@@ -1,0 +1,149 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+  moduleFormat = "commonjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum RoomStatus {
+  WAITING
+  PLAYING
+  FINISHED
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  quizzes      Quiz[]   @relation("UserQuizzes")
+  rooms        Room[]   @relation("UserRooms")
+  sessions      Session[]
+
+  @@map("users")
+}
+
+model Quiz {
+  id        String     @id @default(uuid())
+  title     String
+  createdBy String     @map("created_by")
+  createdAt DateTime   @default(now()) @map("created_at")
+
+  user      User       @relation("UserQuizzes", fields: [createdBy], references: [id])
+  questions Question[]
+  rooms     Room[]
+
+  @@index([createdBy])
+  @@map("quizzes")
+}
+
+model Question {
+  id         String   @id @default(uuid())
+  quizId     String   @map("quiz_id")
+  content    String
+  timeLimit  Int      @map("time_limit")
+  orderIndex Int      @map("order_index")
+
+  quiz       Quiz     @relation(fields: [quizId], references: [id])
+  answers    Answer[]
+  playerAnswers PlayerAnswer[]
+
+  @@index([quizId])
+  @@map("questions")
+}
+
+model Answer {
+  id         String   @id @default(uuid())
+  questionId String   @map("question_id")
+  content    String
+  isCorrect  Boolean  @map("is_correct")
+
+  question   Question @relation(fields: [questionId], references: [id])
+  playerAnswers PlayerAnswer[]
+
+  @@index([questionId])
+  @@map("answers")
+}
+
+model Room {
+  id                     String      @id @default(uuid())
+  pin                    String      @unique
+  quizId                 String      @map("quiz_id")
+  hostId                 String      @map("host_id")
+  status                 RoomStatus  @default(WAITING)
+  currentQuestionIndex   Int         @default(0) @map("current_question_index")
+  questionStartedAt      DateTime?   // 🔥 hỗ trợ realtime + chống cheat
+  createdAt              DateTime    @default(now()) @map("created_at")
+
+  quiz       Quiz     @relation(fields: [quizId], references: [id])
+  host       User     @relation("UserRooms", fields: [hostId], references: [id])
+  players    Player[]
+
+  @@index([quizId])
+  @@index([hostId])
+  @@index([pin])
+  @@map("rooms")
+}
+
+model Player {
+  id        String   @id @default(uuid())
+  roomId    String   @map("room_id")
+  nickname  String
+  score     Int      @default(0)
+  joinedAt  DateTime @default(now()) @map("joined_at")
+
+  room      Room     @relation(fields: [roomId], references: [id])
+  answers   PlayerAnswer[]
+
+  @@index([roomId])
+  @@unique([roomId, nickname]) 
+  @@map("players")
+}
+
+model PlayerAnswer {
+  id           String   @id @default(uuid())
+  playerId     String   @map("player_id")
+  questionId   String   @map("question_id")
+  answerId     String   @map("answer_id")
+  isCorrect    Boolean  @map("is_correct")
+  timeAnswered DateTime @default(now()) @map("time_answered")
+  scoreEarned  Int      @default(0) @map("score_earned")
+
+  player   Player   @relation(fields: [playerId], references: [id])
+  question Question @relation(fields: [questionId], references: [id])
+  answer   Answer   @relation(fields: [answerId], references: [id])
+
+  @@unique([playerId, questionId]) 
+
+  @@index([playerId])
+  @@index([questionId])
+  @@index([answerId])
+
+  @@index([questionId, isCorrect])
+  @@index([playerId, scoreEarned])
+
+  @@map("player_answers")
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  refreshToken String   @map("refresh_token") // 🔥 nên hash
+  expiresAt    DateTime @map("expires_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}

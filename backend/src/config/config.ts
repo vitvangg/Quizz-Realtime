@@ -1,0 +1,4 @@
+const ACCESS_TOKEN_TTL = "10s";
+const REFRESH_TOKEN_TTL = "7d";
+
+export { ACCESS_TOKEN_TTL, REFRESH_TOKEN_TTL };
