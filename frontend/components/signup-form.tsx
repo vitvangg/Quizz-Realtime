@@ -14,12 +14,13 @@ import Link from "next/link"
 import { z } from "zod"
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
+import { useRouter } from "next/navigation";
+import { useAuthStore } from "@/stores/auth.store";
 
 const signupSchema = z.object({
   email: z.email(),
-  name: z.string().min(1, "Tên không được để trống"),
-  password: z.string().min(8, "Mật khẩu phải có ít nhất 8 ký tự"),
-  confirmPassword: z.string().min(8, "Xác nhận mật khẩu phải có ít nhất 8 ký tự"),
+  password: z.string().min(6, "Mật khẩu phải có ít nhất 6 ký tự"),
+  confirmPassword: z.string().min(6, "Xác nhận mật khẩu phải có ít nhất 6 ký tự"),
 })
   .refine((data) => data.password === data.confirmPassword, {
     message: "Mật khẩu xác nhận không khớp",
@@ -37,14 +38,20 @@ export function SignupForm({
   loginHref,
   ...props
 }: SignupFormProps) {
-
-  const { register, handleSubmit, formState: { errors } } = useForm<SignupFormValues>({
+  const { register } = useAuthStore();
+  const router = useRouter();
+  const { register: formRegister, handleSubmit, formState: { errors } } = useForm<SignupFormValues>({
     resolver: zodResolver(signupSchema),
   })
 
   const onSubmit = async (data: SignupFormValues) => {
-    // goi api tu backend de register
-    console.log(data)
+    const { email, password } = data;
+    try {
+      await register(email, password);
+      router.push("/signin");
+    } catch (error) {
+      console.error("Signup error:", error);
+    }
   }
 
   return (
@@ -68,21 +75,9 @@ export function SignupForm({
                   type="email"
                   placeholder="m@example.com"
                   required
-                  {...register("email")}
+                  {...formRegister("email")}
                 />
                 {errors.email && <p className="text-red-500">{errors.email.message}</p>}
-              </Field>
-
-              {/* Name */}
-              <Field>
-                <FieldLabel htmlFor="name">User name</FieldLabel>
-                <Input
-                  id="name"
-                  type="text"
-                  required
-                  {...register("name")}
-                />
-                {errors.name && <p className="text-red-500">{errors.name.message}</p>}
               </Field>
 
               {/* Password */}
@@ -91,7 +86,7 @@ export function SignupForm({
                   <Field>
                     <FieldLabel htmlFor="password">Mật khẩu</FieldLabel>
                     <Input id="password" type="password" required
-                      {...register("password")}
+                      {...formRegister("password")}
                     />
                     {errors.password && <p className="text-red-500">{errors.password.message}</p>}
                   </Field>
@@ -100,13 +95,13 @@ export function SignupForm({
                       Xác nhận mật khẩu
                     </FieldLabel>
                     <Input id="confirm-password" type="password" required
-                      {...register("confirmPassword")}
+                      {...formRegister("confirmPassword")}
                     />
                     {errors.confirmPassword && <p className="text-red-500">{errors.confirmPassword.message}</p>}
                   </Field>
                 </Field>
                 <FieldDescription>
-                  Mật khẩu phải có ít nhất 8 ký tự
+                  Mật khẩu phải có ít nhất 6 ký tự
                 </FieldDescription>
               </Field>
               <Field>
