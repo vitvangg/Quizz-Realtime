@@ -27,12 +27,16 @@ export class QuizzsController {
   findAll() {
     return this.quizzsService.findAll();
   }
+ @Get('user')
+  findByUserId(@CurrentUser() user) {
+    return this.quizzsService.findByUserId(user.id);
+  }
 
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.quizzsService.findOne(id);
   }
-
+ 
   @Patch(':id')
   update(
     @Param('id') id: string,

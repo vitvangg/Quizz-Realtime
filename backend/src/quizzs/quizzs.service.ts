@@ -28,6 +28,12 @@ export class QuizzsService {
     });
   }
 
+  findByUserId(userId: string) {
+    return this.prismaService.quiz.findMany({
+      where: { createdBy: userId },
+    });
+  }
+
   findOne(id: string) {
     return this.prismaService.quiz.findUnique({
       where: { id },
@@ -41,7 +47,7 @@ export class QuizzsService {
       throw new NotFoundException('Quiz not found');
     }
     if (quiz.createdBy !== userId) {
-      throw new ForbiddenException();
+      throw new ForbiddenException("not alowed");
     }
 
     return this.prismaService.quiz.update({
@@ -58,7 +64,7 @@ export class QuizzsService {
       throw new NotFoundException('Quiz not found');
     }
     if (quiz.createdBy !== userId) {
-      throw new ForbiddenException();
+      throw new ForbiddenException("not alowed");
     }
 
     return this.prismaService.quiz.delete({

@@ -61,7 +61,8 @@ export class AnswersService {
     });
   }
 
-  findByQuestionId(questionId: string) {
+  async findByQuestionId(questionId: string, userId: string) {
+    await this.checkQuestionOwner(questionId, userId);
     return this.prismaService.answer.findMany({
       where: { questionId },
     });

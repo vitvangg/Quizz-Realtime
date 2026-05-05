@@ -19,10 +19,10 @@ export class QuestionsService {
       },
     });
 
-    if (!question) throw new NotFoundException();
+    if (!question) throw new NotFoundException('khong ton tai quétion');
 
     if (question.quiz.createdBy !== userId) {
-      throw new ForbiddenException();
+      throw new ForbiddenException('not alloewd');
     }
   }
 
@@ -35,7 +35,7 @@ export class QuestionsService {
     if (!quiz) throw new NotFoundException('Quiz not found');
 
     if (quiz.createdBy !== userId) {
-      throw new ForbiddenException();
+      throw new ForbiddenException('not allowed');
     }
 
     return this.prismaService.question.create({
