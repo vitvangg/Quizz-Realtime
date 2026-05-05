@@ -1,0 +1,1 @@
+# Frontend Home Plan\n- Xây dựng UI trang chủ, form nhập mã PIN.\n- Chuyển hướng sang trang chờ `/room/[pin]` nếu PIN hợp lệ.\n\n

@@ -100,7 +100,7 @@ model Player {
   nickname  String
   score     Int      @default(0)
   joinedAt  DateTime @default(now()) @map("joined_at")
-
+  isHost    Boolean  @default(false) @map("is_host")
   room      Room     @relation(fields: [roomId], references: [id])
   answers   PlayerAnswer[]
 

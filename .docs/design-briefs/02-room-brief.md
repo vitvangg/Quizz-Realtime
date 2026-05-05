@@ -1,0 +1,1 @@
+# Room Realtime Design Brief\n- **Host View**: Hiển thị PIN lớn ở giữa, danh sách Player tham gia, nút Start.\n- **Player View**: Hiển thị \"Đợi host bắt đầu\", sau đó hiển thị 4 nút màu (Tương ứng đáp án).\n\n

@@ -1,0 +1,1 @@
+# Backend Authentication Plan\n- **Mục tiêu**: Xử lý đăng nhập, đăng ký, JWT, Refresh Token.\n- **Thực trạng**: Đã có User entity, Session entity trong Prisma.\n- **Tiếp theo**: Cấu hình Passport, Access Token (15m), Refresh Token (7d).\n\n
