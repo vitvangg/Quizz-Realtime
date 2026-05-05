@@ -11,7 +11,7 @@ export class RoomService {
   }
 
   findAll() {
-    return `This action returns all room`;
+    return `This action returns rooms`;
   }
 
   findOne(id: number) {
