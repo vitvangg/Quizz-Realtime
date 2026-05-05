@@ -1,0 +1,1 @@
+# Frontend Layout Plan\n- Thiết lập Navbar, Auth Provider (Zustand store), Toast notification (Sonner).\n\n
