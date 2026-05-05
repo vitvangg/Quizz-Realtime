@@ -1,1 +1,1 @@
-# Master Layout Design Brief\n- **UI/UX**: Giao diện tối giản, gam màu sáng, các nút bấm bo góc lớn (Kahoot style).\n- **Responsive**: Hỗ trợ tốt trên mobile.\n\n
+# UI/UX Design Brief (Kahoot Style)\n\n- **Font chữ**: Sử dụng font chữ to, rõ ràng, san-serif (Inter hoặc Montserrat).\n- **Màu sắc (4 đáp án chuẩn)**:\n  1. Đỏ (Tam giác) - `bg-red-500`\n  2. Xanh dương (Hình thoi) - `bg-blue-500`\n  3. Vàng (Hình tròn) - `bg-yellow-400`\n  4. Xanh lá (Hình vuông) - `bg-green-500`\n- **Animation**: Dùng `framer-motion` hoặc Tailwind css animations cho việc cộng điểm, đếm ngược.\n

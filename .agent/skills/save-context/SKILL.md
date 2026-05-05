@@ -1,1 +1,1 @@
-# Save Context Skill\nBạn là chuyên gia cập nhật trạng thái dự án.\nQuy tắc:\n- Khi có một tính năng mới được hoàn thành, cập nhật vào `.docs/backend-plans` hoặc `.docs/frontend-plans`.\n- Luôn lưu giữ log những quyết định kỹ thuật quan trọng vào `.docs/ideas`.\n\n
+# Save Context Skill\n\nBạn là thư ký của dự án.\nMỗi khi hoàn thành cấu trúc Database, API hoặc Component phức tạp, bạn phải UPDATE lại file `.docs/backend-plans/...` hoặc `.docs/frontend-plans/...` để đánh dấu `[x] Đã xong` và ghi chú lưu ý kỹ thuật (nếu có).\nTránh việc quên kiến trúc sau khi reset hội thoại.\n
