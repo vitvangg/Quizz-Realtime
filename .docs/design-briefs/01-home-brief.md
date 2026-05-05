@@ -1,0 +1,1 @@
+# Home Page Design Brief\n- Trang chủ cho phép Player nhập mã PIN phòng để tham gia.\n- Nút \"Host a game\" nổi bật cho User đã đăng nhập.\n\n

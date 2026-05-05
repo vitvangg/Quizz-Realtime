@@ -1,0 +1,1 @@
+# Core Gameplay Realtime Ideas\n- Dùng Socket.io.\n- Khi Host bấm Next Question, server emit `question_started` với timestamp.\n- Client tính điểm = MaxScore * (Thời gian còn lại / Tổng thời gian).\n- PlayerAnswer cần validate `questionId` xem có khớp câu hỏi hiện tại không để chống cheat.\n\n

@@ -1,0 +1,1 @@
+# Frontend Room Plan\n- Khởi tạo WebSocket kết nối khi vào trang.\n- Hiển thị UI theo role: IsHost ? Màn hình Host : Màn hình Player.\n\n

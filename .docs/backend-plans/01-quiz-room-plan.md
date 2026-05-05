@@ -1,0 +1,1 @@
+# Backend Quiz & Room Plan\n- **Mục tiêu**: Quản lý đề thi, tạo phòng chơi (Room), lưu kết quả.\n- **Thực trạng**: Đã có Room, Quiz, Question, Answer, Player, PlayerAnswer trong DB.\n- **Tiếp theo**: Xây dựng API tạo PIN ngẫu nhiên 6 số, quản lý trạng thái Room (WAITING, PLAYING, FINISHED).\n\n

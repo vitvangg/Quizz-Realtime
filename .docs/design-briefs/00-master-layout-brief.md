@@ -1,0 +1,1 @@
+# Master Layout Design Brief\n- **UI/UX**: Giao diện tối giản, gam màu sáng, các nút bấm bo góc lớn (Kahoot style).\n- **Responsive**: Hỗ trợ tốt trên mobile.\n\n
