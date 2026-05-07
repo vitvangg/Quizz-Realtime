@@ -79,17 +79,10 @@ export const useAuthStore = create<authState>((set, get) => ({
     logout: async () => {
         try {
             set({ loading: true });
-            await authService.logout();
-            set({ accessToken: null, user: null });
-
-            toast.success("Đăng xuất thành công!");
-        } catch (error: unknown) {
-            console.error("Logout error:", error);
-            const serverMessage = getErrorMessage(error, "Lỗi không xác định.");
-            toast.error(`Đăng xuất thất bại: ${serverMessage || "Lỗi không xác định."}`);
-            throw error;
+            await authService.logout().catch(err => console.error("Logout API error:", err));
         } finally {
-            set({ loading: false });
+            set({ accessToken: null, user: null, loading: false });
+            toast.success("Đăng xuất thành công!");
         }
     },
 
