@@ -45,13 +45,10 @@ import { AnswersModule } from './answers/answers.module';
     NotificationModule,
     SettingModule,
     AnalyticsModule,
-<<<<<<< HEAD
     QuizzsModule,
     QuestionsModule,
     AnswersModule,
-=======
     GameModule,
->>>>>>> a1b955e ([QuangNVV3] create room gamesession player)
   ],
   controllers: [AppController],
   providers: [

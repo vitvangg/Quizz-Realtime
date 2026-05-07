@@ -13,7 +13,7 @@ import {
   Gamepad2
 } from "lucide-react";
 
-export default function QuizLayout({
+export default function HostLayout({
   children,
 }: {
   children: React.ReactNode;
@@ -41,13 +41,13 @@ export default function QuizLayout({
 
             <nav className="hidden md:flex items-center gap-1">
               <Button variant="ghost" asChild className="gap-2 font-medium">
-                <Link href="/quiz">
+                <Link href="/host">
                   <LayoutDashboard className="h-4 w-4" />
                   Bộ sưu tập
                 </Link>
               </Button>
               <Button variant="ghost" asChild className="gap-2 font-medium">
-                <Link href="/quiz/build">
+                <Link href="/host/build">
                   <PlusCircle className="h-4 w-4" />
                   Tạo mới
                 </Link>

@@ -1,188 +1,187 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { toast } from 'sonner';
-import { QuizCard } from '@/components/game/QuizCard';
-import { quizService } from '@/services/quiz.service';
-import { roomService } from '@/services/room.service';
-import { useAuthStore } from '@/stores/auth.store';
-import type { Quiz } from '@/types/game';
-import { Button } from '@/components/ui/button';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
-import { Plus, LogOut, Gamepad2, Loader2, ShieldCheck } from 'lucide-react';
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useQuizStore } from "@/stores/quiz.store";
+import { roomService } from "@/services/room.service";
+import { useAuthStore } from "@/stores/auth.store";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { PlusCircle, Play, Edit, Trash2, BookOpen, Clock, Loader2 } from "lucide-react";
+import Link from "next/link";
+import { 
+  DropdownMenu, 
+  DropdownMenuContent, 
+  DropdownMenuItem, 
+  DropdownMenuTrigger 
+} from "@/components/ui/dropdown-menu";
+import type { Quiz } from "@/types/game";
 
-export default function HostDashboardPage() {
-  const [quizzes, setQuizzes] = useState<Quiz[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [creatingRoomId, setCreatingRoomId] = useState<string | null>(null);
+export default function MyQuizzesPage() {
   const router = useRouter();
-  const { accessToken, logout, isHydrated, user } = useAuthStore();
-
-  const loadQuizzes = async () => {
-    try {
-      if (!isHydrated) return;
-
-      if (!accessToken) {
-        toast.error('Please login to access host dashboard');
-        router.push('/signin');
-        return;
-      }
-
-      // Load real quizzes from API
-      const data = await quizService.getMyQuizzes();
-      setQuizzes(data);
-    } catch (error) {
-      console.error('Error loading quizzes:', error);
-      toast.error('Failed to load quizzes');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const { quizzes, loading, getMyQuizzes, delete: deleteQuiz } = useQuizStore();
+  const { isHydrated, accessToken } = useAuthStore();
+  const [startingQuizId, setStartingQuizId] = useState<string | null>(null);
 
   useEffect(() => {
     if (isHydrated) {
-      loadQuizzes();
+      getMyQuizzes();
     }
-  }, [isHydrated]);
+  }, [isHydrated, getMyQuizzes]);
 
-  const handleLiveHost = async (quizId: string) => {
-    setCreatingRoomId(quizId);
+  const handleDelete = async (id: string) => {
+    if (confirm("Bạn có chắc chắn muốn xóa bộ câu hỏi này không?")) {
+      await deleteQuiz(id);
+    }
+  };
+
+  const handleStartGame = async (quiz: Quiz) => {
+    // Check if user is logged in
+    if (!accessToken) {
+      toast.error("Vui lòng đăng nhập để tạo phòng chơi");
+      router.push("/signin");
+      return;
+    }
+
+    // Check if quiz has questions
+    if (!quiz.questions || quiz.questions.length === 0) {
+      toast.error("Quiz chưa có câu hỏi nào. Vui lòng thêm câu hỏi trước!");
+      router.push(`/host/edit/${quiz.id}`);
+      return;
+    }
+
+    setStartingQuizId(quiz.id);
     try {
-      // Create real room via API
-      const room = await roomService.createRoom({ quizId });
-
-      toast.success('Room created! Share the PIN with players.');
-
+      // Create room with this quiz
+      const room = await roomService.createRoom({ quizId: quiz.id });
+      toast.success(`Đã tạo phòng! Mã PIN: ${room.pin}`);
+      
       // Navigate to waiting room
       router.push(`/room/${room.pin}`);
     } catch (error: any) {
-      console.error('Error creating room:', error);
-      toast.error(error.response?.data?.message || 'Failed to create room');
+      console.error("Error creating room:", error);
+      toast.error(error.response?.data?.message || "Không thể tạo phòng. Vui lòng thử lại.");
     } finally {
-      setCreatingRoomId(null);
+      setStartingQuizId(null);
     }
   };
 
-  const handleEdit = (quizId: string) => {
-    router.push(`/admin/quizzes/builder?quizId=${quizId}`);
-  };
-
-  const handleLogout = async () => {
-    await logout();
-    router.push('/');
-  };
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-muted/30">
-        <div className="flex flex-col items-center gap-4">
-          <Loader2 className="size-10 text-primary animate-spin" />
-          <p className="text-muted-foreground">Loading dashboard...</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="min-h-screen bg-muted/30">
-      {/* Header */}
-      <header className="bg-background border-b">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="flex size-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                <Gamepad2 className="size-5" />
-              </div>
-              <div>
-                <h1 className="text-xl font-semibold">Host Dashboard</h1>
-                <p className="text-sm text-muted-foreground">
-                  Manage your quizzes and start games
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              {user && (
-                <div className="hidden sm:flex items-center gap-2 text-sm text-muted-foreground">
-                  <ShieldCheck className="size-4" />
-                  <span>{user.email}</span>
-                </div>
-              )}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleLogout}
-                className="gap-2"
-              >
-                <LogOut className="size-4" />
-                Logout
-              </Button>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="container mx-auto px-4 py-8">
-        <div className="mb-8">
-          <h2 className="text-lg font-semibold">My Quizzes</h2>
-          <p className="text-sm text-muted-foreground">
-            Select a quiz to start hosting a live game session
+    <div className="container mx-auto py-8 px-4 max-w-6xl">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
+        <div>
+          <h1 className="text-3xl font-extrabold tracking-tight mb-2">Bộ sưu tập của tôi</h1>
+          <p className="text-muted-foreground italic">
+            Quản lý và tổ chức các bộ câu hỏi của bạn một cách chuyên nghiệp.
           </p>
         </div>
+        <Link href="/host/build">
+          <Button className="gap-2 shadow-lg shadow-primary/20 hover:scale-105 transition-transform px-6 py-6 text-lg rounded-xl">
+            <PlusCircle className="h-5 w-5" />
+            Tạo Quiz mới
+          </Button>
+        </Link>
+      </div>
 
-        {quizzes.length === 0 ? (
-          <Card className="max-w-md mx-auto">
-            <CardHeader className="text-center pb-2">
-              <div className="mx-auto mb-4 flex size-14 items-center justify-center rounded-full bg-muted">
-                <Gamepad2 className="size-7 text-muted-foreground" />
-              </div>
-              <CardTitle>No quizzes yet</CardTitle>
-              <CardDescription>
-                Create your first quiz to start hosting interactive game sessions
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex justify-center pb-6">
-              <Button asChild className="gap-2">
-                <a href="/admin/quizzes/builder">
-                  <Plus className="size-4" />
-                  Create New Quiz
-                </a>
-              </Button>
-            </CardContent>
-          </Card>
-        ) : (
-          <>
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {quizzes.map((quiz) => (
-                <QuizCard
-                  key={quiz.id}
-                  quiz={quiz}
-                  onLiveHost={() => handleLiveHost(quiz.id)}
-                  onEdit={() => handleEdit(quiz.id)}
-                  isLoading={creatingRoomId === quiz.id}
-                />
-              ))}
-            </div>
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 text-center py-20">
+           <div className="col-span-full flex flex-col items-center gap-4">
+              <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+              <p className="text-muted-foreground font-medium">Đang tải danh sách Quiz...</p>
+           </div>
+        </div>
+      ) : quizzes.length === 0 ? (
+        <Card className="border-dashed border-2 bg-muted/5 py-16 flex flex-col items-center justify-center text-center">
+          <div className="bg-primary/10 p-6 rounded-full mb-6">
+            <BookOpen className="h-12 w-12 text-primary opacity-50" />
+          </div>
+          <CardTitle className="text-2xl mb-2">Chưa có bộ câu hỏi nào</CardTitle>
+          <p className="text-muted-foreground max-w-sm mb-8">
+            Bắt đầu tạo bộ câu hỏi đầu tiên của bạn để chia sẻ kiến thức với mọi người!
+          </p>
+          <Link href="/host/build">
+            <Button variant="outline" className="border-2 border-primary/20 hover:bg-primary/5">
+              Tạo Quiz ngay bây giờ
+            </Button>
+          </Link>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {quizzes.map((quiz) => (
+            <Card 
+              key={quiz.id} 
+              className="group relative overflow-hidden border-2 hover:border-primary/40 transition-all hover:shadow-xl hover:shadow-primary/5 flex flex-col cursor-pointer"
+              onClick={() => router.push(`/host/edit/${quiz.id}`)}
+            >
+              <CardHeader className="bg-muted/30 pb-4 relative">
+                <div className="flex justify-between items-start">
+                  <div className="bg-primary/10 text-primary p-2 rounded-lg mb-2">
+                    <BookOpen className="h-5 w-5" />
+                  </div>
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-8 w-8 rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDelete(quiz.id);
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+                <CardTitle className="text-xl font-bold line-clamp-1">{quiz.title}</CardTitle>
+                <div className="flex items-center gap-3 text-sm text-muted-foreground mt-2">
+                  <span className="flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    {new Date(quiz.createdAt).toLocaleDateString('vi-VN')}
+                  </span>
+                </div>
+              </CardHeader>
+              
+              <CardContent className="pt-6 flex-grow">
+                <div className="flex items-center justify-between bg-muted/20 p-4 rounded-xl">
+                  <div className="text-center flex-1 border-r">
+                    <p className="text-2xl font-black text-primary">{quiz.questions?.length || 0}</p>
+                    <p className="text-[10px] uppercase font-bold text-muted-foreground">Câu hỏi</p>
+                  </div>
+                  <div className="text-center flex-1">
+                    <p className="text-2xl font-black text-primary">
+                      {quiz.questions?.reduce((acc: number, q: any) => acc + q.timeLimit, 0) || 0}s
+                    </p>
+                    <p className="text-[10px] uppercase font-bold text-muted-foreground">Tổng thời gian</p>
+                  </div>
+                </div>
+              </CardContent>
 
-            {/* Create New Quiz Button */}
-            <div className="mt-8 flex justify-center">
-              <Button asChild variant="outline" className="gap-2">
-                <a href="/admin/quizzes/builder">
-                  <Plus className="size-4" />
-                  Create New Quiz
-                </a>
-              </Button>
-            </div>
-          </>
-        )}
-      </main>
+              <CardFooter className="pt-2 pb-6 px-6 grid grid-cols-2 gap-3">
+                <Button variant="outline" className="w-full gap-2 rounded-lg" onClick={(e) => {
+                  e.stopPropagation();
+                  router.push(`/host/edit/${quiz.id}`);
+                }}>
+                  <Edit className="h-4 w-4" /> Sửa
+                </Button>
+                <Button 
+                  className="w-full gap-2 rounded-lg shadow-md shadow-primary/20 bg-primary hover:bg-primary/90"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleStartGame(quiz);
+                  }}
+                  disabled={startingQuizId === quiz.id}
+                >
+                  {startingQuizId === quiz.id ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Play className="h-4 w-4 fill-current" />
+                  )}
+                  Bắt đầu
+                </Button>
+              </CardFooter>
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
