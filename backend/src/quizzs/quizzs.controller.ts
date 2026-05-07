@@ -27,7 +27,7 @@ export class QuizzsController {
   findAll() {
     return this.quizzsService.findAll();
   }
- @Get('user')
+  @Get('user')
   findByUserId(@CurrentUser() user) {
     return this.quizzsService.findByUserId(user.id);
   }

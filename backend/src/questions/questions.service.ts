@@ -51,6 +51,7 @@ export class QuestionsService {
   findAll() {
     return this.prismaService.question.findMany({
       orderBy: { orderIndex: 'desc' },
+      include: { answers: true },
     });
   }
 
@@ -58,6 +59,7 @@ export class QuestionsService {
     return this.prismaService.question.findMany({
       where: { quizId },
       orderBy: { orderIndex: 'desc' },
+      include: { answers: true },
     });
   }
 
@@ -87,10 +89,13 @@ export class QuestionsService {
 
   async remove(id: string, userId: string) {
     await this.checkQuestionOwner(id, userId);
-    const question = await this.findOne(id);
-    if (!question) {
-      throw new NotFoundException('Question not found');
-    }
+    
+    // 1. Xóa tất cả Answers của câu hỏi này trước
+    await this.prismaService.answer.deleteMany({
+      where: { questionId: id }
+    });
+
+    // 2. Sau đó mới xóa Question
     return this.prismaService.question.delete({
       where: { id },
     });
