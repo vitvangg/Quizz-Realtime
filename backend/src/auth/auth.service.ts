@@ -87,7 +87,7 @@ export class AuthService {
 
   async logout(refreshToken: string) {
     if (!refreshToken) {
-      throw new UnauthorizedException('No refresh token provided');
+      return;
     }
     await this.sessionService.deleteSession(refreshToken);
   }
