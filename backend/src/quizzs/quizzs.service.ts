@@ -76,35 +76,25 @@ export class QuizzsService {
   }
 
   async remove(id: string, userId: string) {
-    const quiz = await this.findOne(id);
+    // Fetch quiz to check ownership and existence.
+    // No need to fetch questions here as cascade handles their deletion.
+    const quiz = await this.prismaService.quiz.findUnique({
+      where: { id },
+    });
+
     if (!quiz) {
       throw new NotFoundException('Quiz not found');
     }
     if (quiz.createdBy !== userId) {
-      throw new ForbiddenException('not alowed');
+      throw new ForbiddenException('not allowed');
     }
 
-    // Xóa thủ công theo thứ tự: Answers -> Questions -> Quiz
-    // 1. Lấy danh sách ID câu hỏi
-    const questions = await this.prismaService.question.findMany({
-      where: { quizId: id },
-      select: { id: true }
-    });
-    const questionIds = questions.map(q => q.id);
-
-    // 2. Xóa tất cả câu trả lời của các câu hỏi đó
-    await this.prismaService.answer.deleteMany({
-      where: { questionId: { in: questionIds } }
-    });
-
-    // 3. Xóa các câu hỏi
-    await this.prismaService.question.deleteMany({
-      where: { quizId: id }
-    });
-
-    // 4. Cuối cùng mới xóa Quiz
-    return this.prismaService.quiz.delete({
-      where: { id },
+    // The cascade delete will handle questions and answers.
+    // Transaction is still good practice for atomicity of the final quiz delete.
+    return this.prismaService.$transaction(async (tx) => {
+      return tx.quiz.delete({
+        where: { id },
+      });
     });
   }
 }
