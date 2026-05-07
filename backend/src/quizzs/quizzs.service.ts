@@ -22,6 +22,7 @@ export class QuizzsService {
 
   findAll() {
     return this.prismaService.quiz.findMany({
+      where: { deletedAt: null },
       orderBy: {
         createdAt: 'desc',
       },
@@ -35,7 +36,7 @@ export class QuizzsService {
 
   findByUserId(userId: string) {
     return this.prismaService.quiz.findMany({
-      where: { createdBy: userId },
+      where: { createdBy: userId, deletedAt: null },
       include: {
         questions: {
           include: { answers: true },
@@ -45,8 +46,8 @@ export class QuizzsService {
   }
 
   findOne(id: string) {
-    return this.prismaService.quiz.findUnique({
-      where: { id },
+    return this.prismaService.quiz.findFirst({
+      where: { id, deletedAt: null },
       include: {
         questions: {
           include: {
@@ -64,7 +65,7 @@ export class QuizzsService {
       throw new NotFoundException('Quiz not found');
     }
     if (quiz.createdBy !== userId) {
-      throw new ForbiddenException('not alowed');
+      throw new ForbiddenException('not allowed');
     }
 
     return this.prismaService.quiz.update({
@@ -77,7 +78,6 @@ export class QuizzsService {
 
   async remove(id: string, userId: string) {
     // Fetch quiz to check ownership and existence.
-    // No need to fetch questions here as cascade handles their deletion.
     const quiz = await this.prismaService.quiz.findUnique({
       where: { id },
     });
@@ -89,12 +89,11 @@ export class QuizzsService {
       throw new ForbiddenException('not allowed');
     }
 
-    // The cascade delete will handle questions and answers.
-    // Transaction is still good practice for atomicity of the final quiz delete.
-    return this.prismaService.$transaction(async (tx) => {
-      return tx.quiz.delete({
-        where: { id },
-      });
+    // Use soft delete instead of hard delete to avoid foreign key constraint violations
+    // and preserve game history (rooms, player answers).
+    return this.prismaService.quiz.update({
+      where: { id },
+      data: { deletedAt: new Date() },
     });
   }
 }
