@@ -1,9 +1,8 @@
 import { RoomStatus } from "generated/prisma/enums";
+import { IsEnum, IsNotEmpty, IsNumber, IsString } from "class-validator";
 
 export class CreateRoomDto {
-    pin: string;
+    @IsString()
+    @IsNotEmpty()
     quizId: string;
-    hostId: string;
-    status: RoomStatus; 
-    currentQuestionIndex: number;
 }

@@ -18,6 +18,7 @@ import { ReportModule } from './admin/report/report.module';
 import { NotificationModule } from './admin/notification/notification.module';
 import { SettingModule } from './admin/setting/setting.module';
 import { AnalyticsModule } from './admin/analytics/analytics.module';
+import { GameModule } from './game/game.module';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor';
 import { QuizzsModule } from './quizzs/quizzs.module';
@@ -44,9 +45,13 @@ import { AnswersModule } from './answers/answers.module';
     NotificationModule,
     SettingModule,
     AnalyticsModule,
+<<<<<<< HEAD
     QuizzsModule,
     QuestionsModule,
     AnswersModule,
+=======
+    GameModule,
+>>>>>>> a1b955e ([QuangNVV3] create room gamesession player)
   ],
   controllers: [AppController],
   providers: [
