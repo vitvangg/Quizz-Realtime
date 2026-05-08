@@ -12,6 +12,7 @@ interface WaitingRoomProps {
   isHost: boolean;
   onStartGame?: () => void;
   onKickPlayer?: (playerId: string) => void;
+  onLeaveRoom?: () => void;
   isStarting?: boolean;
 }
 
@@ -22,6 +23,7 @@ export function WaitingRoom({
   isHost,
   onStartGame,
   onKickPlayer,
+  onLeaveRoom,
   isStarting = false,
 }: WaitingRoomProps) {
   const handleCopyPin = async () => {
@@ -40,7 +42,7 @@ export function WaitingRoom({
       url: window.location.origin,
     };
 
-    if (navigator.share) {
+    if (typeof navigator.share === 'function') {
       try {
         await navigator.share(shareData);
       } catch (err) {
@@ -77,7 +79,7 @@ export function WaitingRoom({
               >
                 <Copy className="w-5 h-5" />
               </button>
-              {typeof navigator !== 'undefined' && navigator.share && (
+              {typeof navigator !== 'undefined' && typeof navigator.share === 'function' && (
                 <button
                   onClick={handleSharePin}
                   className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
@@ -118,7 +120,15 @@ export function WaitingRoom({
         </div>
 
         {/* Action Buttons */}
-        <div className="mt-8 flex justify-center">
+        <div className="mt-8 flex justify-center gap-4">
+          {/* Leave Room Button */}
+          <button
+            onClick={onLeaveRoom}
+            className="px-6 py-3 bg-gray-200 text-gray-700 font-medium rounded-lg hover:bg-gray-300 transition-colors"
+          >
+            Leave Room
+          </button>
+
           {isHost ? (
             <button
               onClick={onStartGame}

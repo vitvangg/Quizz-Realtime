@@ -52,8 +52,8 @@ const initialState = {
   session: null,
   currentQuestionIndex: 0,
   playerSessions: [],
-  isHost: true,
-  isConnected: true,
+  isHost: false,
+  isConnected: false,
   isLoading: false,
   error: null,
   userId: null,
@@ -68,12 +68,23 @@ export const useGameStore = create<GameState>((set) => ({
 
   setCurrentPlayer: (player) => set({ currentPlayer: player }),
 
-  setPlayers: (players) => set({ players }),
+  setPlayers: (players) =>
+    set(() => {
+      // Filter for unique players by id
+      const uniquePlayers = players.filter(
+        (p, i, arr) => arr.findIndex(x => x.id === p.id) === i
+      );
+      return { players: uniquePlayers };
+    }),
 
   addPlayer: (player) =>
-    set((state) => ({
-      players: [...state.players, player],
-    })),
+    set((state) => {
+      // Only add if not already in list
+      if (state.players.some(p => p.id === player.id)) {
+        return state;
+      }
+      return { players: [...state.players, player] };
+    }),
 
   removePlayer: (playerId) =>
     set((state) => ({

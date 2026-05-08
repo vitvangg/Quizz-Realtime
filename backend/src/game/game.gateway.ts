@@ -4,251 +4,132 @@ import {
   SubscribeMessage,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  OnGatewayInit,
   ConnectedSocket,
   MessageBody,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { GameService } from './game.service';
 import { Logger } from '@nestjs/common';
-
-interface JoinRoomPayload {
-  pin: string;
-  nickname: string;
-  userId?: string; // If logged in user joins
-}
-
-interface KickPlayerPayload {
-  playerId: string;
-  hostId: string;
-}
-
-interface StartGamePayload {
-  roomId: string;
-  hostId: string;
-}
+import { RoomHandler } from './handlers/room.handler';
 
 @WebSocketGateway({
-  cors: {
-    origin: '*',
-  },
+  cors: { origin: '*' },
   namespace: '/game',
 })
-export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit {
   @WebSocketServer()
   server: Server;
 
-  private logger = new Logger('GameGateway');
-  private socketRoomMap = new Map<string, string>(); // socketId -> roomPin
-  private roomSocketsMap = new Map<string, Set<string>>(); // roomPin -> Set<socketId>
+  private readonly logger = new Logger(GameGateway.name);
 
-  constructor(private readonly gameService: GameService) {}
+  constructor(private readonly roomHandler: RoomHandler) {}
+
+  // ============================================================================
+  // LIFECYCLE
+  // ============================================================================
+
+  async afterInit(server: Server) {
+    const redisUrl = process.env.REDIS_URL;
+
+    if (!redisUrl) {
+      this.logger.warn('Redis not configured - running without Redis adapter');
+      return;
+    }
+
+    const redisConfig = this.parseRedisUrl(redisUrl);
+
+    try {
+      const Redis = require('ioredis');
+      const { createAdapter } = require('socket.io-redis-adapter');
+
+      const pubClient = new Redis({
+        host: redisConfig.host,
+        port: redisConfig.port,
+        password: redisConfig.password,
+        tls: redisConfig.tls ? {} : undefined,
+      });
+
+      const subClient = pubClient.duplicate();
+
+      await pubClient.ping();
+      this.logger.log('Redis adapter connected');
+
+      server.adapter(createAdapter(pubClient, subClient));
+    } catch (error) {
+      this.logger.error('Failed to connect Redis adapter:', error.message);
+    }
+  }
+
+  private parseRedisUrl(url: string) {
+    const match = url.match(/^rediss?:\/\/(?::([^@]+)@|([^:]+):([^@]+)@)?([^:/]+)(?::(\d+))?$/);
+    if (!match) {
+      return { host: 'localhost', port: 6379, password: '', tls: false };
+    }
+    const password = match[1] || (match[2] && match[3] ? match[3] : '');
+    return {
+      password: password || '',
+      host: match[4],
+      port: parseInt(match[5] || '6379', 10),
+      tls: url.startsWith('rediss://'),
+    };
+  }
 
   handleConnection(client: Socket) {
     this.logger.log(`Client connected: ${client.id}`);
   }
 
-  handleDisconnect(client: Socket) {
+  async handleDisconnect(client: Socket) {
     this.logger.log(`Client disconnected: ${client.id}`);
-
-    // Remove from room tracking
-    const pin = this.socketRoomMap.get(client.id);
-    if (pin) {
-      this.socketRoomMap.delete(client.id);
-      const sockets = this.roomSocketsMap.get(pin);
-      if (sockets) {
-        sockets.delete(client.id);
-        if (sockets.size === 0) {
-          this.roomSocketsMap.delete(pin);
-        }
-      }
-    }
+    await this.roomHandler.handleDisconnect(client, this.server);
   }
 
-  // Join room via PIN (Player flow)
-  @SubscribeMessage('join-room')
-  async handleJoinRoom(
+  // ============================================================================
+  // ROOM EVENTS (unified)
+  // ============================================================================
+
+  @SubscribeMessage('room:host_join')
+  handleHostJoin(
     @ConnectedSocket() client: Socket,
-    @MessageBody() payload: JoinRoomPayload,
+    @MessageBody() payload: { roomId: string },
   ) {
-    this.logger.log(`Join room: ${payload.pin}, nickname: ${payload.nickname}`);
-
-    const result = await this.gameService.handleJoinRoom(
-      payload.pin,
-      payload.nickname,
-    );
-
-    if (!result.success) {
-      client.emit('error', {
-        code: 'JOIN_ERROR',
-        message: result.error,
-      });
-      return;
-    }
-
-    // Track socket in room
-    this.socketRoomMap.set(client.id, payload.pin);
-    if (!this.roomSocketsMap.has(payload.pin)) {
-      this.roomSocketsMap.set(payload.pin, new Set());
-    }
-    this.roomSocketsMap.get(payload.pin)?.add(client.id);
-
-    // Join socket.io room
-    client.join(`room:${payload.pin}`);
-
-    // Send success to joining player
-    client.emit('joined-room', {
-      player: result.player,
-      room: result.room,
-    });
-
-    // Broadcast to room that player joined
-    client.to(`room:${payload.pin}`).emit('player-joined', {
-      player: result.player,
-    });
-
-    // Get updated room info
-    const roomResult = await this.gameService.getRoomInfo(payload.pin);
-    if (roomResult.success && roomResult.room) {
-      this.server.to(`room:${payload.pin}`).emit('room-updated', {
-        room: roomResult.room,
-        players: roomResult.room.players,
-      });
-    }
+    return this.roomHandler.handleHostJoin(client, payload, this.server);
   }
 
-  // Leave room
-  @SubscribeMessage('leave-room')
-  async handleLeaveRoom(
+  @SubscribeMessage('room:player_join')
+  handlePlayerJoin(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { pin: string; nickname: string },
+  ) {
+    return this.roomHandler.handlePlayerJoin(client, payload, this.server);
+  }
+
+  @SubscribeMessage('room:kick')
+  handleKick(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: { playerId: string },
   ) {
-    const pin = this.socketRoomMap.get(client.id);
-
-    const result = await this.gameService.handleLeaveRoom(payload.playerId);
-
-    if (pin) {
-      // Broadcast player left
-      this.server.to(`room:${pin}`).emit('player-left', {
-        playerId: payload.playerId,
-      });
-
-      // Leave socket room
-      client.leave(`room:${pin}`);
-      this.socketRoomMap.delete(client.id);
-
-      const sockets = this.roomSocketsMap.get(pin);
-      if (sockets) {
-        sockets.delete(client.id);
-      }
-    }
-
-    return result;
+    return this.roomHandler.handleKickPlayer(client, payload, this.server);
   }
 
-  // Kick player (Host only)
-  @SubscribeMessage('kick-player')
-  async handleKickPlayer(
+  @SubscribeMessage('room:leave')
+  handleLeave(@ConnectedSocket() client: Socket) {
+    return this.roomHandler.handlePlayerLeave(client, this.server);
+  }
+
+  @SubscribeMessage('room:close')
+  handleClose(@ConnectedSocket() client: Socket) {
+    return this.roomHandler.handleCloseRoom(client, this.server);
+  }
+
+  // ============================================================================
+  // GAME EVENTS (simplified)
+  // ============================================================================
+
+  @SubscribeMessage('game:start')
+  handleStart(
     @ConnectedSocket() client: Socket,
-    @MessageBody() payload: KickPlayerPayload,
+    @MessageBody() payload: { roomId: string },
   ) {
-    this.logger.log(`Kick player: ${payload.playerId} by host: ${payload.hostId}`);
-
-    const result = await this.gameService.handleKickPlayer(
-      payload.playerId,
-      payload.hostId,
-    );
-
-    if (!result.success) {
-      client.emit('error', {
-        code: 'KICK_ERROR',
-        message: result.error,
-      });
-      return;
-    }
-
-    // Find socket of kicked player and emit event
-    this.roomSocketsMap.forEach((sockets, roomPin) => {
-      sockets.forEach((socketId) => {
-        // We'll emit to all - in real implementation, track player->socket mapping
-      });
-    });
-
-    // Broadcast player was kicked
-    this.server.to(`room:${this.socketRoomMap.get(client.id) || ''}`).emit('player-kicked', {
-      playerId: payload.playerId,
-      reason: 'Removed by host',
-    });
-
-    return result;
-  }
-
-  // Start game (Host only)
-  @SubscribeMessage('start-game')
-  async handleStartGame(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() payload: StartGamePayload,
-  ) {
-    this.logger.log(`Start game: room ${payload.roomId} by host ${payload.hostId}`);
-
-    const result = await this.gameService.handleStartGame(
-      payload.roomId,
-      payload.hostId,
-    );
-
-    if (!result.success) {
-      client.emit('error', {
-        code: 'START_ERROR',
-        message: result.error,
-      });
-      return;
-    }
-
-    const pin = this.socketRoomMap.get(client.id);
-
-    // Emit countdown
-    if (result.session) {
-      const session = result.session as any;
-      const questions = session.room?.quiz?.questions || [];
-      
-      this.server.to(`room:${pin}`).emit('game-starting', {
-        sessionId: session.id,
-        countdown: 3,
-        totalQuestions: questions.length,
-      });
-
-      // After countdown, emit first question
-      const firstQuestion = questions[0];
-      setTimeout(() => {
-        if (firstQuestion) {
-          this.server.to(`room:${pin}`).emit('question-start', {
-            sessionId: session.id,
-            questionIndex: 0,
-            question: firstQuestion,
-            timeLimit: firstQuestion.timeLimit || 20,
-          });
-        }
-      }, 3000);
-    }
-
-    return {
-      success: true,
-      session: result.session,
-    };
-  }
-
-  // Get room info
-  @SubscribeMessage('get-room')
-  async handleGetRoom(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() payload: { pin: string },
-  ) {
-    const result = await this.gameService.getRoomInfo(payload.pin);
-    return result;
-  }
-
-  // Ping/pong for heartbeat
-  @SubscribeMessage('ping')
-  handlePing(@ConnectedSocket() client: Socket) {
-    client.emit('pong', { timestamp: Date.now() });
+    return this.roomHandler.handleStartGame(client, payload, this.server);
   }
 }

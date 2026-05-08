@@ -1,11 +1,16 @@
-import { Module, forwardRef } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { GameGateway } from './game.gateway';
 import { GameService } from './game.service';
-import { RoomService } from '../room/room.service';
-import { GameSessionService } from '../admin/game-session/game-session.service';
+import { RoomHandler } from './handlers/room.handler';
+import { RedisModule } from '../redis/redis.module';
 
 @Module({
-  providers: [GameGateway, GameService, RoomService, GameSessionService],
+  imports: [RedisModule],
+  providers: [
+    GameGateway,
+    GameService,
+    RoomHandler,
+  ],
   exports: [GameGateway, GameService],
 })
 export class GameModule {}

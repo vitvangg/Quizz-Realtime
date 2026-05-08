@@ -24,6 +24,7 @@ import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor
 import { QuizzsModule } from './quizzs/quizzs.module';
 import { QuestionsModule } from './questions/questions.module';
 import { AnswersModule } from './answers/answers.module';
+import { RedisModule } from './redis/redis.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { AnswersModule } from './answers/answers.module';
     QuestionsModule,
     AnswersModule,
     GameModule,
+    RedisModule,
   ],
   controllers: [AppController],
   providers: [

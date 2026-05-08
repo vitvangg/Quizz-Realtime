@@ -8,7 +8,11 @@ const SOCKET_URL = process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:3000';
 
 export function getSocket(): Socket {
   if (!socket) {
-    socket = io(SOCKET_URL, {
+    // Connect directly to the /game namespace
+    const url = `${SOCKET_URL}/game`;
+    console.log('[SOCKET] Creating socket connection to:', url);
+
+    socket = io(url, {
       path: '/socket.io',
       transports: ['websocket', 'polling'],
       autoConnect: true,
@@ -18,15 +22,24 @@ export function getSocket(): Socket {
     });
 
     socket.on('connect', () => {
-      console.log('Socket connected:', socket?.id);
+      console.log('[SOCKET] Connected with ID:', socket?.id);
     });
 
     socket.on('disconnect', (reason) => {
-      console.log('Socket disconnected:', reason);
+      console.log('[SOCKET] Disconnected:', reason);
     });
 
     socket.on('connect_error', (error) => {
-      console.error('Socket connection error:', error);
+      console.error('[SOCKET] Connection error:', error.message, 'url:', url);
+    });
+
+    socket.on('error', (error: { code: string; message: string }) => {
+      console.error('[SOCKET] Error:', error);
+    });
+
+    // Debug all events
+    socket.onAny((event, ...args) => {
+      console.log('[SOCKET] Event received:', event, args);
     });
   }
   return socket;

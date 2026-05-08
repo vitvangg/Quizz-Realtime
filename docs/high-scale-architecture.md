@@ -70,11 +70,10 @@
 // ==============================================================
 model Room {
   id        String     @id @default(uuid())
-  pin       String     @unique  // 6-digit join code
+  pin       String     @unique
   quizId    String     @map("quiz_id")
   hostId    String     @map("host_id")
   status    RoomStatus @default(WAITING)
-  maxPlayers Int       @default(1000) @map("max_players")
   createdAt DateTime   @default(now()) @map("created_at")
 
   quiz     Quiz          @relation(fields: [quizId], references: [id])
@@ -84,70 +83,54 @@ model Room {
 
   @@index([quizId])
   @@index([hostId])
-  @@index([pin])
   @@map("rooms")
 }
 
-// ==============================================================
-// PLAYER — Người chơi (persistent identity trong phòng)
-// ==============================================================
+//
+// 🟢 PLAYER
+//
 model Player {
-  id        String   @id @default(uuid())
-  roomId    String   @map("room_id")
-  userId    String?  @map("user_id")   // null = anonymous guest
-  nickname  String
-  avatarUrl String?  @map("avatar_url")
-  joinedAt  DateTime @default(now()) @map("joined_at")
+  id       String   @id @default(uuid())
+  roomId   String   @map("room_id")
+  nickname String
+  joinedAt DateTime @default(now()) @map("joined_at")
 
   room     Room            @relation(fields: [roomId], references: [id])
   sessions PlayerSession[]
 
-  // Guest players reuse same Player row across sessions
-  // via unique(roomId, userId) or unique(roomId, nickname) for guests
-  @@unique([roomId, userId])
   @@unique([roomId, nickname])
   @@index([roomId])
-  @@index([userId])
   @@map("players")
 }
 
-// ==============================================================
-// GAME SESSION — Phiên chơi (1 phòng có thể có nhiều round)
-// ==============================================================
+//
+// 🔥 GAME SESSION
+//
 model GameSession {
   id        String     @id @default(uuid())
   roomId    String     @map("room_id")
-  roundNumber Int      @default(1)    @map("round_number")
   status    RoomStatus @default(WAITING)
   startedAt DateTime   @default(now()) @map("started_at")
   endedAt   DateTime?  @map("ended_at")
 
   currentQuestionIndex Int       @default(0) @map("current_question_index")
   questionStartedAt    DateTime? @map("question_started_at")
-  questionDurationMs  Int       @default(20000) @map("question_duration_ms")
 
   room    Room            @relation(fields: [roomId], references: [id])
   players PlayerSession[]
 
   @@index([roomId])
-  @@index([roomId, status])
   @@map("game_sessions")
 }
 
-// ==============================================================
-// PLAYER SESSION — Bản ghi tham gia của 1 player trong 1 session
-// ==============================================================
+//
+// 🔥 PLAYER SESSION
+//
 model PlayerSession {
-  id              String   @id @default(uuid())
-  playerId        String   @map("player_id")
-  sessionId       String   @map("session_id")
-  score           Int      @default(0)
-  correctAnswers  Int      @default(0) @map("correct_answers")
-  avgResponseTime MsBigInt @default(0)  @map("avg_response_time_ms")
-  // Lưu avg dạng Int (miliseconds) — BIGINT trong PostgreSQL
-  // Hoặc dùng Decimal nếu cần precision
-  rank            Int?     // computed after session ends
-  joinedAt        DateTime @default(now()) @map("joined_at")
+  id        String @id @default(uuid())
+  playerId  String @map("player_id")
+  sessionId String @map("session_id")
+  score     Int    @default(0)
 
   player  Player         @relation(fields: [playerId], references: [id])
   session GameSession    @relation(fields: [sessionId], references: [id])
@@ -156,41 +139,52 @@ model PlayerSession {
   @@unique([playerId, sessionId])
   @@index([sessionId])
   @@index([playerId])
-  @@index([sessionId, score])
   @@map("player_sessions")
 }
 
-// ==============================================================
-// PLAYER ANSWER — Log câu trả lời (append-only, không UPDATE)
-// ==============================================================
+//
+// 🔥 PLAYER ANSWER (HISTORY → KHÔNG CASCADE)
+//
 model PlayerAnswer {
-  id               String   @id @default(uuid())
-  playerSessionId  String   @map("player_session_id")
-  sessionId        String   @map("session_id")          // denormalized for query speed
-  questionId       String   @map("question_id")
-  answerId         String   @map("answer_id")
+  id              String @id @default(uuid())
+  playerSessionId String @map("player_session_id")
+  questionId      String @map("question_id")
+  answerId        String @map("answer_id")
 
-  // Snapshots — không bao giờ sửa sau khi ghi
-  questionContent  String?  @map("question_content")
-  answerContent    String?  @map("answer_content")
-  isCorrect        Boolean  @map("is_correct")
-  scoreEarned      Int      @default(0) @map("score_earned")
-  responseTimeMs   Int      @map("response_time_ms")  // ms từ lúc question bắt đầu
+  // 🔥 snapshot chống sai lịch sử (optional nhưng nên có)
+  questionContent String? @map("question_content")
+  answerContent   String? @map("answer_content")
 
-  // Index để query leaderboard
-  timeAnswered     DateTime @default(now()) @map("time_answered")
+  isCorrect    Boolean  @map("is_correct")
+  scoreEarned  Int      @default(0) @map("score_earned")
+  timeAnswered DateTime @default(now()) @map("time_answered")
 
   playerSession PlayerSession @relation(fields: [playerSessionId], references: [id])
   question      Question      @relation(fields: [questionId], references: [id])
   answer        Answer        @relation(fields: [answerId], references: [id])
 
-  // Partial unique: mỗi player-session chỉ trả lời 1 lần mỗi câu hỏi
   @@unique([playerSessionId, questionId])
-  @@index([sessionId, scoreEarned])      // leaderboard query
-  @@index([sessionId, questionId])        // per-question stats
-  @@index([questionId, isCorrect])       // accuracy analytics
-  @@index([timeAnswered])                // ordering
+  @@index([playerSessionId])
+  @@index([questionId])
+  @@index([playerSessionId, isCorrect]) // 🔥 optimize score
   @@map("player_answers")
+}
+
+//
+// 🔐 AUTH SESSION
+//
+model AuthSession {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  refreshToken String   @map("refresh_token")
+  expiresAt    DateTime @map("expires_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("auth_sessions")
 }
 
 // ==============================================================
@@ -198,9 +192,7 @@ model PlayerAnswer {
 // ==============================================================
 enum RoomStatus {
   WAITING    // Chờ người chơi
-  COUNTDOWN  // Đếm ngược trước khi bắt đầu
   PLAYING    // Đang chơi
-  SHOW_ANSWER // Hiển thị kết quả câu hỏi
   FINISHED   // Kết thúc
 }
 
