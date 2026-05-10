@@ -20,7 +20,7 @@ export class UserController {
   @Get()
   @UseGuards(AuthGuard)
   getAllUser() {
-      return this.userService.getAll();
+    return this.userService.getAll();
   }
 
   @Get('test')

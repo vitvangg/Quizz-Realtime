@@ -124,11 +124,12 @@ model Answer {
 // 🟢 ROOM
 //
 model Room {
-  id        String   @id @default(uuid())
-  pin       String   @unique
-  quizId    String   @map("quiz_id")
-  hostId    String   @map("host_id")
-  createdAt DateTime @default(now()) @map("created_at")
+  id        String     @id @default(uuid())
+  pin       String     @unique
+  quizId    String     @map("quiz_id")
+  hostId    String     @map("host_id")
+  status    RoomStatus @default(WAITING)
+  createdAt DateTime   @default(now()) @map("created_at")
 
   quiz     Quiz          @relation(fields: [quizId], references: [id])
   host     User          @relation("UserRooms", fields: [hostId], references: [id])

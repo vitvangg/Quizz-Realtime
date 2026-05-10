@@ -20,6 +20,9 @@ import { SettingModule } from './admin/setting/setting.module';
 import { AnalyticsModule } from './admin/analytics/analytics.module';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor';
+import { QuizzsModule } from './quizzs/quizzs.module';
+import { QuestionsModule } from './questions/questions.module';
+import { AnswersModule } from './answers/answers.module';
 
 @Module({
   imports: [
@@ -41,6 +44,9 @@ import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor
     NotificationModule,
     SettingModule,
     AnalyticsModule,
+    QuizzsModule,
+    QuestionsModule,
+    AnswersModule,
   ],
   controllers: [AppController],
   providers: [
