@@ -19,6 +19,15 @@ enum RoomStatus {
   FINISHED
 }
 
+enum GameStatus {
+  WAITING
+  STARTING
+  QUESTION_ACTIVE
+  QUESTION_RESULT
+  LEADERBOARD
+  FINISHED
+}
+
 model User {
   id           String   @id @default(uuid())
   email        String   @unique
@@ -164,7 +173,7 @@ model Player {
 model GameSession {
   id        String     @id @default(uuid())
   roomId    String     @map("room_id")
-  status    RoomStatus @default(WAITING)
+  status    GameStatus @default(WAITING)
   startedAt DateTime   @default(now()) @map("started_at")
   endedAt   DateTime?  @map("ended_at")
 

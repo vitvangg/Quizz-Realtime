@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import { toast } from 'sonner';
 import { authState } from '@/types/auth.type';
 import { authService } from '@/services/auth.service';
-import api from '@/lib/axios';
 import axios from 'axios';
 
 const getErrorMessage = (error: unknown, fallback: string) => {
@@ -58,16 +57,12 @@ export const useAuthStore = create<authState>((set, get) => ({
         try {
             set({ loading: true });
             // Goi API để đăng nhập người dùng
-            // Backend sẽ set refreshToken vào cookie
-            const response = await api.post("/auth/login", { email, password }, {
-                withCredentials: true
-            });
+            const data = await authService.login(email, password);
 
-            // Lưu accessToken vào state (KHÔNG lưu vào localStorage)
-            const { accessToken, data: user } = response.data;
+            // Lưu token vào axios để tự động gửi trong các yêu cầu sau
             set({
-                accessToken,
-                user,
+                accessToken: data.accessToken,
+                user: data.data,
             });
 
             toast.success("Đăng nhập thành công!");
@@ -84,9 +79,7 @@ export const useAuthStore = create<authState>((set, get) => ({
     logout: async () => {
         try {
             set({ loading: true });
-            // Backend sẽ clear refreshToken cookie
-            await api.post("/auth/logout", {}, { withCredentials: true })
-                .catch(err => console.error("Logout API error:", err));
+            await authService.logout().catch(err => console.error("Logout API error:", err));
         } finally {
             set({ accessToken: null, user: null, loading: false });
             toast.success("Đăng xuất thành công!");
@@ -95,9 +88,9 @@ export const useAuthStore = create<authState>((set, get) => ({
 
     getProfile: async () => {
         try {
-            const response = await api.get("/auth/profile");
-            set({ user: response.data });
-            return response.data;
+            const profile = await authService.getProfile();
+            set({ user: profile });
+            return profile;
         } catch (error) {
             console.error("Get profile error:", error);
             throw error;
@@ -108,23 +101,13 @@ export const useAuthStore = create<authState>((set, get) => ({
         try {
             set({ loading: true });
             const { user, getProfile } = get();
-            
-            // Gọi refresh token - backend sẽ đọc refreshToken từ cookie
-            // và set refreshToken mới vào cookie
-            const response = await api.post("/auth/refresh-token", {}, {
-                withCredentials: true
-            });
-            
-            const newAccessToken = response.data.accessToken;
+            const newAccessToken = await authService.refresh();
             set({ accessToken: newAccessToken });
 
             if (!user) {
                 await getProfile();
             }
-            
-            return newAccessToken;
         } catch (error) {
-            // Refresh fail có thể do hết hạn hoặc không có token
             if (!axios.isAxiosError(error) || error.response?.status !== 401) {
                 console.error("Refresh token error:", error);
             }
@@ -139,38 +122,15 @@ export const useAuthStore = create<authState>((set, get) => ({
         if (isHydrated) return;
 
         try {
-            // Thử refresh token từ cookie (chỉ khi API available)
-            const apiAvailable = await checkApiAvailable();
-            if (!apiAvailable) {
-                // API không khả dụng - có thể backend chưa start
-                clearState();
-                set({ isHydrated: true });
-                return;
-            }
-
             await refresh();
             const { user, accessToken } = get();
             if (accessToken && !user) {
                 await getProfile();
             }
         } catch {
-            // Không có valid refresh token - clear state
             clearState();
         } finally {
             set({ isHydrated: true });
         }
     },
 }));
-
-// Helper function để check API có khả dụng không
-async function checkApiAvailable(): Promise<boolean> {
-    try {
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/auth/ping`, {
-            method: 'GET',
-            cache: 'no-store',
-        });
-        return response.ok || response.status === 404; // 404 cũng OK - API có respond
-    } catch {
-        return false;
-    }
-}

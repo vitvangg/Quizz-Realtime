@@ -4,9 +4,10 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useQuizStore } from "@/stores/quiz.store";
 import { useRoomStore } from "@/stores/room.store";
+import { useAuthStore } from "@/stores/auth.store";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { PlusCircle, Play, Edit, Trash2, BookOpen, Clock, MoreVertical } from "lucide-react";
+import { PlusCircle, Play, Edit, Trash2, BookOpen, Clock, LogOut } from "lucide-react";
 import Link from "next/link";
 import { 
   DropdownMenu, 
@@ -14,19 +15,52 @@ import {
   DropdownMenuItem, 
   DropdownMenuTrigger 
 } from "@/components/ui/dropdown-menu";
+import { toast } from "sonner";
 
 export default function MyQuizzesPage() {
   const router = useRouter();
   const { quizzes, loading, getMyQuizzes, delete: deleteQuiz } = useQuizStore();
+  const { createRoom, loading: roomLoading, currentRoom, reset } = useRoomStore();
+  const { user } = useAuthStore();
 
   useEffect(() => {
     getMyQuizzes();
-  }, [getMyQuizzes]);
+    return () => {
+      reset();
+    };
+  }, [getMyQuizzes, reset]);
+
+  useEffect(() => {
+    if (currentRoom) {
+      // Host: redirect with host flag
+      router.push(`/room/${currentRoom.id}?host=true`);
+    }
+  }, [currentRoom, router]);
 
   const handleDelete = async (id: string) => {
     if (confirm("Bạn có chắc chắn muốn xóa bộ câu hỏi này không?")) {
       await deleteQuiz(id);
     }
+  };
+
+  const handleStartGame = async (quizId: string) => {
+    if (!user) {
+      toast.error("Vui lòng đăng nhập để tạo phòng");
+      router.push("/signin");
+      return;
+    }
+
+    try {
+      await createRoom(quizId);
+    } catch (error) {
+      toast.error("Không thể tạo phòng");
+    }
+  };
+
+  const handleLogout = async () => {
+    const { logout } = useAuthStore.getState();
+    await logout();
+    router.push("/");
   };
 
   return (
@@ -38,12 +72,23 @@ export default function MyQuizzesPage() {
             Quản lý và tổ chức các bộ câu hỏi của bạn một cách chuyên nghiệp.
           </p>
         </div>
-        <Link href="/quiz/build">
-          <Button className="gap-2 shadow-lg shadow-primary/20 hover:scale-105 transition-transform px-6 py-6 text-lg rounded-xl">
-            <PlusCircle className="h-5 w-5" />
-            Tạo Quiz mới
-          </Button>
-        </Link>
+        <div className="flex items-center gap-4">
+          {user && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <span>{user.email}</span>
+              <Button variant="ghost" size="sm" onClick={handleLogout}>
+                <LogOut className="h-4 w-4 mr-1" />
+                Đăng xuất
+              </Button>
+            </div>
+          )}
+          <Link href="/quiz/build">
+            <Button className="gap-2 shadow-lg shadow-primary/20 hover:scale-105 transition-transform px-6 py-6 text-lg rounded-xl">
+              <PlusCircle className="h-5 w-5" />
+              Tạo Quiz mới
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {loading ? (
@@ -86,7 +131,7 @@ export default function MyQuizzesPage() {
                     size="icon" 
                     className="h-8 w-8 rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
                     onClick={(e) => {
-                      e.stopPropagation(); // Ngăn chặn sự kiện click vào card
+                      e.stopPropagation();
                       handleDelete(quiz.id);
                     }}
                   >
@@ -126,19 +171,14 @@ export default function MyQuizzesPage() {
                 </Button>
                 <Button 
                   className="w-full gap-2 rounded-lg shadow-md shadow-primary/20 bg-primary hover:bg-primary/90"
-                  onClick={async (e) => {
+                  onClick={(e) => {
                     e.stopPropagation();
-                    try {
-                      const room = await useRoomStore.getState().createRoom(quiz.id);
-                      if (room) {
-                        router.push(`/room/${room.id}`);
-                      }
-                    } catch (error) {
-                      console.error("Error creating room:", error);
-                    }
+                    handleStartGame(quiz.id);
                   }}
+                  disabled={roomLoading || !quiz.questions?.length}
                 >
-                  <Play className="h-4 w-4 fill-current" /> Bắt đầu
+                  <Play className="h-4 w-4 fill-current" /> 
+                  {roomLoading ? 'Đang tạo...' : 'Bắt đầu'}
                 </Button>
               </CardFooter>
             </Card>

@@ -1,4 +1,9 @@
 import { PartialType } from '@nestjs/mapped-types';
-import { CreateRoomDto } from './create-room.dto';
+import { CreateRoomDto, RoomStatus } from './create-room.dto';
+import { IsOptional, IsEnum } from 'class-validator';
 
-export class UpdateRoomDto extends PartialType(CreateRoomDto) {}
+export class UpdateRoomDto extends PartialType(CreateRoomDto) {
+  @IsOptional()
+  @IsEnum(RoomStatus)
+  status?: RoomStatus;
+}

@@ -22,6 +22,8 @@ import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor';
 import { QuizzsModule } from './quizzs/quizzs.module';
 import { QuestionsModule } from './questions/questions.module';
+import { RedisModule } from './redis/redis.module';
+import { GameModule } from './game/game.module';
 import { AnswersModule } from './answers/answers.module';
 
 @Module({
@@ -29,11 +31,13 @@ import { AnswersModule } from './answers/answers.module';
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    RedisModule,
     PrismaModule,
     AuthModule,
     ClientUserModule,
     SessionModule,
     RoomModule,
+    GameModule,
     RoleModule,
     PermissionModule,
     AdminUserModule,

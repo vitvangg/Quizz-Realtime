@@ -48,7 +48,7 @@ export function SigninForm({
             await login(email, password);
 
             console.log("after login");
-            // Redirect to quiz page after successful login
+            // goi api tu backend de login
             router.push("/quiz");
         } catch (error) {
             console.error("Login error:", error);

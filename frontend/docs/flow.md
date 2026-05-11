@@ -1,215 +1,180 @@
-# Frontend Flow - Implementation Status
+# Frontend Flow
+
+## Current Status
+
+✅ Backend Room implementation: DONE
+✅ Frontend Room implementation: DONE
+
+---
 
 ## 1. Landing Page (`/`)
 
-**STATUS**: ✅ IMPLEMENTED
+### ✅ Implemented
 
-### Features:
-- Input nhập mã PIN room
-- Input nhập nickname
-- Button "Tham gia Game"
-- Button đăng nhập/đăng ký
-- Hiển thị features
+- Landing page với hero section
+- Input mã PIN room (button "Tham gia ngay")
+- Button "Tạo Quiz mới" cho user đã login
+- Navigation header với login/logout
+- JoinRoomDialog component
 
-### Guest Flow:
-1. Nhập PIN (6 số)
-2. Nhập nickname
-3. Click "Tham gia Game"
-4. → Redirect `/room/[id]`
+### Flow
 
-### Authenticated Flow:
-1. Click "Đi đến Quiz của tôi"
-2. → Redirect `/quiz`
+1. User nhấn "Tham gia ngay"
+2. Mở JoinRoomDialog
+3. Nhập PIN + nickname
+4. Connect WebSocket → join room
+5. Redirect tới `/room/:id`
 
 ---
 
 ## 2. Authentication Flow
 
-**STATUS**: ✅ Code sẵn có
+### ✅ Đã có
 
-- `/signin` - Đăng nhập
-- `/signup` - Đăng ký
-- Redirect `/quiz` sau login thành công
+- `/signin` - Login page
+- `/signup` - Register page
+- Auth store với token management
+- Auto refresh token
+
+### Flow
+
+1. User đăng nhập/đăng ký
+2. Lưu access token
+3. Redirect tới `/quiz`
 
 ---
 
 ## 3. Quiz List Page (`/quiz`)
 
-**STATUS**: ✅ IMPLEMENTED
+### ✅ Implemented
 
-### Features:
-- Hiển thị quiz của user
-- Button "Sửa" → `/quiz/edit/:id`
-- Button "Bắt đầu" → Tạo room + redirect `/room/[id]`
+- Danh sách quiz của user
+- Button "Bắt đầu" → Tạo room + redirect tới waiting room
+- Button "Sửa" → Edit quiz
+- Button "Xóa" quiz
 
-### Flow:
-1. Click "Bắt đầu" trên quiz
-2. Gọi `roomService.create(quizId)`
-3. Backend tạo room + sinh PIN
-4. Redirect `/room/${room.id}`
+### Flow
 
----
-
-## 4. Waiting Room (`/room/[id]`)
-
-**STATUS**: ✅ IMPLEMENTED
-
-### Features:
-- Hiển thị mã PIN (copy được)
-- Danh sách player realtime (WebSocket)
-- Player đang online highlight
-- Nút "Bắt đầu Game" (host only)
-- Nút "Thoát phòng"
-
-### WebSocket Events:
-| Event | Handler | Status |
-|-------|---------|--------|
-| `room_joined` | Update room state | ✅ |
-| `player_joined` | Add player to list | ✅ |
-| `player_left` | Remove player | ✅ |
-| `room_left` | Reset state | ✅ |
-| `room_error` | Show error toast | ✅ |
+1. Click "Bắt đầu" 
+2. Gọi `POST /room` (auth required)
+3. Backend sinh room PIN
+4. Redirect tới `/room/:id`
+5. Auto connect WebSocket
 
 ---
 
-## 5. Game Play (`/room/[id]/play`)
+## 4. Waiting Room (`/room/:id`)
 
-**STATUS**: ❌ CHƯA IMPLEMENT
+### ✅ Implemented
 
-Khi host bấm "Bắt đầu Game":
-1. Emit `start_game` event
-2. Backend broadcast `game_starting` (countdown)
-3. Backend emit `question_start`
-4. Player submit `submit_answer`
-5. → `leaderboard` → `game_end`
+#### Components
 
----
+- `waiting-screen.tsx` - Main waiting UI
+- `player-list.tsx` - Player list với kick functionality
+- `pin-input.tsx` - PIN input component
 
-## 6. API Endpoints
+#### Host thấy:
+- Room PIN (hiển thị nổi bật)
+- Danh sách player realtime
+- Button "Bắt đầu Game"
+- Button copy PIN
 
-| Method | Endpoint | Description | Status |
-|--------|----------|-------------|--------|
-| POST | `/room` | Tạo room | ✅ |
-| GET | `/room/:id` | Get room | ✅ |
-| GET | `/room/pin/:pin` | Get by PIN | ✅ |
-| POST | `/room/join` | Join room (REST) | ✅ |
-
----
-
-## 7. Files Structure
-
-```
-frontend/
-├── app/
-│   ├── page.tsx                    ✅ Landing page
-│   ├── signin/page.tsx            ✅
-│   ├── signup/page.tsx             ✅
-│   ├── quiz/
-│   │   ├── page.tsx               ✅ Quiz list + start game
-│   │   ├── builder/page.tsx       ✅ Create quiz
-│   │   └── edit/[id]/page.tsx    ✅ Edit quiz
-│   └── room/
-│       └── [id]/page.tsx          ✅ Waiting room
-├── components/
-│   └── (existing components)
-├── services/
-│   ├── auth.service.ts            ✅
-│   ├── quiz.service.ts            ✅
-│   ├── room.service.ts            ✅ NEW
-│   └── socket.service.ts          ✅ NEW
-├── stores/
-│   ├── auth.store.ts              ✅
-│   ├── quiz.store.ts              ✅
-│   └── room.store.ts              ✅ NEW
-└── types/
-    ├── auth.type.ts               ✅
-    ├── quiz.type.ts               ✅
-    └── room.type.ts               ✅ NEW
-```
+#### Player thấy:
+- Room info
+- Quiz title
+- Player list realtime
+- Trạng thái "Đang chờ Host bắt đầu..."
 
 ---
 
-## 8. WebSocket Events (Implemented)
+## 5. WebSocket Events
 
 ### Namespace: `/game`
 
-| Event | Direction | Payload | Status |
-|-------|-----------|---------|--------|
-| `join_room` | Client → Server | `{ pin, nickname }` | ✅ Backend |
-| `join_by_id` | Client → Server | `{ roomId, nickname }` | ✅ Backend |
-| `leave_room` | Client → Server | `{ roomId }` | ✅ Backend |
-| `get_room_state` | Client → Server | `{ roomId }` | ✅ Backend |
-| `room_joined` | Server → Client | Full state | ✅ |
-| `player_joined` | Server → Client | Player info | ✅ |
-| `player_left` | Server → Client | Player info | ✅ |
-| `room_left` | Server → Client | Confirm | ✅ |
-| `error` | Server → Client | Error msg | ✅ |
+#### ✅ Implemented (Backend)
 
-### Game Events (TODO):
+| Event | Direction | Status |
+|-------|-----------|--------|
+| `join_room` | Client → Server | ✅ |
+| `join_by_id` | Client → Server | ✅ |
+| `leave_room` | Client → Server | ✅ |
+| `get_room_state` | Client → Server | ✅ |
+| `room_joined` | Server → Client | ✅ |
+| `player_joined` | Server → Client | ✅ |
+| `player_left` | Server → Client | ✅ |
+| `room_left` | Server → Client | ✅ |
 
-| Event | Direction | Description |
-|-------|-----------|-------------|
-| `start_game` | Client → Server | Host starts |
-| `game_starting` | Server → Client | Countdown |
-| `question_start` | Server → Client | New question |
-| `submit_answer` | Client → Server | Player answers |
-| `answer_received` | Server → Client | Confirm |
-| `question_result` | Server → Client | Correct answer |
-| `leaderboard` | Server → Client | Rankings |
-| `game_end` | Server → Client | Final results |
-
----
-
-## 9. Implementation Checklist
-
-### ✅ Completed:
-- [x] Landing page với join game form
-- [x] Room types
-- [x] Room service (API)
-- [x] Socket service (WebSocket)
-- [x] Room store (Zustand)
-- [x] Waiting room page
-- [x] Quiz page → Room flow
-- [x] Player list realtime
-- [x] Host indicator
-- [x] Copy PIN functionality
-
-### ❌ TODO:
-- [ ] Game play page
-- [ ] Question display
-- [ ] Answer submission
-- [ ] Timer synchronization
-- [ ] Leaderboard display
-- [ ] Game results
-- [ ] Reconnect handling
-- [ ] Kick player functionality
-
----
-
-## 10. State Management
-
-### Room Store (`room.store.ts`)
+#### ✅ Implemented (Frontend Store)
 
 ```typescript
+// room.store.ts
 interface RoomState {
+  socket: Socket | null;
+  isConnected: boolean;
   currentRoom: Room | null;
+  currentPlayer: Player | null;
   players: Player[];
-  myPlayer: Player | null;
   isHost: boolean;
-  connectionStatus: 'disconnected' | 'connecting' | 'connected';
   
+  connectSocket: () => void;
+  disconnectSocket: () => void;
   createRoom: (quizId: string) => Promise<Room>;
-  joinRoom: (pin: string, nickname: string) => Promise<boolean>;
+  joinRoom: (pin: string, nickname: string) => Promise<void>;
+  joinRoomById: (roomId: string, nickname: string) => Promise<void>;
   leaveRoom: () => Promise<void>;
-  // ...
 }
 ```
 
 ---
 
-## 11. Environment Variables
+## 6. API Endpoints
 
-```env
-NEXT_PUBLIC_API_URL=http://localhost:3000
-NEXT_PUBLIC_WS_URL=http://localhost:3000
+### Room APIs
+
+| Method | Endpoint | Description | Auth |
+|--------|----------|-------------|------|
+| POST | `/room` | Create room | ✅ JWT |
+| GET | `/room` | List waiting rooms | - |
+| GET | `/room/:id` | Get room | - |
+| GET | `/room/pin/:pin` | Get room by PIN | - |
+| POST | `/room/join` | Join room | - |
+| POST | `/room/leave` | Leave room | ✅ JWT |
+
+---
+
+## 7. File Structure
+
 ```
+frontend/
+├── app/
+│   ├── page.tsx                    # Landing page ✅
+│   ├── room/
+│   │   └── [id]/
+│   │       └── page.tsx           # Waiting room ✅
+│   └── quiz/
+│       └── page.tsx               # Quiz list ✅
+├── components/
+│   └── room/
+│       ├── pin-input.tsx          # PIN input ✅
+│       ├── player-list.tsx        # Player list ✅
+│       ├── waiting-screen.tsx     # Waiting UI ✅
+│       └── join-room-dialog.tsx   # Join dialog ✅
+├── services/
+│   └── room.service.ts            # Room API calls ✅
+├── stores/
+│   └── room.store.ts              # Room state ✅
+└── types/
+    └── room.type.ts               # Room types ✅
+```
+
+---
+
+## 8. Pending Features
+
+| Feature | Status |
+|---------|--------|
+| Kick player | TODO |
+| Start game flow | TODO |
+| Question/Answer flow | TODO |
+| Leaderboard | TODO |
+| Reconnect logic | TODO |

@@ -1,45 +1,33 @@
 import api from "@/lib/axios";
+import { CreateRoomDto, JoinRoomDto, Room } from "@/types/room.type";
 
 export const roomService = {
-  // Tạo room mới
-  async create(quizId: string) {
-    const response = await api.post("/room", { quizId });
+  async create(data: CreateRoomDto): Promise<Room> {
+    const response = await api.post("/room", data);
     return response.data;
   },
 
-  // Lấy room theo ID
-  async getById(id: string) {
+  async getById(id: string): Promise<Room> {
     const response = await api.get(`/room/${id}`);
     return response.data;
   },
 
-  // Lấy room theo PIN
-  async getByPin(pin: string) {
+  async getByPin(pin: string): Promise<Room> {
     const response = await api.get(`/room/pin/${pin}`);
     return response.data;
   },
 
-  // Lấy tất cả room đang chờ
-  async getAll() {
+  async join(data: JoinRoomDto): Promise<{ room: Room; player: any }> {
+    const response = await api.post("/room/join", data);
+    return response.data;
+  },
+
+  async leave(roomId: string, playerId: string): Promise<void> {
+    await api.post("/room/leave", { roomId, playerId });
+  },
+
+  async getWaitingRooms(): Promise<Room[]> {
     const response = await api.get("/room");
-    return response.data;
-  },
-
-  // Join room (REST fallback)
-  async join(pin: string, nickname: string) {
-    const response = await api.post("/room/join", { pin, nickname });
-    return response.data;
-  },
-
-  // Leave room (REST fallback)
-  async leave(roomId: string, playerId: string) {
-    const response = await api.post("/room/leave", { roomId, playerId });
-    return response.data;
-  },
-
-  // Xóa room (host only)
-  async delete(id: string) {
-    const response = await api.delete(`/room/${id}`);
     return response.data;
   },
 };
