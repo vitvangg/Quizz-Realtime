@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useQuizStore } from "@/stores/quiz.store";
+import { useRoomStore } from "@/stores/room.store";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { PlusCircle, Play, Edit, Trash2, BookOpen, Clock, MoreVertical } from "lucide-react";
@@ -125,9 +126,16 @@ export default function MyQuizzesPage() {
                 </Button>
                 <Button 
                   className="w-full gap-2 rounded-lg shadow-md shadow-primary/20 bg-primary hover:bg-primary/90"
-                  onClick={(e) => {
+                  onClick={async (e) => {
                     e.stopPropagation();
-                    // Thêm logic bắt đầu game ở đây nếu cần
+                    try {
+                      const room = await useRoomStore.getState().createRoom(quiz.id);
+                      if (room) {
+                        router.push(`/room/${room.id}`);
+                      }
+                    } catch (error) {
+                      console.error("Error creating room:", error);
+                    }
                   }}
                 >
                   <Play className="h-4 w-4 fill-current" /> Bắt đầu
