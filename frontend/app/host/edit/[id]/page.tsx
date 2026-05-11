@@ -43,7 +43,6 @@ export default function EditQuizPage() {
 
   const [questions, setQuestions] = useState<Question[]>([]);
 
-  // Load dữ liệu cũ và đổ vào form
   const loadQuizData = useCallback(async () => {
     try {
       setLoading(true);
@@ -63,7 +62,6 @@ export default function EditQuizPage() {
         }));
         setQuestions(formattedQuestions);
       } else {
-        // Nếu quiz chưa có câu hỏi nào (trường hợp hiếm), tạo sẵn 1 câu trống
         setQuestions([{
           id: "q-" + Date.now(),
           content: "",
@@ -76,7 +74,7 @@ export default function EditQuizPage() {
       }
     } catch (error) {
       toast.error("Không thể tải dữ liệu Quiz");
-      router.push("/quiz");
+      router.push("/host");
     } finally {
       setLoading(false);
     }
@@ -86,7 +84,6 @@ export default function EditQuizPage() {
     loadQuizData();
   }, [loadQuizData]);
 
-  // Các logic điều khiển form (Giống hệt trang Create)
   const addQuestion = () => {
     setQuestions([
       ...questions,
@@ -173,7 +170,6 @@ export default function EditQuizPage() {
       return;
     }
 
-    // Validate
     for (let i = 0; i < questions.length; i++) {
       if (!questions[i].content.trim()) {
         toast.error(`Câu hỏi ${i + 1} chưa có nội dung!`);
@@ -188,21 +184,16 @@ export default function EditQuizPage() {
 
     setSaving(true);
     try {
-      // 1. Cập nhật Tiêu đề Quiz
       await quizStore.update(quizId, { title });
 
-      // 2. Lấy dữ liệu hiện tại để xóa
       const currentQuizData = await quizService.getById(quizId);
 
-      // Xóa tất cả questions cũ một cách đồng thời và đợi tất cả hoàn tất
       if (currentQuizData.questions && currentQuizData.questions.length > 0) {
         await Promise.all(
           currentQuizData.questions.map((q: any) => questionStore.delete(q.id))
         );
       }
 
-      // 3. Tạo lại toàn bộ từ đầu
-      // Chúng ta tạo tuần tự để đảm bảo orderIndex đúng
       for (let i = 0; i < questions.length; i++) {
         const q = questions[i];
         const newQuestion = await questionStore.create({
@@ -213,7 +204,6 @@ export default function EditQuizPage() {
         });
 
         const questionId = newQuestion.id;
-        // Tạo các câu trả lời cho câu hỏi này
         await Promise.all(
           q.answers.map((a) => answerStore.create({
             questionId,
@@ -224,7 +214,7 @@ export default function EditQuizPage() {
       }
 
       toast.success("Cập nhật bộ Quiz thành công!");
-      router.push("/quiz");
+      router.push("/host");
 
     } catch (error) {
       toast.error("Có lỗi xảy ra khi lưu thay đổi");
@@ -247,7 +237,7 @@ export default function EditQuizPage() {
       {/* Header Section */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 sticky top-0 z-10 bg-background/80 backdrop-blur-md py-4 border-b">
         <div className="flex items-center gap-4">
-          <Link href="/quiz">
+          <Link href="/host">
             <Button variant="outline" size="icon" className="rounded-full">
               <ArrowLeft className="h-4 w-4" />
             </Button>
