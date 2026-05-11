@@ -8,23 +8,25 @@ import { AuthModule } from './auth/auth.module';
 import { UserModule as ClientUserModule } from './user/user.module';
 import { SessionModule } from './session/session.module';
 import { RoomModule } from './room/room.module';
-import { RoleModule } from './admin/role/role.module';
-import { PermissionModule } from './admin/permission/permission.module';
-import { UserModule as AdminUserModule } from './admin/user/user.module';
-import { QuizModule } from './admin/quiz/quiz.module';
-import { AuditLogModule } from './admin/audit-log/audit-log.module';
-import { GameSessionModule } from './admin/game-session/game-session.module';
-import { ReportModule } from './admin/report/report.module';
-import { NotificationModule } from './admin/notification/notification.module';
-import { SettingModule } from './admin/setting/setting.module';
-import { AnalyticsModule } from './admin/analytics/analytics.module';
+import { RoleModule } from './admin/it/role/role.module';
+import { PermissionModule } from './admin/it/permission/permission.module';
+import { UserModule as AdminUserModule } from './admin/it/user/user.module';
+import { QuizModule } from './admin/it/quiz/quiz.module';
+import { AuditLogModule } from './admin/system/audit-log/audit-log.module';
+import { GameSessionModule } from './admin/system/game-session/game-session.module';
+import { ReportModule } from './admin/system/report/report.module';
+import { NotificationModule } from './admin/system/notification/notification.module';
+import { SettingModule } from './admin/system/setting/setting.module';
+import { AnalyticsModule } from './admin/system/analytics/analytics.module';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor';
 import { QuizzsModule } from './quizzs/quizzs.module';
 import { QuestionsModule } from './questions/questions.module';
-import { RedisModule } from './redis/redis.module';
 import { GameModule } from './game/game.module';
 import { AnswersModule } from './answers/answers.module';
+import { RedisModule } from './redis/redis.module';
+import { DashboardModule } from './admin/system/dashboard/dashboard.module';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 
 @Module({
   imports: [
@@ -32,6 +34,7 @@ import { AnswersModule } from './answers/answers.module';
       isGlobal: true,
     }),
     RedisModule,
+    EventEmitterModule.forRoot(),
     PrismaModule,
     AuthModule,
     ClientUserModule,
@@ -51,6 +54,9 @@ import { AnswersModule } from './answers/answers.module';
     QuizzsModule,
     QuestionsModule,
     AnswersModule,
+    GameModule,
+    RedisModule,
+    DashboardModule,
   ],
   controllers: [AppController],
   providers: [
