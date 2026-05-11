@@ -18,11 +18,13 @@ import { ReportModule } from './admin/report/report.module';
 import { NotificationModule } from './admin/notification/notification.module';
 import { SettingModule } from './admin/setting/setting.module';
 import { AnalyticsModule } from './admin/analytics/analytics.module';
+import { GameModule } from './game/game.module';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor';
 import { QuizzsModule } from './quizzs/quizzs.module';
 import { QuestionsModule } from './questions/questions.module';
 import { AnswersModule } from './answers/answers.module';
+import { RedisModule } from './redis/redis.module';
 
 @Module({
   imports: [
@@ -47,6 +49,8 @@ import { AnswersModule } from './answers/answers.module';
     QuizzsModule,
     QuestionsModule,
     AnswersModule,
+    GameModule,
+    RedisModule,
   ],
   controllers: [AppController],
   providers: [

@@ -49,7 +49,7 @@ export function SigninForm({
 
             console.log("after login");
             // goi api tu backend de login
-            router.push("/testAPI");
+            router.push("/host");
         } catch (error) {
             console.error("Login error:", error);
         }
