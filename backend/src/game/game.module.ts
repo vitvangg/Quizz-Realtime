@@ -1,16 +1,13 @@
 import { Module } from '@nestjs/common';
+import { GameSessionService } from './game-session.service';
 import { GameGateway } from './game.gateway';
-import { GameService } from './game.service';
-import { RoomHandler } from './handlers/room.handler';
-import { RedisModule } from '../redis/redis.module';
+import { RoomModule } from '../room/room.module';
+import { PrismaModule } from '../prisma/prisma.module';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
-  imports: [RedisModule],
-  providers: [
-    GameGateway,
-    GameService,
-    RoomHandler,
-  ],
-  exports: [GameGateway, GameService],
+  imports: [RoomModule, PrismaModule, AuthModule],
+  providers: [GameSessionService, GameGateway],
+  exports: [GameSessionService, GameGateway],
 })
 export class GameModule {}

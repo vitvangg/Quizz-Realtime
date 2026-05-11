@@ -1,150 +1,144 @@
-'use client';
+"use client";
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { PinInput } from '@/components/game/PinInput';
-import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { JoinRoomDialog } from '@/components/room/join-room-dialog';
+import { useAuthStore } from '@/stores/auth.store';
+import Link from 'next/link';
+import { Gamepad2, Users, Shield, Zap } from 'lucide-react';
 
-export default function LandingPage() {
-  const [pin, setPin] = useState('');
-  const [error, setError] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+export default function HomePage() {
   const router = useRouter();
+  const { user, isHydrated } = useAuthStore();
+  const [joinDialogOpen, setJoinDialogOpen] = useState(false);
 
-  const handlePinSubmit = async () => {
-    if (pin.length !== 6) {
-      setError('Please enter a 6-digit PIN');
-      return;
-    }
-
-    setIsLoading(true);
-    setError('');
-
-    try {
-      // Verify PIN exists
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}room/pin/${pin}`);
-
-      if (!response.ok) {
-        if (response.status === 404) {
-          setError('Room not found. Please check the PIN.');
-        } else {
-          setError('Failed to join room. Please try again.');
-        }
-        return;
-      }
-
-      const room = await response.json();
-
-      // Navigate to waiting room
-      router.push(`/room/${pin}`);
-    } catch (err) {
-      console.error('Error joining room:', err);
-      setError('Failed to join room. Please check your connection.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleLoginClick = () => {
-    router.push('/signin');
+  const handleJoinGame = () => {
+    setJoinDialogOpen(true);
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex flex-col items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        {/* Logo / Brand */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl mb-4">
-            <svg
-              className="w-10 h-10 text-white"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-              />
-            </svg>
+    <div className="min-h-screen bg-gradient-to-b from-primary/5 via-background to-background">
+      <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
+              <Gamepad2 className="w-5 h-5 text-primary-foreground" />
+            </div>
+            <span className="font-bold text-xl">QuizGame</span>
           </div>
-          <h1 className="text-3xl font-bold text-gray-900">Quiz Game</h1>
-          <p className="text-gray-600 mt-2">Challenge your friends in real-time!</p>
+          
+          <nav className="flex items-center gap-4">
+            {isHydrated && user ? (
+              <>
+                <Link href="/quiz">
+                  <Button variant="ghost">Quiz của tôi</Button>
+                </Link>
+                <span className="text-sm text-muted-foreground">
+                  {user.email}
+                </span>
+              </>
+            ) : isHydrated ? (
+              <>
+                <Link href="/signin">
+                  <Button variant="ghost">Đăng nhập</Button>
+                </Link>
+                <Link href="/signup">
+                  <Button>Đăng ký</Button>
+                </Link>
+              </>
+            ) : null}
+          </nav>
         </div>
+      </header>
 
-        {/* PIN Entry Card */}
-        <div className="bg-white rounded-2xl shadow-xl p-8">
-          <h2 className="text-xl font-semibold text-gray-900 text-center mb-6">
-            Enter Room Code
-          </h2>
-
-          <div className="mb-6">
-            <PinInput
-              value={pin}
-              onChange={setPin}
-              onSubmit={handlePinSubmit}
-              error={error}
-              disabled={isLoading}
-            />
-          </div>
-
-          <button
-            onClick={handlePinSubmit}
-            disabled={pin.length !== 6 || isLoading}
-            className="w-full py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {isLoading ? (
-              <span className="flex items-center justify-center gap-2">
-                <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                    fill="none"
-                  />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                  />
-                </svg>
-                Joining...
-              </span>
-            ) : (
-              'Join Room'
-            )}
-          </button>
-
-          {/* Divider */}
-          <div className="flex items-center my-6">
-            <div className="flex-1 border-t border-gray-200" />
-            <span className="px-4 text-gray-400 text-sm">OR</span>
-            <div className="flex-1 border-t border-gray-200" />
-          </div>
-
-          {/* Login Button */}
-          <button
-            onClick={handleLoginClick}
-            className="w-full py-3 bg-gray-100 text-gray-700 font-semibold rounded-lg hover:bg-gray-200 transition-colors"
-          >
-            Login to Host a Game
-          </button>
-        </div>
-
-        {/* Footer */}
-        <div className="mt-8 text-center">
-          <p className="text-sm text-gray-500">
-            Want to create your own quiz?{' '}
-            <a href="/signup" className="text-blue-600 hover:underline">
-              Sign up
-            </a>
+      <main className="container mx-auto px-4 py-16">
+        <section className="text-center max-w-3xl mx-auto mb-16">
+          <h1 className="text-5xl font-extrabold tracking-tight mb-6 bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
+            Chơi Quiz cùng bạn bè
+          </h1>
+          <p className="text-xl text-muted-foreground mb-8">
+            Tạo phòng chơi, chia sẻ mã PIN và cùng nhau thi đấu theo thời gian thực.
+            Giống Kahoot nhưng hoàn toàn miễn phí!
           </p>
-        </div>
-      </div>
+          
+          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <Button 
+              size="lg" 
+              className="text-lg px-8 py-6 shadow-lg shadow-primary/25"
+              onClick={handleJoinGame}
+            >
+              Tham gia ngay
+            </Button>
+            {user && (
+              <Link href="/quiz">
+                <Button 
+                  size="lg" 
+                  variant="outline"
+                  className="text-lg px-8 py-6"
+                >
+                  Tạo Quiz mới
+                </Button>
+              </Link>
+            )}
+          </div>
+        </section>
+
+        <section className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
+          <Card className="border-2 hover:border-primary/50 transition-colors">
+            <CardHeader>
+              <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center mb-4">
+                <Zap className="w-6 h-6 text-primary" />
+              </div>
+              <CardTitle>Nhanh chóng</CardTitle>
+              <CardDescription>
+                Tham gia chỉ trong vài giây với mã PIN 6 chữ số
+              </CardDescription>
+            </CardHeader>
+          </Card>
+
+          <Card className="border-2 hover:border-primary/50 transition-colors">
+            <CardHeader>
+              <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center mb-4">
+                <Users className="w-6 h-6 text-primary" />
+              </div>
+              <CardTitle>Nhiều người chơi</CardTitle>
+              <CardDescription>
+                Cùng chơi với bạn bè, gia đình hoặc đồng nghiệp
+              </CardDescription>
+            </CardHeader>
+          </Card>
+
+          <Card className="border-2 hover:border-primary/50 transition-colors">
+            <CardHeader>
+              <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center mb-4">
+                <Shield className="w-6 h-6 text-primary" />
+              </div>
+              <CardTitle>Bảo mật</CardTitle>
+              <CardDescription>
+                Dữ liệu của bạn được bảo vệ an toàn
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        </section>
+
+        <section className="mt-16 text-center">
+          <p className="text-muted-foreground">
+            Đã có tài khoản?{' '}
+            <Link href="/signin" className="text-primary hover:underline">
+              Đăng nhập
+            </Link>
+            {' '}để tạo quiz của riêng bạn
+          </p>
+        </section>
+      </main>
+
+      <JoinRoomDialog 
+        open={joinDialogOpen} 
+        onOpenChange={setJoinDialogOpen} 
+      />
     </div>
   );
 }
+

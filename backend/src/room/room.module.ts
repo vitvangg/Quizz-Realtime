@@ -1,12 +1,14 @@
 import { Module } from '@nestjs/common';
 import { RoomService } from './room.service';
 import { RoomController } from './room.controller';
-import { JwtModule } from '@nestjs/jwt';
+import { RoomGateway } from './room.gateway';
+import { PrismaModule } from 'src/prisma/prisma.module';
+import { AuthModule } from 'src/auth/auth.module';
 
 @Module({
-  imports: [JwtModule],
+  imports: [PrismaModule, AuthModule],
   controllers: [RoomController],
-  providers: [RoomService],
-  exports: [RoomService],
+  providers: [RoomService, RoomGateway],
+  exports: [RoomService, RoomGateway],
 })
 export class RoomModule {}
