@@ -22,8 +22,8 @@ export default function LandingPage() {
 
     try {
       // Verify PIN exists
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/room/pin/${pin}`);
-      
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}room/pin/${pin}`);
+
       if (!response.ok) {
         if (response.status === 404) {
           setError('Room not found. Please check the PIN.');
@@ -34,7 +34,7 @@ export default function LandingPage() {
       }
 
       const room = await response.json();
-      
+
       // Navigate to waiting room
       router.push(`/room/${pin}`);
     } catch (err) {
