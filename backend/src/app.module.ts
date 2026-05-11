@@ -18,7 +18,6 @@ import { ReportModule } from './admin/system/report/report.module';
 import { NotificationModule } from './admin/system/notification/notification.module';
 import { SettingModule } from './admin/system/setting/setting.module';
 import { AnalyticsModule } from './admin/system/analytics/analytics.module';
-import { GameModule } from './game/game.module';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor';
 import { QuizzsModule } from './quizzs/quizzs.module';
@@ -33,6 +32,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    RedisModule,
     EventEmitterModule.forRoot(),
     PrismaModule,
     AuthModule,
@@ -52,13 +52,12 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
     QuizzsModule,
     QuestionsModule,
     AnswersModule,
-    GameModule,
     RedisModule,
     DashboardModule,
   ],
   controllers: [AppController],
   providers: [
-    AppService, 
+    AppService,
     PrismaService,
     {
       provide: APP_INTERCEPTOR,
@@ -66,4 +65,4 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
     }
   ],
 })
-export class AppModule {}
+export class AppModule { }

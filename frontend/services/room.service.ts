@@ -1,54 +1,33 @@
-import { apiClient } from '@/lib/apiClient';
-import type { Room } from '@/types/game';
-
-interface CreateRoomDto {
-  quizId: string;
-}
+import api from "@/lib/axios";
+import { CreateRoomDto, JoinRoomDto, Room } from "@/types/room.type";
 
 export const roomService = {
-  // Tạo phòng mới (cần đăng nhập)
-  async createRoom(dto: CreateRoomDto): Promise<Room> {
-    const response = await apiClient.post<Room>('/room', dto);
+  async create(data: CreateRoomDto): Promise<Room> {
+    const response = await api.post("/room", data);
     return response.data;
   },
 
-  // Lấy phòng theo PIN
-  async getRoomByPin(pin: string): Promise<Room> {
-    const response = await apiClient.get<Room>(`/room/pin/${pin}`);
+  async getById(id: string): Promise<Room> {
+    const response = await api.get(`/room/${id}`);
     return response.data;
   },
 
-  // Lấy phòng theo ID
-  async getRoomById(id: string): Promise<Room> {
-    const response = await apiClient.get<Room>(`/room/${id}`);
+  async getByPin(pin: string): Promise<Room> {
+    const response = await api.get(`/room/pin/${pin}`);
     return response.data;
   },
 
-  // Lấy danh sách phòng của user
-  async getMyRooms(): Promise<Room[]> {
-    const response = await apiClient.get<Room[]>('/room');
+  async join(data: JoinRoomDto): Promise<{ room: Room; player: any }> {
+    const response = await api.post("/room/join", data);
     return response.data;
   },
 
-  // Tham gia phòng
-  async joinRoom(pin: string, nickname: string): Promise<any> {
-    const response = await apiClient.post('/room/join', { pin, nickname });
+  async leave(roomId: string, playerId: string): Promise<void> {
+    await api.post("/room/leave", { roomId, playerId });
+  },
+
+  async getWaitingRooms(): Promise<Room[]> {
+    const response = await api.get("/room");
     return response.data;
-  },
-
-  // Rời phòng
-  async leaveRoom(playerId: string): Promise<void> {
-    await apiClient.post(`/room/leave/${playerId}`);
-  },
-
-  // Cập nhật trạng thái phòng
-  async updateStatus(id: string, status: string): Promise<Room> {
-    const response = await apiClient.patch<Room>(`/room/${id}/status`, { status });
-    return response.data;
-  },
-
-  // Xóa phòng
-  async deleteRoom(id: string): Promise<void> {
-    await apiClient.delete(`/room/${id}`);
   },
 };
