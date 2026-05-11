@@ -11,7 +11,7 @@ export class RoomHandler {
   constructor(
     private readonly gameService: GameService,
     private readonly redisService: RedisService,
-  ) {}
+  ) { }
 
   // ══════════════════════════════════════════════════════════════════════════════
   // HOST EVENTS
