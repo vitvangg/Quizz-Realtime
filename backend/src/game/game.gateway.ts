@@ -11,6 +11,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { Logger } from '@nestjs/common';
 import { RoomHandler } from './handlers/room.handler';
+import { OnEvent } from '@nestjs/event-emitter';
 
 @WebSocketGateway({
   cors: { origin: '*' },
@@ -22,7 +23,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
   private readonly logger = new Logger(GameGateway.name);
 
-  constructor(private readonly roomHandler: RoomHandler) {}
+  constructor(private readonly roomHandler: RoomHandler) { }
 
   // ============================================================================
   // LIFECYCLE
@@ -54,8 +55,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       await pubClient.ping();
       this.logger.log('Redis adapter connected');
 
-      server.adapter(createAdapter(pubClient, subClient));
-    } catch (error) {
+      const rootServer = (server as any).server || server;
+      rootServer.adapter(createAdapter(pubClient, subClient));
+    } catch (error: any) {
       this.logger.error('Failed to connect Redis adapter:', error.message);
     }
   }
@@ -131,5 +133,17 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     @MessageBody() payload: { roomId: string },
   ) {
     return this.roomHandler.handleStartGame(client, payload, this.server);
+  }
+
+  // ============================================================================
+  // SYSTEM EVENTS (from Admin OPS)
+  // ============================================================================
+
+  @OnEvent('system.incident.kill_switch')
+  handleKillSwitch() {
+    this.logger.error('🚨 KILL SWITCH ACTIVATED: Disconnecting all active game sockets!');
+    if (this.server) {
+      this.server.disconnectSockets(true);
+    }
   }
 }

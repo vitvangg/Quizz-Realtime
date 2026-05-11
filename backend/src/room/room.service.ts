@@ -6,7 +6,7 @@ import { RoomStatus } from '../../generated/prisma/enums';
 
 @Injectable()
 export class RoomService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
   private generatePin(): string {
     return Math.floor(100000 + Math.random() * 900000).toString();
