@@ -26,7 +26,7 @@ export function WaitingScreen({ roomId }: WaitingScreenProps) {
   } = useRoomStore();
   const [copied, setCopied] = useState(false);
 
-  const isHost = !!(currentPlayer?.isHost || 
+  const isHost = !!(currentPlayer?.isHost ||
     (currentPlayer?.id === currentRoom?.hostId) ||
     (currentPlayer?.id?.startsWith('host_') && currentRoom?.hostId));
 
@@ -106,10 +106,10 @@ export function WaitingScreen({ roomId }: WaitingScreenProps) {
 
     try {
       toast.loading('Đang bắt đầu game...', { id: 'start-game' });
-      
+
       const { useGameStore } = await import('@/stores/game.store');
       const gameStore = useGameStore.getState();
-      
+
       if (!gameStore.socket?.connected) {
         gameStore.connectSocket();
         await new Promise<void>((resolve) => {
