@@ -22,7 +22,6 @@ import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor';
 import { QuizzsModule } from './quizzs/quizzs.module';
 import { QuestionsModule } from './questions/questions.module';
-import { GameModule } from './game/game.module';
 import { AnswersModule } from './answers/answers.module';
 import { RedisModule } from './redis/redis.module';
 import { DashboardModule } from './admin/system/dashboard/dashboard.module';
@@ -40,7 +39,6 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
     ClientUserModule,
     SessionModule,
     RoomModule,
-    GameModule,
     RoleModule,
     PermissionModule,
     AdminUserModule,
@@ -54,13 +52,12 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
     QuizzsModule,
     QuestionsModule,
     AnswersModule,
-    GameModule,
     RedisModule,
     DashboardModule,
   ],
   controllers: [AppController],
   providers: [
-    AppService, 
+    AppService,
     PrismaService,
     {
       provide: APP_INTERCEPTOR,
@@ -68,4 +65,4 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
     }
   ],
 })
-export class AppModule {}
+export class AppModule { }
