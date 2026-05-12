@@ -1,26 +1,46 @@
-import { Injectable } from '@nestjs/common';
-import { CreateAuditLogDto } from './dto/create-audit-log.dto';
-import { UpdateAuditLogDto } from './dto/update-audit-log.dto';
+import { Injectable, Logger } from '@nestjs/common';
+import { PrismaService } from '../../../prisma/prisma.service';
+
+export interface SecurityEventPayload {
+  action: string;
+  entity: string;
+  entityId?: string;
+  userId?: string;
+  ipAddress?: string;
+  details?: string;
+}
 
 @Injectable()
 export class AuditLogService {
-  create(createAuditLogDto: CreateAuditLogDto) {
-    return 'This action adds a new auditLog';
+  private readonly logger = new Logger(AuditLogService.name);
+
+  constructor(private readonly prisma: PrismaService) {}
+
+  async logSecurityEvent(payload: SecurityEventPayload): Promise<void> {
+    try {
+      await this.prisma.auditLog.create({
+        data: {
+          action: payload.action,
+          entity: payload.entity,
+          entityId: payload.entityId,
+          userId: payload.userId,
+          ipAddress: payload.ipAddress,
+          details: payload.details,
+        },
+      });
+      this.logger.log(`[AUDIT] ${payload.action} | IP: ${payload.ipAddress} | ${payload.details}`);
+    } catch (error) {
+      this.logger.error(`Failed to write audit log: ${error.message}`);
+    }
   }
 
-  findAll() {
-    return `This action returns all auditLog`;
-  }
-
-  findOne(id: number) {
-    return `This action returns a #${id} auditLog`;
-  }
-
-  update(id: number, updateAuditLogDto: UpdateAuditLogDto) {
-    return `This action updates a #${id} auditLog`;
-  }
-
-  remove(id: number) {
-    return `This action removes a #${id} auditLog`;
+  async getSecurityLogs(limit = 50) {
+    return this.prisma.auditLog.findMany({
+      where: {
+        entity: 'SECURITY',
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
   }
 }
