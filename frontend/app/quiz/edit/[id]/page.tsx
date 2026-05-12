@@ -36,7 +36,7 @@ export default function EditQuizPage() {
   const [title, setTitle] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  
+
   const quizStore = useQuizStore();
   const questionStore = useQuestionStore();
   const answerStore = useAnswerStore();
@@ -49,7 +49,7 @@ export default function EditQuizPage() {
       setLoading(true);
       const quiz = await quizService.getById(quizId);
       setTitle(quiz.title);
-      
+
       if (quiz.questions && quiz.questions.length > 0) {
         const formattedQuestions = quiz.questions.map((q: any) => ({
           id: q.id,
@@ -156,7 +156,7 @@ export default function EditQuizPage() {
                 return { ...a, [field]: value };
               }
               if (field === "isCorrect" && value === true) {
-                 return { ...a, isCorrect: false };
+                return { ...a, isCorrect: false };
               }
               return a;
             }),
@@ -165,6 +165,17 @@ export default function EditQuizPage() {
         return q;
       })
     );
+  };
+
+  const moveQuestion = (index: number, direction: 'up' | 'down') => {
+    const newIndex = direction === 'up' ? index - 1 : index + 1;
+    if (newIndex < 0 || newIndex >= questions.length) return;
+
+    const newQuestions = [...questions];
+    const [movedItem] = newQuestions.splice(index, 1);
+    newQuestions.splice(newIndex, 0, movedItem);
+
+    setQuestions(newQuestions);
   };
 
   const handleUpdate = async () => {
@@ -245,7 +256,7 @@ export default function EditQuizPage() {
   return (
     <div className="max-w-5xl mx-auto py-8 px-4 space-y-8 pb-32">
       {/* Header Section */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 sticky top-0 z-10 bg-background/80 backdrop-blur-md py-4 border-b">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 sticky top-16 z-40 bg-background/80 backdrop-blur-md py-4 border-b">
         <div className="flex items-center gap-4">
           <Link href="/quiz">
             <Button variant="outline" size="icon" className="rounded-full">
@@ -293,11 +304,13 @@ export default function EditQuizPage() {
             key={q.id}
             question={q}
             index={index}
+            totalQuestions={questions.length}
             onUpdate={updateQuestion}
             onRemove={removeQuestion}
             onUpdateAnswer={updateAnswer}
             onAddAnswer={addAnswer}
             onRemoveAnswer={removeAnswer}
+            onMove={moveQuestion}
             canRemove={questions.length > 1}
           />
         ))}
@@ -305,10 +318,10 @@ export default function EditQuizPage() {
 
       {/* Add Question Button */}
       <div className="flex justify-center pt-4">
-        <Button 
-          variant="outline" 
-          size="lg" 
-          className="gap-2 w-full max-w-md border-dashed border-2 py-8 text-lg hover:bg-primary/5 hover:border-primary/50 transition-all group" 
+        <Button
+          variant="outline"
+          size="lg"
+          className="gap-2 w-full max-w-md border-dashed border-2 py-8 text-lg hover:bg-primary/5 hover:border-primary/50 transition-all group"
           onClick={addQuestion}
           disabled={saving}
         >

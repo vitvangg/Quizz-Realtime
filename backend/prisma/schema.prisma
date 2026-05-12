@@ -108,7 +108,7 @@ model Question {
   timeLimit  Int    @map("time_limit")
   orderIndex Int    @map("order_index")
 
-  quiz          Quiz           @relation(fields: [quizId], references: [id])
+  quiz          Quiz           @relation(fields: [quizId], references: [id], onDelete: Cascade)
   answers       Answer[]
   playerAnswers PlayerAnswer[]
 
@@ -122,7 +122,7 @@ model Answer {
   content    String
   isCorrect  Boolean @map("is_correct")
 
-  question      Question       @relation(fields: [questionId], references: [id])
+  question      Question       @relation(fields: [questionId], references: [id], onDelete: Cascade)
   playerAnswers PlayerAnswer[]
 
   @@index([questionId])
