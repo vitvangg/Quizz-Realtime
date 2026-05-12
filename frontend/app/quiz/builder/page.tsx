@@ -165,7 +165,15 @@ export default function QuizBuilderPage() {
       }
 
       if (importedQuestions.length > 0) {
-        setQuestions([...questions, ...importedQuestions]);
+        // Nếu chỉ có 1 câu hỏi và nó trống, thì thay thế bằng danh sách mới
+        const isFirstQuestionEmpty = questions.length === 1 && !questions[0].content.trim();
+        
+        if (isFirstQuestionEmpty) {
+          setQuestions(importedQuestions);
+        } else {
+          setQuestions([...questions, ...importedQuestions]);
+        }
+        
         toast.success(`Đã nhập thành công ${importedQuestions.length} câu hỏi!`);
       } else {
         toast.error("Không tìm thấy dữ liệu hợp lệ trong file.");
@@ -404,7 +412,6 @@ export default function QuizBuilderPage() {
               Trình tạo Quiz
             </h1>
             <p className="text-sm text-muted-foreground font-medium flex items-center gap-1.5">
-              <LayoutGrid className="h-4 w-4 text-primary" />
               Tạo những thử thách thú vị
             </p>
           </div>
@@ -417,7 +424,7 @@ export default function QuizBuilderPage() {
             onClick={handleSave}
             disabled={saving}
           >
-            <Save className="h-5 w-5" />
+
             {saving ? "Đang lưu..." : "Xuất bản Quiz"}
           </Button>
         </div>
