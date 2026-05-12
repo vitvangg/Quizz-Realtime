@@ -1,33 +1,43 @@
-import { Controller, Post, Body, UseGuards, Req } from '@nestjs/common';
+import { Controller, Post, Get, Body, Req } from '@nestjs/common';
 import { DashboardService } from './dashboard.service';
-import { RolesGuard } from '../../../common/guards/roles.guard';
-import { Roles } from '../../../common/decorators/roles.decorator';
-import { Role } from '../../../common/enums/role.enum';
-import { AuthGuard } from '../../../auth/guards/auth.guard';
 
 @Controller('admin/system/incident')
-// @UseGuards(AuthGuard, RolesGuard)
+// @UseGuards(AuthGuard, RolesGuard) -- Re-enable in production
 export class IncidentController {
-  constructor(private readonly systemService: DashboardService) { }
+  constructor(private readonly systemService: DashboardService) {}
 
   @Post('kill-switch')
-  // @Roles([Role.SUPER_ADMIN])
-  async triggerKillSwitch(@Req() req: any) {
+  async triggerKillSwitch(@Req() req: any, @Body() body: { pin?: string }) {
     const adminId = req.user?.id || 'SYSTEM_UNKNOWN';
-    return this.systemService.activateKillSwitch(adminId);
+    return this.systemService.activateKillSwitch(adminId, body?.pin);
   }
 
   @Post('lockdown')
-  @Roles([Role.SUPER_ADMIN, Role.OPS_ADMIN])
   async triggerLockdown(@Req() req: any, @Body() body: { enable: boolean }) {
     const adminId = req.user?.id || 'SYSTEM_UNKNOWN';
     return this.systemService.setLockdown(adminId, body.enable);
   }
 
   @Post('maintenance')
-  @Roles([Role.SUPER_ADMIN])
   async triggerMaintenance(@Req() req: any, @Body() body: { enable: boolean }) {
     const adminId = req.user?.id || 'SYSTEM_UNKNOWN';
     return this.systemService.setMaintenance(adminId, body.enable);
+  }
+
+  @Get('blacklist')
+  async getBlacklist() {
+    return this.systemService.getBlacklist();
+  }
+
+  @Post('ban-ip')
+  async banIp(@Req() req: any, @Body() body: { ip: string; reason: string }) {
+    const adminId = req.user?.id || 'SYSTEM_UNKNOWN';
+    return this.systemService.manualBanIp(body.ip, body.reason || 'Manual ban', adminId);
+  }
+
+  @Post('unban-ip')
+  async unbanIp(@Req() req: any, @Body() body: { ip: string }) {
+    const adminId = req.user?.id || 'SYSTEM_UNKNOWN';
+    return this.systemService.unbanIp(body.ip, adminId);
   }
 }
