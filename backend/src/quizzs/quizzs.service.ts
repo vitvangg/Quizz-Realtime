@@ -22,6 +22,7 @@ export class QuizzsService {
 
   findAll() {
     return this.prismaService.quiz.findMany({
+      where: { deletedAt: null },
       orderBy: {
         createdAt: 'desc',
       },
@@ -35,7 +36,7 @@ export class QuizzsService {
 
   findByUserId(userId: string) {
     return this.prismaService.quiz.findMany({
-      where: { createdBy: userId },
+      where: { createdBy: userId, deletedAt: null },
       include: {
         questions: {
           include: { answers: true },
@@ -45,8 +46,8 @@ export class QuizzsService {
   }
 
   findOne(id: string) {
-    return this.prismaService.quiz.findUnique({
-      where: { id },
+    return this.prismaService.quiz.findFirst({
+      where: { id, deletedAt: null },
       include: {
         questions: {
           include: {
@@ -64,7 +65,7 @@ export class QuizzsService {
       throw new NotFoundException('Quiz not found');
     }
     if (quiz.createdBy !== userId) {
-      throw new ForbiddenException('not alowed');
+      throw new ForbiddenException('not allowed');
     }
 
     return this.prismaService.quiz.update({
@@ -76,35 +77,23 @@ export class QuizzsService {
   }
 
   async remove(id: string, userId: string) {
-    const quiz = await this.findOne(id);
+    // Fetch quiz to check ownership and existence.
+    const quiz = await this.prismaService.quiz.findUnique({
+      where: { id },
+    });
+
     if (!quiz) {
       throw new NotFoundException('Quiz not found');
     }
     if (quiz.createdBy !== userId) {
-      throw new ForbiddenException('not alowed');
+      throw new ForbiddenException('not allowed');
     }
 
-    // Xóa thủ công theo thứ tự: Answers -> Questions -> Quiz
-    // 1. Lấy danh sách ID câu hỏi
-    const questions = await this.prismaService.question.findMany({
-      where: { quizId: id },
-      select: { id: true }
-    });
-    const questionIds = questions.map(q => q.id);
-
-    // 2. Xóa tất cả câu trả lời của các câu hỏi đó
-    await this.prismaService.answer.deleteMany({
-      where: { questionId: { in: questionIds } }
-    });
-
-    // 3. Xóa các câu hỏi
-    await this.prismaService.question.deleteMany({
-      where: { quizId: id }
-    });
-
-    // 4. Cuối cùng mới xóa Quiz
-    return this.prismaService.quiz.delete({
+    // Use soft delete instead of hard delete to avoid foreign key constraint violations
+    // and preserve game history (rooms, player answers).
+    return this.prismaService.quiz.update({
       where: { id },
+      data: { deletedAt: new Date() },
     });
   }
 }

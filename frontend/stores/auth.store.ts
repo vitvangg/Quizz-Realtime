@@ -100,16 +100,19 @@ export const useAuthStore = create<authState>((set, get) => ({
     refresh: async () => {
         try {
             set({ loading: true });
-            const { user, getProfile } = get();
+            console.log("[AuthStore] Refreshing token...");
             const newAccessToken = await authService.refresh();
             set({ accessToken: newAccessToken });
+            console.log("[AuthStore] Token refreshed successfully.");
 
-            if (!user) {
-                await getProfile();
-            }
+            // Sau khi có token mới, lấy lại profile
+            await get().getProfile().catch(err => console.error("Profile recovery failed:", err));
+            
         } catch (error) {
-            if (!axios.isAxiosError(error) || error.response?.status !== 401) {
-                console.error("Refresh token error:", error);
+            if (axios.isAxiosError(error) && error.response?.status === 401) {
+                console.warn("[AuthStore] Session expired or invalid refresh token.");
+            } else {
+                console.error("[AuthStore] Refresh token error:", error);
             }
             throw error;
         } finally {
@@ -118,16 +121,15 @@ export const useAuthStore = create<authState>((set, get) => ({
     },
 
     initAuth: async () => {
-        const { isHydrated, refresh, getProfile, clearState } = get();
+        const { isHydrated, refresh, clearState } = get();
         if (isHydrated) return;
 
+        console.log("[AuthStore] Initializing authentication...");
         try {
+            // Luôn thử refresh khi init để khôi phục session từ cookie
             await refresh();
-            const { user, accessToken } = get();
-            if (accessToken && !user) {
-                await getProfile();
-            }
-        } catch {
+        } catch (error) {
+            console.log("[AuthStore] No active session found.");
             clearState();
         } finally {
             set({ isHydrated: true });
