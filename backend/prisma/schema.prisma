@@ -34,6 +34,10 @@ model User {
   passwordHash String   @map("password_hash")
   roleId       String?  @map("role_id")
   status       String   @default("ACTIVE") // ACTIVE, BANNED
+  fullName     String?   @map("full_name")
+  avatar       String?
+  phoneNumber  String?  @map("phone_number")
+  bio          String?
   createdAt    DateTime @default(now()) @map("created_at")
 
   role         Role?         @relation(fields: [roleId], references: [id])

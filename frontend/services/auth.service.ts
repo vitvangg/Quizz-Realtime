@@ -34,5 +34,10 @@ export const authService = {
     async refresh() {
         const response = await api.post("/auth/refresh-token")
         return response.data.accessToken;
+    },
+
+    async changePassword(data: any) {
+        const response = await api.patch("/auth/change-password", data);
+        return response.data;
     }
 }

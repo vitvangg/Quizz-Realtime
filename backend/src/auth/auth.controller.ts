@@ -1,15 +1,20 @@
-import { Body, Controller, Get, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Req, Res, UseGuards, Patch } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dtos/register.dto';
 import { LoginDto } from './dtos/login.dto';
+import { ChangePasswordDto } from './dtos/change-password.dto';
 import { REFRESH_TOKEN_TTL } from 'src/config/config';
 import ms from 'ms';
 import { AuthGuard } from './guards/auth.guard';
 import { CurrentUser } from 'src/user/decorators/user.decorator';
+import { UserService } from 'src/user/user.service';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly userService: UserService,
+  ) { }
 
   @Post('register')
   async register(@Body() data: RegisterDto) {
@@ -56,6 +61,19 @@ export class AuthController {
   @Get('profile')
   @UseGuards(AuthGuard)
   async getProfile(@CurrentUser() user) {
-    return user;
+
+    const fullUser = await this.userService.findById(user.id);
+    if (!fullUser) {
+      return null;
+    }
+
+    const { passwordHash, ...safeUser } = fullUser;
+    return safeUser;
+  }
+
+  @Patch('change-password')
+  @UseGuards(AuthGuard)
+  async changePassword(@CurrentUser() user, @Body() data: ChangePasswordDto) {
+    return this.authService.changePassword(user.id, data);
   }
 }
