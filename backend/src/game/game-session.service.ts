@@ -397,6 +397,72 @@ export class GameSessionService {
     };
   }
 
+  /**
+   * Returns the full authoritative game state — used as HTTP fallback when socket
+   * events are missed after navigation. Includes current question data and
+   * computed remaining time so the frontend can render immediately without
+   * waiting for a socket event.
+   */
+  async getFullGameState(sessionId: string) {
+    const cached = await this.getGameCache(sessionId);
+    const session = await this.prisma.gameSession.findUnique({
+      where: { id: sessionId },
+      include: {
+        room: {
+          include: {
+            quiz: {
+              include: {
+                questions: {
+                  include: { answers: true },
+                  orderBy: { orderIndex: 'asc' },
+                },
+              },
+            },
+          },
+        },
+        players: {
+          include: { player: true },
+          orderBy: { score: 'desc' },
+        },
+      },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Session not found');
+    }
+
+    // Compute remaining time based on server clock
+    let remainingTime: number | null = null;
+    let currentQuestion: any = null;
+
+    if (cached && cached.status === GameState.QUESTION_ACTIVE && cached.questionStartedAt) {
+      const elapsed = (Date.now() - cached.questionStartedAt) / 1000;
+      remainingTime = Math.max(0, cached.timeLimit - Math.floor(elapsed));
+      const questionData = session.room.quiz.questions[cached.currentQuestionIndex];
+      if (questionData) {
+        currentQuestion = {
+          id: questionData.id,
+          content: questionData.content,
+          answers: questionData.answers.map((a: any) => ({ id: a.id, content: a.content })),
+          timeLimit: questionData.timeLimit,
+        };
+      }
+    }
+
+    const leaderboard = await this.getLeaderboard(sessionId);
+
+    return {
+      sessionId: session.id,
+      roomId: session.roomId,
+      status: cached?.status || GameState.WAITING,
+      currentQuestionIndex: cached?.currentQuestionIndex ?? 0,
+      totalQuestions: cached?.totalQuestions ?? session.room.quiz.questions.length,
+      remainingTime,
+      currentQuestion,
+      leaderboard,
+    };
+  }
+
   async getSessionWithQuiz(sessionId: string) {
     return this.prisma.gameSession.findUnique({
       where: { id: sessionId },

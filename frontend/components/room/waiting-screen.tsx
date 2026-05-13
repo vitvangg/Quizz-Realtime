@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PlayerList } from './player-list';
 import { useRoomStore } from '@/stores/room.store';
+import { useGameStore } from '@/stores/game.store';
+import { GameState } from '@/types/game.type';
 import { toast } from 'sonner';
 
 interface WaitingScreenProps {
@@ -19,22 +21,38 @@ export function WaitingScreen({ roomId }: WaitingScreenProps) {
     currentRoom,
     currentPlayer,
     players,
-    socket,
+    socket: roomSocket,
     leaveRoom,
     loading,
-    reset,
+    reset: resetRoomStore,
   } = useRoomStore();
   const [copied, setCopied] = useState(false);
 
-  const isHost = !!(currentPlayer?.isHost || 
-    (currentPlayer?.id === currentRoom?.hostId) ||
-    (currentPlayer?.id?.startsWith('host_') && currentRoom?.hostId));
+  const isHost = !!(
+    currentPlayer?.isHost ||
+    currentPlayer?.id === currentRoom?.hostId ||
+    (currentPlayer?.id?.startsWith('host_') && currentRoom?.hostId)
+  );
 
+  // Read countdown state from the game store — updated by socket events in the store.
+  // This replaces the local gameStarting/countdown state that caused stale-closure bugs.
+  const gameStore = useGameStore();
+
+  // ── Ensure game store registers its socket updater ─────────────────────────────
+  // connectSocket registers store updater so socket events (game_redirect etc.)
+  // flow into Zustand. It no-ops if already registered.
   useEffect(() => {
-    if (!socket) return;
+    gameStore.connectSocket();
+  }, []);
+  const isGameStarting = gameStore.gameStatus === GameState.STARTING;
+  const storeCountdown = gameStore.countdown;
 
-    const handleRoomLeft = (data: { roomId: string; message: string; isHost?: boolean }) => {
-      console.log('[WaitingScreen] Room left event:', data);
+  // ── Room events ───────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!roomSocket) return;
+
+    const handleRoomLeft = (data: { roomId: string; isHost?: boolean }) => {
+      resetRoomStore();
       if (data.isHost) {
         toast.info('Bạn đã rời phòng');
         router.push('/quiz');
@@ -42,45 +60,58 @@ export function WaitingScreen({ roomId }: WaitingScreenProps) {
         toast.info('Bạn đã rời phòng');
         router.push('/');
       }
-      reset();
     };
 
     const handleHostLeft = (data: { roomId: string }) => {
-      console.log('[WaitingScreen] Host left event:', data);
+      const gameStatus = useGameStore.getState().gameStatus;
+      if (gameStatus === GameState.STARTING) return;
       toast.warning('Host đã rời phòng. Phòng sẽ bị đóng.');
-      setTimeout(() => {
-        router.push('/');
-      }, 2000);
+      setTimeout(() => router.push('/'), 2000);
     };
 
-    const handlePlayerLeft = (data: { playerId: string; nickname: string }) => {
-      console.log('[WaitingScreen] Player left:', data);
+    const handlePlayerLeft = (data: { nickname: string }) => {
       toast.info(`${data.nickname} đã rời phòng`);
     };
 
-    const handleGameStarting = (data: { sessionId: string; countdown: number }) => {
-      console.log('[WaitingScreen] Game starting (player only):', data);
-      if (!isHost && currentPlayer) {
-        sessionStorage.setItem('playerId', currentPlayer.id);
-        sessionStorage.setItem('playerNickname', currentPlayer.nickname);
-        sessionStorage.setItem('currentRoomId', currentRoom?.id || '');
-        sessionStorage.setItem('isHost', 'false');
-        router.push(`/game/${data.sessionId}`);
-      }
-    };
-
-    socket.on('room_left', handleRoomLeft);
-    socket.on('host_left', handleHostLeft);
-    socket.on('player_left', handlePlayerLeft);
-    socket.on('game_starting', handleGameStarting);
+    roomSocket.on('room_left', handleRoomLeft);
+    roomSocket.on('host_left', handleHostLeft);
+    roomSocket.on('player_left', handlePlayerLeft);
 
     return () => {
-      socket.off('room_left', handleRoomLeft);
-      socket.off('host_left', handleHostLeft);
-      socket.off('player_left', handlePlayerLeft);
-      socket.off('game_starting', handleGameStarting);
+      roomSocket.off('room_left', handleRoomLeft);
+      roomSocket.off('host_left', handleHostLeft);
+      roomSocket.off('player_left', handlePlayerLeft);
     };
-  }, [socket, router, reset, isHost, currentPlayer]);
+  }, [roomSocket, router, resetRoomStore]);
+
+  // ── SPA Navigation for game_redirect ───────────────────────────────────────────
+  // _pendingRedirect is set in lib/socket.ts when game_redirect is received.
+  // We use a separate useEffect on this specific field to avoid stale-closure issues.
+  // IMPORTANT: Only set hostSessionId for the actual host, not for players.
+  const pendingRedirect = useGameStore((s) => s._pendingRedirect);
+
+  useEffect(() => {
+    if (!pendingRedirect) return;
+    console.log('[WaitingScreen] SPA redirect to:', pendingRedirect);
+    
+    // Only set hostSessionId if this user is actually the host
+    // (has matching userId in room's hostId, or isHost flag is set)
+    const isActualHost = !!(
+      currentPlayer?.isHost ||
+      currentPlayer?.id === currentRoom?.hostId ||
+      (currentPlayer?.id?.startsWith('host_') && currentRoom?.hostId)
+    );
+    
+    if (isActualHost) {
+      sessionStorage.setItem('hostSessionId', pendingRedirect.replace('/game/', ''));
+      console.log('[WaitingScreen] Set hostSessionId (is actual host)');
+    } else {
+      console.log('[WaitingScreen] Not setting hostSessionId (is player)');
+    }
+    
+    useGameStore.setState({ _pendingRedirect: null });
+    router.push(pendingRedirect);
+  }, [pendingRedirect, currentPlayer, currentRoom]);
 
   const handleCopyPin = async () => {
     if (currentRoom?.pin) {
@@ -106,17 +137,15 @@ export function WaitingScreen({ roomId }: WaitingScreenProps) {
 
     try {
       toast.loading('Đang bắt đầu game...', { id: 'start-game' });
-      
-      const { useGameStore } = await import('@/stores/game.store');
+
       const gameStore = useGameStore.getState();
-      
+
       if (!gameStore.socket?.connected) {
         gameStore.connectSocket();
         await new Promise<void>((resolve) => {
-          const checkConnection = setInterval(() => {
-            const store = useGameStore.getState();
-            if (store.isConnected) {
-              clearInterval(checkConnection);
+          const interval = setInterval(() => {
+            if (useGameStore.getState().isConnected) {
+              clearInterval(interval);
               resolve();
             }
           }, 50);
@@ -128,8 +157,6 @@ export function WaitingScreen({ roomId }: WaitingScreenProps) {
       if (sessionId) {
         sessionStorage.setItem('hostSessionId', sessionId);
         toast.success('Game bắt đầu!', { id: 'start-game' });
-        await new Promise(resolve => setTimeout(resolve, 5500));
-        router.push(`/game/${sessionId}`);
       }
     } catch (error) {
       console.error('[WaitingScreen] Start game error:', error);
@@ -143,6 +170,21 @@ export function WaitingScreen({ roomId }: WaitingScreenProps) {
         <div className="text-center">
           <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-muted-foreground">Đang tải phòng...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Host countdown overlay — reads from game store (set by socket events in the store).
+  if (isGameStarting && storeCountdown !== null) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-2xl text-white/80 mb-4">Game bắt đầu!</p>
+          <div className="text-9xl font-bold text-white animate-pulse">
+            {storeCountdown}
+          </div>
+          <p className="text-xl text-white/60 mt-4">Chuẩn bị câu hỏi...</p>
         </div>
       </div>
     );
