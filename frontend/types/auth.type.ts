@@ -15,4 +15,5 @@ export interface authState {
     getProfile: () => Promise<User>;
     refresh: () => Promise<void>;
     initAuth: () => Promise<void>;
+    changePassword: (data: any) => Promise<void>;
 }
