@@ -27,6 +27,8 @@ import { useQuestionStore } from "@/stores/question.store";
 import { useAnswerStore } from "@/stores/answer.store";
 
 import { QuestionCard } from "@/components/quiz/question-card";
+import { QuizCategory, CATEGORY_LABELS } from "@/types/quiz.type";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface Answer {
   id: string;
@@ -46,6 +48,7 @@ export default function QuizBuilderPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [title, setTitle] = useState("");
+  const [category, setCategory] = useState<QuizCategory>(QuizCategory.KHAC);
   const [saving, setSaving] = useState(false);
 
   const quizStore = useQuizStore();
@@ -78,6 +81,7 @@ export default function QuizBuilderPage() {
 
   const downloadTemplate = () => {
     const headers = [
+      "Danh muc (TOAN|VAT_LI|HOA_HOC|SINH_HOC|VAN_HOC|LICH_SU|DIA_LY|TIENG_ANH|CONG_NGHE|KHAC)",
       "Noi dung cau hoi",
       "Thoi gian (giay)",
       "Dap an 1",
@@ -91,8 +95,8 @@ export default function QuizBuilderPage() {
     ];
 
     const sampleData = [
-      "Thu do cua Viet Nam la gi?,20,Ha Noi,1,TP Ho Chi Minh,0,Da Nang,0,Hue,0",
-      "React la gi?,30,Mot thu vien JS,1,Mot framework CSS,0,Mot ngon ngu lap trinh,0,Mot he quan tri CSDL,0",
+      "TOAN,1 + 1 bang bao nhieu?,20,2,1,3,0,4,0,5,0",
+      "TIENG_ANH,What is 'Hello' in Vietnamese?,30,Xin chao,1,Tam biet,0,Cam on,0,Xin loi,0",
     ];
 
     const csvContent = "\uFEFF" + [headers.join(","), ...sampleData].join("\n");
@@ -100,7 +104,7 @@ export default function QuizBuilderPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", "quiz_template.csv");
+    link.setAttribute("download", "quiz_template_with_category.csv");
     link.style.visibility = "hidden";
     document.body.appendChild(link);
     link.click();
@@ -130,6 +134,7 @@ export default function QuizBuilderPage() {
     try {
       const lines = text.split("\n");
       const importedQuestions: Question[] = [];
+      let detectedCategory: QuizCategory | null = null;
 
       // Bo qua header (dong 0)
       for (let i = 1; i < lines.length; i++) {
@@ -137,14 +142,20 @@ export default function QuizBuilderPage() {
         if (!line) continue;
 
         const parts = line.split(",");
-        if (parts.length < 6) continue; // It nhat phai co 2 dap an
+        if (parts.length < 7) continue; // It nhat phai co Category, Content, Time, 2 Answers
 
-        const content = parts[0];
-        const timeLimit = parseInt(parts[1]) || 20;
+        const categoryVal = parts[0].trim().toUpperCase();
+        const content = parts[1];
+        const timeLimit = parseInt(parts[2]) || 20;
         const answers: Answer[] = [];
 
-        // Duyet qua cac cap dap an (bat dau tu index 2)
-        for (let j = 2; j < parts.length; j += 2) {
+        // Luu lai category tu dong hop le dau tien
+        if (!detectedCategory && Object.values(QuizCategory).includes(categoryVal as QuizCategory)) {
+          detectedCategory = categoryVal as QuizCategory;
+        }
+
+        // Duyet qua cac cap dap an (bat dau tu index 3)
+        for (let j = 3; j < parts.length; j += 2) {
           if (parts[j]) {
             answers.push({
               id: `a-${Date.now()}-${i}-${j}`,
@@ -165,8 +176,21 @@ export default function QuizBuilderPage() {
       }
 
       if (importedQuestions.length > 0) {
-        setQuestions([...questions, ...importedQuestions]);
-        toast.success(`Đã nhập thành công ${importedQuestions.length} câu hỏi!`);
+        // Cập nhật danh mục nếu tìm thấy
+        if (detectedCategory) {
+          setCategory(detectedCategory);
+        }
+
+        // Nếu chỉ có 1 câu hỏi và nó trống, thì thay thế bằng danh sách mới
+        const isFirstQuestionEmpty = questions.length === 1 && !questions[0].content.trim();
+        
+        if (isFirstQuestionEmpty) {
+          setQuestions(importedQuestions);
+        } else {
+          setQuestions([...questions, ...importedQuestions]);
+        }
+        
+        toast.success(`Đã nhập thành công ${importedQuestions.length} câu hỏi${detectedCategory ? ` thuộc danh mục ${CATEGORY_LABELS[detectedCategory]}` : ""}!`);
       } else {
         toast.error("Không tìm thấy dữ liệu hợp lệ trong file.");
       }
@@ -344,7 +368,7 @@ export default function QuizBuilderPage() {
     setSaving(true);
 
     try {
-      const newQuiz = await quizStore.create({ title });
+      const newQuiz = await quizStore.create({ title, category });
       const quizId = newQuiz.id;
 
       for (let i = 0; i < questions.length; i++) {
@@ -404,7 +428,6 @@ export default function QuizBuilderPage() {
               Trình tạo Quiz
             </h1>
             <p className="text-sm text-muted-foreground font-medium flex items-center gap-1.5">
-              <LayoutGrid className="h-4 w-4 text-primary" />
               Tạo những thử thách thú vị
             </p>
           </div>
@@ -417,7 +440,7 @@ export default function QuizBuilderPage() {
             onClick={handleSave}
             disabled={saving}
           >
-            <Save className="h-5 w-5" />
+
             {saving ? "Đang lưu..." : "Xuất bản Quiz"}
           </Button>
         </div>
@@ -458,17 +481,37 @@ export default function QuizBuilderPage() {
         </div>
         <Card className="border-2 border-primary/10 shadow-sm bg-gradient-to-br from-background to-muted/30 overflow-hidden">
           <CardContent className="pt-8">
-            <div className="space-y-3">
-              <Label htmlFor="title" className="text-sm font-black text-muted-foreground uppercase tracking-widest px-1">
-                Tên bộ sưu tập
-              </Label>
-              <Input
-                id="title"
-                placeholder="Ví dụ: Lập trình React căn bản..."
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                className="text-2xl font-black py-8 border-2 border-transparent bg-background focus:border-primary/50 transition-all rounded-2xl placeholder:text-muted-foreground/30"
-              />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-3">
+                <Label htmlFor="title" className="text-sm font-black text-muted-foreground uppercase tracking-widest px-1">
+                  Tên bộ sưu tập
+                </Label>
+                <Input
+                  id="title"
+                  placeholder="Ví dụ: Lập trình React căn bản..."
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  className="text-2xl font-black py-8 border-2 border-transparent bg-background focus:border-primary/50 transition-all rounded-2xl placeholder:text-muted-foreground/30"
+                />
+              </div>
+
+              <div className="space-y-3">
+                <Label htmlFor="category" className="text-sm font-black text-muted-foreground uppercase tracking-widest px-1">
+                  Danh mục
+                </Label>
+                <Select value={category} onValueChange={(value) => setCategory(value as QuizCategory)}>
+                  <SelectTrigger className="text-xl font-black py-8 border-2 border-transparent bg-background focus:border-primary/50 transition-all rounded-2xl h-auto">
+                    <SelectValue placeholder="Chọn danh mục" />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-2xl border-2">
+                    {Object.entries(CATEGORY_LABELS).map(([value, label]) => (
+                      <SelectItem key={value} value={value} className="py-3 font-bold rounded-xl">
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </CardContent>
         </Card>

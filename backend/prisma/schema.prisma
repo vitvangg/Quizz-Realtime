@@ -88,6 +88,7 @@ model RolePermission {
 model Quiz {
   id        String    @id @default(uuid())
   title     String
+  category  QuizCategory @default(KHAC)
   createdBy String    @map("created_by")
   createdAt DateTime  @default(now()) @map("created_at")
   deletedAt DateTime? @map("deleted_at") // 🔥 soft delete
@@ -99,6 +100,18 @@ model Quiz {
   @@index([createdBy])
   @@index([deletedAt]) // 🔥 query nhanh hơn
   @@map("quizzes")
+}
+enum QuizCategory {
+  TOAN
+  VAT_LI
+  HOA_HOC
+  SINH_HOC
+  VAN_HOC
+  LICH_SU
+  DIA_LY
+  TIENG_ANH
+  CONG_NGHE
+  KHAC
 }
 
 model Question {

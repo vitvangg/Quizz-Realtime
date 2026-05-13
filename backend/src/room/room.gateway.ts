@@ -53,38 +53,39 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
     console.log(`[RoomGateway] Client disconnected: ${client.id}`);
 
     const identity = this.socketMap.get(client.id);
-    if (!identity) return;
+    if (!identity) {
+      console.log(`[RoomGateway] No identity for disconnected client ${client.id}`);
+      return;
+    }
+
+    const { roomId, isHost, playerId } = identity;
 
     try {
-      // If host disconnects, just cleanup the socket
-      if (identity.isHost) {
-        console.log(`[RoomGateway] Host disconnected from room ${identity.roomId}`);
-        
-        client.leave(identity.roomId);
-        this.socketMap.delete(client.id);
+      // Always clean up socket from in-memory maps.
+      client.leave(roomId);
+      this.socketMap.delete(client.id);
 
-        const roomSockets = this.roomSockets.get(identity.roomId);
-        if (roomSockets) {
-          roomSockets.delete(client.id);
-          if (roomSockets.size === 0) {
-            this.roomSockets.delete(identity.roomId);
-          }
+      const roomSockets = this.roomSockets.get(roomId);
+      if (roomSockets) {
+        roomSockets.delete(client.id);
+        if (roomSockets.size === 0) {
+          this.roomSockets.delete(roomId);
         }
-
-        // Notify remaining players that host left
-        this.server.to(identity.roomId).emit('host_left', {
-          roomId: identity.roomId,
-        });
-
-        return;
       }
 
-      // For regular players, call leaveRoom
-      await this.handleLeaveRoom(client, { roomId: identity.roomId });
+      // Players who disconnect legitimately (tab close, network loss) are handled
+      // by handleLeaveRoom. Hosts that disconnect during game navigation will also
+      // call this — but the frontend's handleHostLeft does NOT redirect during
+      // game (gameStatus === STARTING). game_redirect is the authoritative redirect.
+      if (!isHost) {
+        await this.handleLeaveRoom(client, { roomId });
+      } else {
+        // For hosts, emit host_left so players can detect host departure.
+        // Players handle this via handleHostLeft which checks gameStatus.
+        this.server.to(roomId).emit('host_left', { roomId });
+      }
     } catch (error) {
       console.error('[RoomGateway] Error on disconnect:', error);
-    } finally {
-      this.socketMap.delete(client.id);
     }
   }
 
@@ -252,7 +253,8 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
           playerCount: updatedRoom.players.length,
         });
 
-        return { success: true };
+        // Return playerId so frontend can persist it (for game session recovery after redirect)
+        return { success: true, playerId: player.id };
       } else {
         // Host joining - no player record needed
         const identity: PlayerIdentity = {
@@ -407,6 +409,8 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const identity = this.socketMap.get(client.id);
     if (!identity) return;
 
+    // Only relay game_starting for UI/UX purposes (countdown, loading overlay).
+    // Navigation is ONLY triggered by game_redirect from the game gateway.
     this.server.to(identity.roomId).emit('game_starting', {
       sessionId: payload.sessionId,
       countdown: payload.countdown,

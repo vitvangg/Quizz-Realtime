@@ -4,11 +4,11 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { useAuthStore } from "@/stores/auth.store";
 import { useRouter } from "next/navigation";
-import { 
-  LogOut, 
-  User, 
-  LayoutDashboard, 
-  PlusCircle, 
+import {
+  LogOut,
+  User,
+  LayoutDashboard,
+  PlusCircle,
   Trophy,
   Gamepad2
 } from "lucide-react";
@@ -52,12 +52,6 @@ export default function QuizLayout({
                   Tạo mới
                 </Link>
               </Button>
-              <Button variant="ghost" asChild className="gap-2 font-medium text-muted-foreground">
-                <Link href="/leaderboard">
-                  <Trophy className="h-4 w-4" />
-                  Xếp hạng
-                </Link>
-              </Button>
             </nav>
           </div>
 
@@ -68,12 +62,12 @@ export default function QuizLayout({
                   <p className="text-sm font-bold leading-none">{user.email?.split('@')[0]}</p>
                   <p className="text-[10px] text-muted-foreground uppercase font-black">Người tạo</p>
                 </div>
-                <Button 
-                   variant="ghost" 
-                   size="icon" 
-                   className="rounded-full bg-muted hover:bg-muted/80 h-10 w-10 overflow-hidden"
-                   onClick={handleLogout}
-                   title="Đăng xuất"
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="rounded-full bg-muted hover:bg-muted/80 h-10 w-10 overflow-hidden"
+                  onClick={handleLogout}
+                  title="Đăng xuất"
                 >
                   <LogOut className="h-4 w-4 text-destructive" />
                 </Button>
@@ -95,9 +89,9 @@ export default function QuizLayout({
       {/* Simple Footer */}
       <footer className="border-t bg-white py-8">
         <div className="container mx-auto px-4 text-center">
-           <p className="text-sm text-muted-foreground">
-              © 2026 Quizzy Realtime Platform. Được thiết kế cho sự tương tác đỉnh cao.
-           </p>
+          <p className="text-sm text-muted-foreground">
+            © 2026 Quizzy Realtime Platform. Được thiết kế cho sự tương tác đỉnh cao.
+          </p>
         </div>
       </footer>
     </div>
