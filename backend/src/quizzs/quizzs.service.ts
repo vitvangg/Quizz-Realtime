@@ -6,6 +6,7 @@ import {
 import { CreateQuizzDto } from './dto/create-quizz.dto';
 import { UpdateQuizzDto } from './dto/update-quizz.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { QuizCategory } from '../../generated/prisma/client';
 
 @Injectable()
 export class QuizzsService {
@@ -15,6 +16,7 @@ export class QuizzsService {
     return this.prismaService.quiz.create({
       data: {
         title: createQuizzDto.title,
+        category: createQuizzDto.category,
         createdBy: userId,
       },
     });
@@ -45,19 +47,53 @@ export class QuizzsService {
     });
   }
 
-  search(q: string, userId: string) {
+  findByCategory(userId: string, category: string) {
     return this.prismaService.quiz.findMany({
-      where: {
-        title: {
-          contains: q,
-          mode: "insensitive",
-        },
-        createdBy: userId,
-        deletedAt: null,
-      },
+      where: { createdBy: userId, deletedAt: null, category: category.toUpperCase() as QuizCategory },
       include: {
         questions: {
           include: { answers: true },
+        },
+      },
+    });
+  }
+
+
+
+  search(q: string, userId: string) {
+    const isCategory = Object.values(QuizCategory).includes(q.toUpperCase() as QuizCategory);
+
+    return this.prismaService.quiz.findMany({
+      where: {
+        createdBy: userId,
+        deletedAt: null,
+
+        OR: [
+          {
+            title: {
+              contains: q,
+              mode: "insensitive",
+            },
+          },
+          {
+            questions: {
+              some: {
+                content: {
+                  contains: q,
+                  mode: "insensitive",
+                },
+              },
+            },
+          },
+          ...(isCategory ? [{ category: q.toUpperCase() as QuizCategory }] : []),
+        ],
+      },
+
+      include: {
+        questions: {
+          include: {
+            answers: true,
+          },
         },
       },
     });

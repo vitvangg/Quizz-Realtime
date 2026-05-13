@@ -13,6 +13,7 @@ import * as crypto from 'crypto';
 import { REFRESH_TOKEN_TTL } from 'src/config/config';
 import { SessionService } from 'src/session/session.service';
 import ms from 'ms';
+import { ChangePasswordDto } from './dtos/change-password.dto';
 
 @Injectable()
 export class AuthService {
@@ -133,5 +134,25 @@ export class AuthService {
       accessToken,
       refreshToken: newRefreshToken,
     };
+  }
+
+  async changePassword(userId: string, data: ChangePasswordDto) {
+    const user = await this.userService.findById(userId);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const isPasswordValid = await bcrypt.compare(
+      data.oldPassword,
+      user.passwordHash,
+    );
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Mật khẩu cũ không chính xác');
+    }
+
+    const hashedPassword = await bcrypt.hash(data.newPassword, 10);
+    await this.userService.update(userId, { passwordHash: hashedPassword });
+
+    return { message: 'Đổi mật khẩu thành công' };
   }
 }

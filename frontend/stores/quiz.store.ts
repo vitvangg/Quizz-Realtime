@@ -2,16 +2,22 @@ import { create } from "zustand";
 import { toast } from "sonner";
 import { quizService } from "@/services/quiz.service";
 import axios from "axios";
+import { QuizCategory } from "@/types/quiz.type";
 
 interface QuizState {
   quizzes: any[];
   currentQuiz: any | null;
   loading: boolean;
+  
+  // Lưu trữ bộ lọc toàn cục
+  searchKeyword: string;
+  selectedCategory: string;
 
+  setFilters: (keyword: string, category: string) => void;
   getAll: () => Promise<void>;
   getMyQuizzes: () => Promise<void>;
   getById: (id: string) => Promise<void>;
-  create: (data: { title: string; description?: string }) => Promise<any>;
+  create: (data: { title: string; description?: string; category: QuizCategory }) => Promise<any>;
   update: (id: string, data: any) => Promise<void>;
   delete: (id: string) => Promise<void>;
   search: (q: string) => Promise<void>;
@@ -24,10 +30,17 @@ const getErrorMessage = (error: unknown, fallback: string) => {
   return fallback;
 };
 
-export const useQuizStore = create<QuizState>((set) => ({
+export const useQuizStore = create<QuizState>((set, get) => ({
   quizzes: [],
   currentQuiz: null,
   loading: false,
+  
+  searchKeyword: "",
+  selectedCategory: "ALL",
+
+  setFilters: (keyword, category) => {
+    set({ searchKeyword: keyword, selectedCategory: category });
+  },
 
   getAll: async () => {
     try {
@@ -112,9 +125,14 @@ export const useQuizStore = create<QuizState>((set) => ({
       set({ loading: false });
     }
   },
+
   search: async (q) => {
+    // Chỉ hiện loading nếu danh sách hiện tại đang trống để tránh reload trang khi chuyển hướng
+    const currentQuizzes = get().quizzes;
+    const shouldShowLoading = currentQuizzes.length === 0;
+
     try {
-      set({ loading: true });
+      if (shouldShowLoading) set({ loading: true });
       const data = await quizService.search(q);
       set({ quizzes: data });
     } catch (error) {

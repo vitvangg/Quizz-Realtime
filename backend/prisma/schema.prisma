@@ -34,6 +34,10 @@ model User {
   passwordHash String   @map("password_hash")
   roleId       String?  @map("role_id")
   status       String   @default("ACTIVE") // ACTIVE, BANNED
+  fullName     String?   @map("full_name")
+  avatar       String?
+  phoneNumber  String?  @map("phone_number")
+  bio          String?
   createdAt    DateTime @default(now()) @map("created_at")
 
   role         Role?         @relation(fields: [roleId], references: [id])
@@ -88,6 +92,7 @@ model RolePermission {
 model Quiz {
   id        String    @id @default(uuid())
   title     String
+  category  QuizCategory @default(KHAC)
   createdBy String    @map("created_by")
   createdAt DateTime  @default(now()) @map("created_at")
   deletedAt DateTime? @map("deleted_at") // 🔥 soft delete
@@ -99,6 +104,18 @@ model Quiz {
   @@index([createdBy])
   @@index([deletedAt]) // 🔥 query nhanh hơn
   @@map("quizzes")
+}
+enum QuizCategory {
+  TOAN
+  VAT_LI
+  HOA_HOC
+  SINH_HOC
+  VAN_HOC
+  LICH_SU
+  DIA_LY
+  TIENG_ANH
+  CONG_NGHE
+  KHAC
 }
 
 model Question {

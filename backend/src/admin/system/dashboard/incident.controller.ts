@@ -2,7 +2,7 @@ import { Controller, Post, Get, Body, Req } from '@nestjs/common';
 import { DashboardService } from './dashboard.service';
 
 @Controller('admin/system/incident')
-// @UseGuards(AuthGuard, RolesGuard) -- Re-enable in production
+// @UseGuards(AuthGuard, RolesGuard) -- Re-enable when auth is ready
 export class IncidentController {
   constructor(private readonly systemService: DashboardService) {}
 
@@ -30,14 +30,19 @@ export class IncidentController {
   }
 
   @Post('ban-ip')
-  async banIp(@Req() req: any, @Body() body: { ip: string; reason: string }) {
+  async banIp(@Req() req: any, @Body() body: { ip: string; reason: string; ttlHours?: number }) {
     const adminId = req.user?.id || 'SYSTEM_UNKNOWN';
-    return this.systemService.manualBanIp(body.ip, body.reason || 'Manual ban', adminId);
+    return this.systemService.manualBanIp(body.ip, body.reason || 'Manual ban', adminId, body.ttlHours);
   }
 
   @Post('unban-ip')
   async unbanIp(@Req() req: any, @Body() body: { ip: string }) {
     const adminId = req.user?.id || 'SYSTEM_UNKNOWN';
     return this.systemService.unbanIp(body.ip, adminId);
+  }
+
+  @Get('sessions')
+  async getActiveSessions() {
+    return this.systemService.getActiveSessions();
   }
 }

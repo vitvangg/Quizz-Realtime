@@ -2,11 +2,8 @@ import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@n
 import { UserService } from './user.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { PrismaService } from 'src/prisma/prisma.service';
-import { Roles } from 'src/common/decorators/roles.decorator';
-import { Role } from 'src/common/enums/role.enum';
 import { AuthGuard } from 'src/auth/guards/auth.guard';
-import { RolesGuard } from 'src/common/guards/roles.guard';
+import { CurrentUser } from './decorators/user.decorator';
 
 @Controller('user')
 export class UserController {
@@ -21,6 +18,12 @@ export class UserController {
   @UseGuards(AuthGuard)
   getAllUser() {
     return this.userService.getAll();
+  }
+
+  @Patch('profile')
+  @UseGuards(AuthGuard)
+  updateProfile(@CurrentUser() user: any, @Body() updateUserDto: UpdateUserDto) {
+    return this.userService.update(user.id, updateUserDto);
   }
 
   @Get('test')

@@ -1,11 +1,10 @@
 import { create } from 'zustand';
 import { toast } from 'sonner';
-import { io, Socket } from 'socket.io-client';
+import { Socket } from 'socket.io-client';
+import { getSocket } from '@/lib/socket';
 import { Room, Player, RoomJoinedPayload, PlayerJoinedPayload, PlayerLeftPayload } from '@/types/room.type';
 import { roomService } from '@/services/room.service';
 import axios from 'axios';
-
-const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000';
 
 interface RoomState {
   socket: Socket | null;
@@ -52,14 +51,9 @@ export const useRoomStore = create<RoomState>((set, get) => ({
 
   connectSocket: () => {
     const { socket } = get();
-    if (socket?.connected) return;
+    if (socket) return; // already initialized with shared socket
 
-    const newSocket = io(`${SOCKET_URL}/game`, {
-      autoConnect: true,
-      reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
-    });
+    const newSocket = getSocket();
 
     newSocket.on('connect', () => {
       console.log('[Socket] Connected:', newSocket.id);
@@ -132,12 +126,8 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   },
 
   disconnectSocket: () => {
-    const { socket } = get();
-    if (socket) {
-      socket.disconnect();
-      socket.removeAllListeners();
-      set({ socket: null, isConnected: false });
-    }
+    // Socket is shared — never disconnect it here.
+    set({ socket: null, isConnected: false });
   },
 
   createRoom: async (quizId: string) => {
@@ -192,6 +182,13 @@ export const useRoomStore = create<RoomState>((set, get) => ({
         const onRoomJoined = (data: RoomJoinedPayload) => {
           console.log('[RoomStore] room_joined event received:', data);
           cleanup();
+          // Save playerId so game page can recover after redirect (window.location.href)
+          if (data.player?.id) {
+            sessionStorage.setItem('playerId', data.player.id);
+            sessionStorage.setItem('playerNickname', data.player.nickname);
+            sessionStorage.setItem('currentRoomId', data.room.id);
+            sessionStorage.setItem('isHost', 'false');
+          }
           resolve();
         };
 
@@ -233,8 +230,14 @@ export const useRoomStore = create<RoomState>((set, get) => ({
             reject(new Error(response?.message || 'Join failed'));
           }
           // Resolve when room_joined event is received
-          const onRoomJoined = () => {
+          const onRoomJoined = (data: RoomJoinedPayload) => {
             currentSocket.off('room_joined', onRoomJoined);
+            if (data.player?.id) {
+              sessionStorage.setItem('playerId', data.player.id);
+              sessionStorage.setItem('playerNickname', data.player.nickname);
+              sessionStorage.setItem('currentRoomId', data.room.id);
+              sessionStorage.setItem('isHost', 'false');
+            }
             resolve();
           };
           currentSocket.on('room_joined', onRoomJoined);
@@ -244,19 +247,19 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   },
 
   joinRoomById: async (roomId: string, nickname: string, jwt?: string) => {
-    const { socket, connectSocket } = get();
-    
-    if (!socket?.connected) {
+    // Always call connectSocket — it no-ops if socket already exists.
+    const { connectSocket } = get();
+
+    if (!get().socket) {
       connectSocket();
-      // Wait for connection
+      // Wait for socket to connect
       await new Promise<void>((resolve) => {
         const checkConnection = setInterval(() => {
-          if (useRoomStore.getState().isConnected) {
+          if (get().isConnected) {
             clearInterval(checkConnection);
             resolve();
           }
         }, 50);
-        // Timeout after 5 seconds
         setTimeout(() => {
           clearInterval(checkConnection);
           resolve();
@@ -265,7 +268,8 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     }
 
     return new Promise<void>((resolve, reject) => {
-      const currentSocket = useRoomStore.getState().socket;
+      // Read socket AFTER it is guaranteed to exist and be connected.
+      const currentSocket = get().socket;
       if (!currentSocket) {
         reject(new Error('Socket not initialized'));
         return;
@@ -273,6 +277,12 @@ export const useRoomStore = create<RoomState>((set, get) => ({
 
       currentSocket.emit('join_by_id', { roomId, nickname, jwt }, (response: any) => {
         if (response.success) {
+          if (response.playerId) {
+            sessionStorage.setItem('playerId', response.playerId);
+            sessionStorage.setItem('playerNickname', nickname);
+            sessionStorage.setItem('currentRoomId', roomId);
+            sessionStorage.setItem('isHost', 'false');
+          }
           resolve();
         } else {
           reject(new Error(response.message || 'Join failed'));
@@ -301,6 +311,16 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       set({ loading: true });
       const room = await roomService.getById(roomId);
       set({ currentRoom: room });
+      // Ensure sessionStorage is set (may have been missed if room_joined fired before storage was ready)
+      if (room) {
+        const storedRoomId = sessionStorage.getItem('currentRoomId');
+        if (!storedRoomId || storedRoomId !== roomId) {
+          // Only set if not already a host (hostSessionId takes precedence)
+          if (!sessionStorage.getItem('hostSessionId')) {
+            sessionStorage.setItem('currentRoomId', roomId);
+          }
+        }
+      }
     } catch (error) {
       const message = getErrorMessage(error, 'Không tìm thấy phòng');
       set({ error: message });
