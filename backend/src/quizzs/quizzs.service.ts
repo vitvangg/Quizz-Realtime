@@ -48,16 +48,35 @@ export class QuizzsService {
   search(q: string, userId: string) {
     return this.prismaService.quiz.findMany({
       where: {
-        title: {
-          contains: q,
-          mode: "insensitive",
-        },
         createdBy: userId,
         deletedAt: null,
+
+        OR: [
+          {
+            title: {
+              contains: q,
+              mode: "insensitive",
+            },
+          },
+
+          {
+            questions: {
+              some: {
+                content: {
+                  contains: q,
+                  mode: "insensitive",
+                },
+              },
+            },
+          },
+        ],
       },
+
       include: {
         questions: {
-          include: { answers: true },
+          include: {
+            answers: true,
+          },
         },
       },
     });

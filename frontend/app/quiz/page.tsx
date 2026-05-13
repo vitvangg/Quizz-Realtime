@@ -115,7 +115,6 @@ export default function MyQuizzesPage() {
         <Input
           placeholder="Tìm kiếm bộ câu hỏi theo tên..."
           className="pl-10 h-12 rounded-xl border-2 focus-visible:ring-primary shadow-sm"
-
           onChange={(e) => setKeyword(e.target.value)}
         />
       </div>
