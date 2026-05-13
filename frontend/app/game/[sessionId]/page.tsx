@@ -9,6 +9,57 @@ import { GameState } from '@/types/game.type';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
+// ============================================================================
+// FREEZE OVERLAY COMPONENT
+// ============================================================================
+function FreezeOverlay({ message }: { message: string }) {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => setElapsed((e) => e + 1), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const fmt = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+
+  return (
+    <div
+      className="fixed inset-0 z-[9999] flex flex-col items-center justify-center"
+      style={{ background: 'rgba(15, 2, 2, 0.97)' }}
+    >
+      {/* Pulsing Warning Icon */}
+      <div className="mb-6 relative">
+        <div className="absolute inset-0 rounded-full bg-red-600 animate-ping opacity-30" />
+        <div className="relative w-24 h-24 rounded-full bg-red-900 border-4 border-red-500 flex items-center justify-center">
+          <span className="text-5xl">🚨</span>
+        </div>
+      </div>
+
+      {/* Title */}
+      <h1 className="text-3xl font-black text-red-500 tracking-widest uppercase mb-2 animate-pulse">
+        HỆ THỐNG TẠM DỪNG
+      </h1>
+
+      {/* Message */}
+      <p className="text-center text-red-200 max-w-lg px-6 text-sm leading-relaxed mb-6">
+        {message || 'Phát hiện truy cập bất thường. Đang truy vết kẻ tấn công. Vui lòng giữ nguyên màn hình và đợi thông báo từ ban tổ chức.'}
+      </p>
+
+      {/* Timer */}
+      <div className="flex flex-col items-center gap-1 mb-8">
+        <span className="text-xs text-red-400 uppercase tracking-widest">Đã dừng</span>
+        <span className="text-4xl font-mono font-bold text-white">{fmt(elapsed)}</span>
+      </div>
+
+      {/* Status bar */}
+      <div className="flex items-center gap-2 px-4 py-2 rounded-full border border-red-800 bg-red-950">
+        <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+        <span className="text-xs text-red-300 font-mono">SECURITY RESPONSE ACTIVE</span>
+      </div>
+    </div>
+  );
+}
+
 export default function GamePage() {
   const params = useParams();
   const router = useRouter();
@@ -17,6 +68,8 @@ export default function GamePage() {
   const {
     gameStatus,
     isHost,
+    isFrozen,
+    freezeMessage,
     currentQuestion,
     questionIndex,
     totalQuestions,
@@ -222,6 +275,11 @@ export default function GamePage() {
         </Card>
       </div>
     );
+  }
+
+  // 🚨 Hard Freeze Overlay — hiển thị trên tất cả mọi state
+  if (isFrozen) {
+    return <FreezeOverlay message={freezeMessage} />;
   }
 
   if (gameStatus === GameState.WAITING || isJoining) {

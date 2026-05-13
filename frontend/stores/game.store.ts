@@ -25,6 +25,10 @@ interface GameStore {
   gameStatus: GameState;
   isHost: boolean;
 
+  // Freeze / Hard Lockdown
+  isFrozen: boolean;
+  freezeMessage: string;
+
   currentQuestion: Question | null;
   questionIndex: number;
   totalQuestions: number;
@@ -67,6 +71,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
   roomId: null,
   gameStatus: GameState.WAITING,
   isHost: false,
+
+  isFrozen: false,
+  freezeMessage: '',
 
   currentQuestion: null,
   questionIndex: 0,
@@ -180,6 +187,23 @@ export const useGameStore = create<GameStore>((set, get) => ({
     newSocket.on('error', (error: { message: string }) => {
       console.error('[GameSocket] Error:', error);
       toast.error(error.message);
+    });
+
+    // 🚨 SYSTEM FREEZE: OPS Admin bật Hard Freeze
+    newSocket.on('system:freeze', (data: { freeze: boolean; message: string }) => {
+      console.warn('[GameSocket] System freeze:', data);
+      set({ isFrozen: data.freeze, freezeMessage: data.message || '' });
+      if (data.freeze) {
+        toast.warning('⚠️ Hệ thống tạm dừng. Đang xử lý sự cố an ninh...');
+      } else {
+        toast.success('✅ Hệ thống hoạt động trở lại!');
+      }
+    });
+
+    // ⏱️ TIMER RESUME: Cập nhật lại đồng hồ sau khi Unfreeze
+    newSocket.on('timer_resume', (data: { remainingSeconds: number }) => {
+      console.log('[GameSocket] Timer resumed, remaining:', data.remainingSeconds);
+      set({ timeRemaining: data.remainingSeconds });
     });
 
     set({ socket: newSocket });
@@ -388,6 +412,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       roomId: null,
       gameStatus: GameState.WAITING,
       isHost: false,
+      isFrozen: false,
+      freezeMessage: '',
       currentQuestion: null,
       questionIndex: 0,
       totalQuestions: 0,

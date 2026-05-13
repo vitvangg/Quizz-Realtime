@@ -4,15 +4,19 @@ import {
   SubscribeMessage,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  OnGatewayInit,
   MessageBody,
   ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Logger, UseGuards, Inject, forwardRef } from '@nestjs/common';
+import { Logger, Inject, forwardRef } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { OnEvent } from '@nestjs/event-emitter';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { GameSessionService, GameState } from './game-session.service';
 import { RoomService } from '../room/room.service';
 import { RoomGateway } from '../room/room.gateway';
+import { RedisService } from '../redis/redis.service';
 
 interface PlayerIdentity {
   userId?: string;
@@ -30,7 +34,7 @@ interface PlayerIdentity {
   },
   namespace: '/game',
 })
-export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit {
   @WebSocketServer()
   server: Server;
 
@@ -39,16 +43,39 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private socketMap = new Map<string, PlayerIdentity>();
   private sessionSockets = new Map<string, Set<string>>();
 
+  // Lưu callback để có thể resume timer khi unfreeze
+  private sessionCallbacks = new Map<string, (data: any) => void>();
+
   constructor(
     private readonly gameSessionService: GameSessionService,
     private readonly roomService: RoomService,
     private readonly jwtService: JwtService,
     @Inject(forwardRef(() => RoomGateway))
     private readonly roomGateway: RoomGateway,
+    private readonly redisService: RedisService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
+  afterInit(server: Server) {
+    this.logger.log('[GameGateway] Initialized');
+  }
+
+  // ============================================================================
+  // CONNECTION HANDLING (với IP Ban check)
+  // ============================================================================
+
   async handleConnection(client: Socket) {
-    this.logger.log(`[GameGateway] Client connected: ${client.id}`);
+    const ip = client.handshake.address;
+
+    // 🛡️ Lớp 1: Block IP bị blacklist ngay tại handshake
+    const isBanned = await this.redisService.isIpBanned(ip);
+    if (isBanned) {
+      this.logger.warn(`🛑 Rejected BANNED IP: ${ip} (socket: ${client.id})`);
+      client.disconnect(true);
+      return;
+    }
+
+    this.logger.log(`[GameGateway] Client connected: ${client.id} (IP: ${ip})`);
   }
 
   async handleDisconnect(client: Socket) {
@@ -69,6 +96,69 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     this.socketMap.delete(client.id);
   }
+
+  // ============================================================================
+  // SYSTEM INCIDENT EVENTS (từ DashboardService via EventEmitter)
+  // ============================================================================
+
+  @OnEvent('system.incident.lockdown')
+  async handleLockdown(payload: { enable: boolean; message: string }) {
+    this.logger.warn(`[SYSTEM FREEZE] broadcast freeze=${payload.enable}`);
+
+    if (this.server) {
+      this.server.emit('system:freeze', {
+        freeze: payload.enable,
+        message: payload.message,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    if (payload.enable) {
+      // FREEZE: Dừng tất cả question timer
+      const paused = await this.gameSessionService.pauseAllTimers();
+      this.logger.warn(`[FREEZE] Paused ${paused.size} session timers`);
+    } else {
+      // UNFREEZE: Resume timer với thời gian còn lại
+      for (const [sessionId, callback] of this.sessionCallbacks.entries()) {
+        const remainingMs = await this.gameSessionService.getTimerRemainingMs(sessionId);
+        if (remainingMs !== null && remainingMs > 0) {
+          const remainingSec = Math.ceil(remainingMs / 1000);
+          this.logger.log(`[UNFREEZE] Resuming session ${sessionId} with ${remainingSec}s remaining`);
+
+          // Thông báo frontend thời gian còn lại
+          this.server.to(sessionId).emit('timer_resume', {
+            remainingSeconds: remainingSec,
+          });
+
+          // Lên lịch lại timer với thời gian còn lại
+          await this.gameSessionService.scheduleQuestionEnd(
+            sessionId,
+            remainingSec,
+            callback,
+          );
+        }
+      }
+    }
+  }
+
+  @OnEvent('system.incident.kill_switch')
+  handleKillSwitch(payload?: { pin?: string }) {
+    if (payload?.pin) {
+      this.logger.error(`🚨 TARGETED KILL SWITCH: Room [${payload.pin}]`);
+      if (this.server) {
+        this.server.in(payload.pin).disconnectSockets(true);
+      }
+    } else {
+      this.logger.error('🚨 GLOBAL KILL SWITCH: Disconnecting ALL game sockets!');
+      if (this.server) {
+        this.server.disconnectSockets(true);
+      }
+    }
+  }
+
+  // ============================================================================
+  // GAME EVENTS
+  // ============================================================================
 
   @SubscribeMessage('host_join_game')
   async handleHostJoinGame(
@@ -187,10 +277,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         serverTime: Date.now(),
       });
 
+      const questionEndCallback = (data: any) => this.handleQuestionEnd(result.session.id, data);
+      this.sessionCallbacks.set(result.session.id, questionEndCallback);
       this.gameSessionService.scheduleQuestionEnd(
         result.session.id,
         result.firstQuestion.timeLimit,
-        (data) => this.handleQuestionEnd(result.session.id, data),
+        questionEndCallback,
       );
 
       return { success: true, sessionId: result.session.id };
@@ -230,10 +322,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         serverTime: Date.now(),
       });
 
+      const nextCallback = (data: any) => this.handleQuestionEnd(payload.sessionId, data);
+      this.sessionCallbacks.set(payload.sessionId, nextCallback);
       this.gameSessionService.scheduleQuestionEnd(
         payload.sessionId,
         result.question.timeLimit,
-        (data) => this.handleQuestionEnd(payload.sessionId, data),
+        nextCallback,
       );
 
       return { success: true };
@@ -306,6 +400,27 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() payload: { sessionId: string; playerId: string; nickname: string },
   ) {
     try {
+      // 🛡️ Lớp 2: Rate limit theo IP tại điểm join_game
+      const ip = client.handshake.address;
+      const rateCheck = await this.redisService.checkRateLimit(`join:${ip}`, 10, 5000);
+      if (!rateCheck.allowed) {
+        this.logger.warn(`⚠️ RATE LIMIT exceeded on join_game from IP: ${ip} (${rateCheck.count} req/5s)`);
+
+        // Auto-ban nếu vượt ngưỡng nghiêm trọng (50+ lần)
+        if (rateCheck.count >= 50) {
+          await this.redisService.banIp(ip, 'Auto-banned: DDoS join_game attack');
+          // Emit event để DashboardService log + email
+          this.eventEmitter.emit('system.incident.auto_ban', {
+            ip,
+            reason: 'Auto-banned: DDoS join_game attack',
+            requestCount: rateCheck.count,
+          });
+          client.disconnect(true);
+        }
+
+        return { success: false, error: 'Too many requests. Please wait.' };
+      }
+
       const session = await this.gameSessionService.getSessionState(payload.sessionId);
 
       const identity: PlayerIdentity = {
@@ -345,6 +460,25 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     },
   ) {
     try {
+      // 🛡️ Lớp 3: Rate limit tại submit_answer — chặn spam đáp án
+      const ip = client.handshake.address;
+      const rateCheck = await this.redisService.checkRateLimit(`answer:${ip}`, 5, 1000);
+      if (!rateCheck.allowed) {
+        this.logger.warn(`⚠️ RATE LIMIT submit_answer from IP: ${ip} (${rateCheck.count} req/s)`);
+
+        if (rateCheck.count >= 30) {
+          await this.redisService.banIp(ip, 'Auto-banned: Answer spam attack');
+          this.eventEmitter.emit('system.incident.auto_ban', {
+            ip,
+            reason: 'Auto-banned: Answer spam attack',
+            requestCount: rateCheck.count,
+          });
+          client.disconnect(true);
+        }
+
+        return { success: false, message: 'Too many answer submissions.' };
+      }
+
       const result = await this.gameSessionService.submitAnswer(
         payload.sessionId,
         payload.playerId,

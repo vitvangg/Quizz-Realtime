@@ -3,10 +3,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import api from '@/lib/axios';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { AlertTriangle, Activity, Cpu, HardDrive, Terminal } from 'lucide-react';
 
 interface SystemMetrics {
   cpu: number;
@@ -24,179 +20,252 @@ interface SystemEvent {
   user?: string;
 }
 
+interface BannedIp {
+  ip: string;
+  reason: string;
+  timestamp: number;
+}
+
 export default function SystemDashboard() {
   const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
   const [events, setEvents] = useState<SystemEvent[]>([]);
   const [isConnected, setIsConnected] = useState(false);
+  const [killPin, setKillPin] = useState('');
+  const [isLockdown, setIsLockdown] = useState(false);
+  const [bannedIps, setBannedIps] = useState<BannedIp[]>([]);
+  const [manualBanIp, setManualBanIp] = useState('');
+  const [manualBanReason, setManualBanReason] = useState('');
   const socketRef = useRef<Socket | null>(null);
   const terminalRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Kết nối tới namespace /admin-ops
-    // Lưu ý: Ở môi trường thực tế cần truyền jwt token để qua được Guard
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:3001';
-    socketRef.current = io(`${wsUrl}/admin-ops`, {
-      transports: ['websocket'],
-    });
-
-    socketRef.current.on('connect', () => {
-      setIsConnected(true);
-      setEvents(prev => [...prev, {
-        type: 'INFO',
-        message: 'Connected to System OPS Gateway',
-        timestamp: new Date()
-      }]);
-    });
-
-    socketRef.current.on('disconnect', () => {
-      setIsConnected(false);
-      setEvents(prev => [...prev, {
-        type: 'WARNING',
-        message: 'Disconnected from System OPS Gateway',
-        timestamp: new Date()
-      }]);
-    });
-
-    socketRef.current.on('system:metrics', (data: SystemMetrics) => {
-      setMetrics(data);
-    });
-
-    socketRef.current.on('system:event', (event: SystemEvent) => {
-      setEvents(prev => [...prev, event]);
-    });
-
-    return () => {
-      socketRef.current?.disconnect();
-    };
+    fetchBannedIps();
+    const interval = setInterval(fetchBannedIps, 10000);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
-    if (terminalRef.current) {
-      terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
-    }
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:5000';
+    socketRef.current = io(`${wsUrl}/admin-ops`, { transports: ['websocket'] });
+    socketRef.current.on('connect', () => {
+      setIsConnected(true);
+      addEvent({ type: 'INFO', message: 'Connected to OPS Gateway', timestamp: new Date() });
+    });
+    socketRef.current.on('disconnect', () => {
+      setIsConnected(false);
+      addEvent({ type: 'WARN', message: 'Disconnected from OPS Gateway', timestamp: new Date() });
+    });
+    socketRef.current.on('system:metrics', (data: SystemMetrics) => setMetrics(data));
+    socketRef.current.on('system:event', (event: SystemEvent) => addEvent(event));
+    return () => { socketRef.current?.disconnect(); };
+  }, []);
+
+  useEffect(() => {
+    if (terminalRef.current) terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
   }, [events]);
 
-  const handleKillSwitch = async () => {
-    if (!confirm('NGUY HIỂM: Bạn có chắc chắn muốn ngắt kết nối TOÀN BỘ người chơi?')) return;
+  const addEvent = (event: SystemEvent) => setEvents((prev) => [...prev.slice(-49), event]);
 
+  const fetchBannedIps = async () => {
     try {
-      // Gọi API Kill Switch thông qua axios instance đã setup JWT
-      await api.post('/admin/system/incident/kill-switch');
-      alert('Đã kích hoạt Kill Switch!');
-    } catch (error: any) {
-      console.error(error);
-      const serverMessage = error.response?.data?.message || 'Có thể do lỗi JWT/CORS hoặc bạn không có quyền SUPER_ADMIN.';
-      alert(`Không thể kích hoạt Kill Switch: ${serverMessage}`);
+      const res = await api.get('/admin/system/incident/blacklist');
+      setBannedIps(res.data.bannedIps || []);
+    } catch { /* ignore */ }
+  };
+
+  const handleKillSwitch = async () => {
+    const isTargeted = killPin.trim().length > 0;
+    if (!confirm(isTargeted ? `Ngắt room [${killPin}]?` : 'GLOBAL KILL — ngắt toàn bộ server?')) return;
+    if (!isTargeted && !confirm('Xác nhận lần 2?')) return;
+    try {
+      await api.post('/admin/system/incident/kill-switch', { pin: isTargeted ? killPin : undefined });
+      setKillPin('');
+    } catch (e: any) {
+      alert('Lỗi: ' + e.response?.data?.message);
     }
   };
 
-  const formatBytes = (bytes: number) => {
-    if (!bytes) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  const handleToggleLockdown = async () => {
+    const next = !isLockdown;
+    if (next && !confirm('Bật Hard Freeze? Màn hình người chơi sẽ bị khóa cứng.')) return;
+    try {
+      await api.post('/admin/system/incident/lockdown', { enable: next });
+      setIsLockdown(next);
+    } catch (e: any) {
+      alert('Lỗi: ' + e.response?.data?.message);
+    }
+  };
+
+  const handleUnban = async (ip: string) => {
+    await api.post('/admin/system/incident/unban-ip', { ip });
+    fetchBannedIps();
+  };
+
+  const handleManualBan = async () => {
+    if (!manualBanIp.trim()) return;
+    await api.post('/admin/system/incident/ban-ip', { ip: manualBanIp, reason: manualBanReason || 'Manual' });
+    fetchBannedIps();
+    setManualBanIp('');
+    setManualBanReason('');
+  };
+
+  const fmtBytes = (b: number) => {
+    if (!b) return '0';
+    const i = Math.floor(Math.log(b) / Math.log(1024));
+    return (b / Math.pow(1024, i)).toFixed(1) + ['B','KB','MB','GB'][i];
+  };
+
+  const eventColor = (type: string) => {
+    if (type === 'CRITICAL') return 'text-red-500';
+    if (type === 'WARNING' || type === 'WARN') return 'text-yellow-400';
+    return 'text-gray-400';
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="p-6 space-y-6 max-w-6xl mx-auto">
+
+      {/* Header */}
+      <div className="flex items-center justify-between border-b pb-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">System Operations (OPS)</h1>
-          <p className="text-muted-foreground">
-            Monitor real-time system metrics and manage incidents.
-          </p>
+          <h1 className="text-xl font-semibold">System Operations</h1>
+          <p className="text-sm text-gray-500">OPS Dashboard — metrics mỗi 3 giây</p>
         </div>
-        <Badge variant={isConnected ? 'default' : 'destructive'} className="text-sm">
-          {isConnected ? 'LIVE' : 'OFFLINE'}
-        </Badge>
+        <div className="flex items-center gap-2 text-sm">
+          <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+          <span className="text-gray-600">{isConnected ? 'LIVE' : 'OFFLINE'}</span>
+        </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Node.js CPU Usage</CardTitle>
-            <Cpu className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {metrics ? metrics.cpu.toFixed(2) : '--'}%
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Process Memory</CardTitle>
-            <Activity className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {metrics ? formatBytes(metrics.memory) : '--'}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">System RAM (Free/Total)</CardTitle>
-            <HardDrive className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-xl font-bold">
-              {metrics ? `${formatBytes(metrics.freeMem)} / ${formatBytes(metrics.totalMem)}` : '--'}
-            </div>
-          </CardContent>
-        </Card>
+      {/* Metrics Row */}
+      <div className="grid grid-cols-3 gap-4">
+        {[
+          { label: 'CPU (Node.js process)', value: metrics ? `${metrics.cpu.toFixed(2)}%` : '—' },
+          { label: 'RAM (process)', value: metrics ? fmtBytes(metrics.memory) : '—' },
+          { label: 'System RAM (free / total)', value: metrics ? `${fmtBytes(metrics.freeMem)} / ${fmtBytes(metrics.totalMem)}` : '—' },
+        ].map((m) => (
+          <div key={m.label} className="border rounded-lg p-4">
+            <p className="text-xs text-gray-500 mb-1">{m.label}</p>
+            <p className="text-2xl font-mono font-semibold">{m.value}</p>
+          </div>
+        ))}
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2">
-        <Card className="col-span-1 bg-black text-green-400 border-border">
-          <CardHeader className="border-b border-gray-800">
-            <CardTitle className="flex items-center space-x-2 text-gray-300">
-              <Terminal className="h-5 w-5" />
-              <span>Event Stream</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div
-              ref={terminalRef}
-              className="h-[300px] overflow-y-auto p-4 font-mono text-sm"
+      <div className="grid grid-cols-2 gap-6">
+
+        {/* Event Log */}
+        <div className="border rounded-lg overflow-hidden">
+          <div className="px-4 py-2 border-b bg-gray-50 flex items-center justify-between">
+            <span className="text-sm font-medium">Event Log</span>
+            <span className="text-xs text-gray-400">{events.length} entries</span>
+          </div>
+          <div ref={terminalRef} className="h-64 overflow-y-auto bg-gray-950 p-3 font-mono text-xs space-y-1">
+            {events.length === 0 && <span className="text-gray-600">Chờ events...</span>}
+            {events.map((ev, i) => (
+              <div key={i}>
+                <span className="text-gray-600">{new Date(ev.timestamp).toLocaleTimeString()}</span>
+                {' '}
+                <span className={eventColor(ev.type)}>[{ev.type}]</span>
+                {' '}
+                <span className="text-gray-300">{ev.message}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Incident Controls */}
+        <div className="border rounded-lg p-4 space-y-4">
+          <h2 className="text-sm font-medium">Incident Controls</h2>
+
+          {/* Kill Switch */}
+          <div className="space-y-2">
+            <label className="text-xs text-gray-500">Kill Switch — nhập PIN để kill room cụ thể, để trống = Global</label>
+            <div className="flex gap-2">
+              <input
+                value={killPin}
+                onChange={(e) => setKillPin(e.target.value)}
+                placeholder="Room PIN (optional)"
+                className="flex-1 h-8 border rounded px-2 text-sm"
+              />
+              <button
+                onClick={handleKillSwitch}
+                className="h-8 px-3 text-xs font-semibold bg-red-600 text-white rounded hover:bg-red-700"
+              >
+                {killPin.trim() ? 'Kill Room' : 'Global Kill'}
+              </button>
+            </div>
+          </div>
+
+          {/* Hard Freeze */}
+          <div className="space-y-2">
+            <label className="text-xs text-gray-500">Hard Freeze — khóa màn hình toàn bộ người chơi</label>
+            <button
+              onClick={handleToggleLockdown}
+              className={`w-full h-8 text-xs font-semibold rounded border transition-colors ${
+                isLockdown
+                  ? 'bg-yellow-100 border-yellow-400 text-yellow-800 hover:bg-yellow-200'
+                  : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+              }`}
             >
-              {events.map((ev, i) => (
-                <div key={i} className="mb-2">
-                  <span className="text-gray-500">[{new Date(ev.timestamp).toLocaleTimeString()}]</span>{' '}
-                  <span className={ev.type === 'CRITICAL' ? 'text-red-500 font-bold' : ev.type === 'WARNING' ? 'text-yellow-500' : 'text-blue-400'}>
-                    [{ev.type}]
-                  </span>{' '}
-                  {ev.message}
-                </div>
-              ))}
-              {events.length === 0 && <div className="text-gray-600">Waiting for events...</div>}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-red-900 bg-red-950/20">
-          <CardHeader>
-            <CardTitle className="text-red-500 flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5" />
-              Incident Controls
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="p-4 border border-red-900 rounded-lg bg-red-950/40">
-              <h3 className="font-bold text-red-500 mb-2">Kill Switch</h3>
-              <p className="text-sm text-red-300 mb-4">
-                Ngắt kết nối toàn bộ người chơi đang hoạt động trên hệ thống ngay lập tức. Hành động này không thể hoàn tác.
-              </p>
-              <Button variant="destructive" onClick={handleKillSwitch} className="w-full font-bold">
-                ACTIVATE KILL SWITCH
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+              {isLockdown ? '🔒 Đang FREEZE — nhấn để tắt' : 'Bật Hard Freeze'}
+            </button>
+          </div>
+        </div>
       </div>
+
+      {/* IP Blacklist */}
+      <div className="border rounded-lg p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-medium">IP Blacklist <span className="text-gray-400 font-normal">({bannedIps.length} banned)</span></h2>
+          <button onClick={fetchBannedIps} className="text-xs text-gray-500 hover:text-gray-800 border rounded px-2 py-1">Refresh</button>
+        </div>
+
+        {/* Manual ban */}
+        <div className="flex gap-2">
+          <input
+            value={manualBanIp}
+            onChange={(e) => setManualBanIp(e.target.value)}
+            placeholder="IP address"
+            className="h-8 border rounded px-2 text-sm w-44"
+          />
+          <input
+            value={manualBanReason}
+            onChange={(e) => setManualBanReason(e.target.value)}
+            placeholder="Lý do"
+            className="flex-1 h-8 border rounded px-2 text-sm"
+          />
+          <button
+            onClick={handleManualBan}
+            disabled={!manualBanIp.trim()}
+            className="h-8 px-3 text-xs font-semibold border border-red-300 text-red-600 rounded hover:bg-red-50 disabled:opacity-40"
+          >
+            Ban
+          </button>
+        </div>
+
+        {/* List */}
+        <div className="max-h-48 overflow-y-auto divide-y text-sm">
+          {bannedIps.length === 0 ? (
+            <p className="text-gray-400 text-xs py-3 text-center">Chưa có IP nào bị ban.</p>
+          ) : (
+            bannedIps.map((b) => (
+              <div key={b.ip} className="flex items-center justify-between py-2">
+                <div>
+                  <span className="font-mono text-sm">{b.ip}</span>
+                  <span className="text-xs text-gray-400 ml-3">{b.reason}</span>
+                  <span className="text-xs text-gray-300 ml-2">{new Date(b.timestamp).toLocaleTimeString('vi-VN')}</span>
+                </div>
+                <button
+                  onClick={() => handleUnban(b.ip)}
+                  className="text-xs text-blue-500 hover:underline"
+                >
+                  Unban
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
     </div>
   );
 }

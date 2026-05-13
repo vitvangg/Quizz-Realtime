@@ -33,6 +33,8 @@ interface QuestionTimer {
   sessionId: string;
   timeout: NodeJS.Timeout;
   questionIndex: number;
+  scheduledAt: number;     // thời điểm lên lịch
+  totalMs: number;         // tổng thời gian (ms)
 }
 
 @Injectable()
@@ -423,19 +425,64 @@ export class GameSessionService {
   ) {
     this.cancelTimer(sessionId);
 
+    const totalMs = timeLimit * 1000;
+    const scheduledAt = Date.now();
+
+    // Lưu callback ref qua closure — Redis chỉ lưu metadata
+    const timeout = setTimeout(async () => {
+      this.activeTimers.delete(sessionId);
+      await this.redis.del(`game:timer_pause:${sessionId}`);
+      await this.handleQuestionEnd(sessionId, onEnd);
+    }, totalMs);
+
     const timer: QuestionTimer = {
       sessionId,
-      timeout: setTimeout(async () => {
-        this.activeTimers.delete(sessionId);
-        await this.handleQuestionEnd(sessionId, onEnd);
-      }, timeLimit * 1000),
+      timeout,
       questionIndex: (await this.getGameCache(sessionId))?.currentQuestionIndex || 0,
+      scheduledAt,
+      totalMs,
     };
 
     this.activeTimers.set(sessionId, timer);
-    this.logger.log(
-      `Timer scheduled for session ${sessionId}: ${timeLimit}s`,
+
+    // Lưu metadata vào Redis để resumeAllTimers có thể lên lịch lại
+    await this.redis.set(
+      `game:timer_meta:${sessionId}`,
+      JSON.stringify({ totalMs, scheduledAt, onEndRef: 'pending' }),
+      'EX',
+      7200,
     );
+
+    this.logger.log(`Timer scheduled for session ${sessionId}: ${timeLimit}s`);
+  }
+
+  /**
+   * Pause tất cả timer đang chạy (khi Freeze bật).
+   * Lưu thời gian còn lại vào Redis key game:timer_pause:<sessionId>
+   */
+  async pauseAllTimers(): Promise<Map<string, number>> {
+    const pausedRemaining = new Map<string, number>();
+
+    for (const [sessionId, timer] of this.activeTimers.entries()) {
+      const elapsed = Date.now() - timer.scheduledAt;
+      const remaining = Math.max(0, timer.totalMs - elapsed);
+
+      clearTimeout(timer.timeout);
+      pausedRemaining.set(sessionId, remaining);
+
+      // Lưu vào Redis để resume được ngay cả khi server restart
+      await this.redis.set(
+        `game:timer_pause:${sessionId}`,
+        String(remaining),
+        'EX',
+        86400,
+      );
+
+      this.logger.warn(`[FREEZE] Timer paused for ${sessionId}, remaining: ${(remaining / 1000).toFixed(1)}s`);
+    }
+
+    this.activeTimers.clear();
+    return pausedRemaining;
   }
 
   cancelTimer(sessionId: string) {
@@ -445,6 +492,19 @@ export class GameSessionService {
       this.activeTimers.delete(sessionId);
       this.logger.log(`Timer cancelled for session ${sessionId}`);
     }
+  }
+
+  /**
+   * Trả về callback map để GameGateway có thể resume đúng callback
+   * (callback được lưu trong closure ở GameGateway)
+   */
+  getActiveSessionIds(): string[] {
+    return Array.from(this.activeTimers.keys());
+  }
+
+  async getTimerRemainingMs(sessionId: string): Promise<number | null> {
+    const val = await this.redis.get(`game:timer_pause:${sessionId}`);
+    return val ? parseInt(val) : null;
   }
 
   private async getGameCache(sessionId: string): Promise<GameCache | null> {
