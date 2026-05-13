@@ -1,4 +1,5 @@
 import api from "@/lib/axios";
+import { QuizCategory } from "@/types/quiz.type";
 
 export const quizService = {
 
@@ -6,6 +7,7 @@ export const quizService = {
     async create(data: {
         title: string;
         description?: string;
+        category: QuizCategory;
     }) {
         const response = await api.post("/quizzs", data);
         return response.data;
@@ -33,6 +35,7 @@ export const quizService = {
     async update(id: string, data: {
         title?: string;
         description?: string;
+        category?: QuizCategory;
     }) {
         const response = await api.patch(`/quizzs/${id}`, data);
         return response.data;
@@ -41,6 +44,12 @@ export const quizService = {
     // Xóa quiz
     async delete(id: string) {
         const response = await api.delete(`/quizzs/${id}`);
+        return response.data;
+    },
+
+    // Search quiz
+    async search(q: string) {
+        const response = await api.get(`/quizzs/search?q=${q}`);
         return response.data;
     }
 };

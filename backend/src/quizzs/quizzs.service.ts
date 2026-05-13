@@ -6,15 +6,17 @@ import {
 import { CreateQuizzDto } from './dto/create-quizz.dto';
 import { UpdateQuizzDto } from './dto/update-quizz.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { QuizCategory } from '../../generated/prisma/client';
 
 @Injectable()
 export class QuizzsService {
-  constructor(private readonly prismaService: PrismaService) {}
+  constructor(private readonly prismaService: PrismaService) { }
 
   create(createQuizzDto: CreateQuizzDto, userId: string) {
     return this.prismaService.quiz.create({
       data: {
         title: createQuizzDto.title,
+        category: createQuizzDto.category,
         createdBy: userId,
       },
     });
@@ -40,6 +42,58 @@ export class QuizzsService {
       include: {
         questions: {
           include: { answers: true },
+        },
+      },
+    });
+  }
+
+  findByCategory(userId: string, category: string) {
+    return this.prismaService.quiz.findMany({
+      where: { createdBy: userId, deletedAt: null, category: category.toUpperCase() as QuizCategory },
+      include: {
+        questions: {
+          include: { answers: true },
+        },
+      },
+    });
+  }
+
+
+
+  search(q: string, userId: string) {
+    const isCategory = Object.values(QuizCategory).includes(q.toUpperCase() as QuizCategory);
+
+    return this.prismaService.quiz.findMany({
+      where: {
+        createdBy: userId,
+        deletedAt: null,
+
+        OR: [
+          {
+            title: {
+              contains: q,
+              mode: "insensitive",
+            },
+          },
+          {
+            questions: {
+              some: {
+                content: {
+                  contains: q,
+                  mode: "insensitive",
+                },
+              },
+            },
+          },
+          ...(isCategory ? [{ category: q.toUpperCase() as QuizCategory }] : []),
+        ],
+      },
+
+      include: {
+        questions: {
+          include: {
+            answers: true,
+          },
         },
       },
     });

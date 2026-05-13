@@ -7,6 +7,7 @@ import {
   Param,
   Delete,
   UseGuards,
+  Query,
 } from '@nestjs/common';
 import { QuizzsService } from './quizzs.service';
 import { CreateQuizzDto } from './dto/create-quizz.dto';
@@ -17,10 +18,14 @@ import { CurrentUser } from 'src/user/decorators/user.decorator';
 @Controller('quizzs')
 @UseGuards(AuthGuard)
 export class QuizzsController {
-  constructor(private readonly quizzsService: QuizzsService) {}
+  constructor(private readonly quizzsService: QuizzsService) { }
   @Post()
   create(@Body() createQuizzDto: CreateQuizzDto, @CurrentUser() user) {
     return this.quizzsService.create(createQuizzDto, user.id);
+  }
+  @Get('search')
+  search(@Query('q') q: string, @CurrentUser() user) {
+    return this.quizzsService.search(q, user.id);
   }
 
   @Get('')
@@ -36,7 +41,7 @@ export class QuizzsController {
   findOne(@Param('id') id: string) {
     return this.quizzsService.findOne(id);
   }
- 
+
   @Patch(':id')
   update(
     @Param('id') id: string,
