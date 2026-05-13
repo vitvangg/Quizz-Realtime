@@ -1,0 +1,1 @@
+# Stress Test Ideas\n\n- Dùng **K6** hoặc **Artillery** script để giả lập 10,000 WebSocket connections kết nối vào server.\n- Bắn event `submit_answer` đồng loạt từ 10k connections trong vòng 5 giây.\n- Đo lường memory của Node.js process (nếu vượt quá 1.5GB có nguy cơ OOM crash).\n- Kiểm tra xem PostgreSQL có bị quá tải CPU (hiện tượng CPU 100%) hay không.\n

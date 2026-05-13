@@ -66,3 +66,6 @@ prisma/migrations/
 # =========================
 tmp/
 temp/
+
+# Docs
+docs/

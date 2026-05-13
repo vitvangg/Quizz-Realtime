@@ -1,1 +1,1 @@
-# Archive Memory Skill\nBạn là chuyên gia lưu trữ context.\nQuy tắc:\n- Khi hoàn thành một task phức tạp, hãy tạo bản tóm tắt ngắn gọn vào file `.docs/ideas/archived-context.md`.\n- Luôn refer đến các context cũ trước khi thay đổi logic lớn.\n\n
+# Archive Memory Skill\n\nLưu trữ các context đã cũ hoặc các task lớn đã hoàn thành vào file `.docs/ideas/archived-context.md` để không làm phình to context của các file plans đang hoạt động.\n

@@ -3,9 +3,9 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtModule } from '@nestjs/jwt';
 import { UserModule } from 'src/user/user.module';
-import { SessionModule } from 'src/session/session.module';
 import { ACCESS_TOKEN_TTL } from 'src/config/config';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { SessionModule } from 'src/session/session.module';
 
 @Module({
   imports: [UserModule,

@@ -4,8 +4,8 @@
 // Get a free hosted Postgres database in seconds: `npx create-db`
 
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider     = "prisma-client"
+  output       = "../generated/prisma"
   moduleFormat = "commonjs"
 }
 
@@ -19,42 +19,97 @@ enum RoomStatus {
   FINISHED
 }
 
+enum GameStatus {
+  WAITING
+  STARTING
+  QUESTION_ACTIVE
+  QUESTION_RESULT
+  LEADERBOARD
+  FINISHED
+}
+
 model User {
   id           String   @id @default(uuid())
   email        String   @unique
   passwordHash String   @map("password_hash")
+  roleId       String?  @map("role_id")
+  status       String   @default("ACTIVE") // ACTIVE, BANNED
   createdAt    DateTime @default(now()) @map("created_at")
 
-  quizzes      Quiz[]   @relation("UserQuizzes")
-  rooms        Room[]   @relation("UserRooms")
-  sessions      Session[]
+  role         Role?         @relation(fields: [roleId], references: [id])
+  quizzes      Quiz[]        @relation("UserQuizzes")
+  rooms        Room[]        @relation("UserRooms")
+  authSessions AuthSession[]
 
+  @@index([roleId])
   @@map("users")
 }
 
+//
+// 🛡️ ROLE & PERMISSION (RBAC)
+//
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  users       User[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String  @id @default(uuid())
+  action      String // e.g., "CREATE", "READ", "UPDATE", "DELETE"
+  subject     String // e.g., "User", "Quiz", "Role"
+  description String?
+
+  roles RolePermission[]
+
+  @@unique([action, subject])
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String @map("role_id")
+  permissionId String @map("permission_id")
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([roleId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
 model Quiz {
-  id        String     @id @default(uuid())
+  id        String    @id @default(uuid())
   title     String
-  createdBy String     @map("created_by")
-  createdAt DateTime   @default(now()) @map("created_at")
+  createdBy String    @map("created_by")
+  createdAt DateTime  @default(now()) @map("created_at")
+  deletedAt DateTime? @map("deleted_at") // 🔥 soft delete
 
   user      User       @relation("UserQuizzes", fields: [createdBy], references: [id])
   questions Question[]
   rooms     Room[]
 
   @@index([createdBy])
+  @@index([deletedAt]) // 🔥 query nhanh hơn
   @@map("quizzes")
 }
 
 model Question {
-  id         String   @id @default(uuid())
-  quizId     String   @map("quiz_id")
+  id         String @id @default(uuid())
+  quizId     String @map("quiz_id")
   content    String
-  timeLimit  Int      @map("time_limit")
-  orderIndex Int      @map("order_index")
+  timeLimit  Int    @map("time_limit")
+  orderIndex Int    @map("order_index")
 
-  quiz       Quiz     @relation(fields: [quizId], references: [id])
-  answers    Answer[]
+  quiz          Quiz           @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  answers       Answer[]
   playerAnswers PlayerAnswer[]
 
   @@index([quizId])
@@ -62,88 +117,195 @@ model Question {
 }
 
 model Answer {
-  id         String   @id @default(uuid())
-  questionId String   @map("question_id")
+  id         String  @id @default(uuid())
+  questionId String  @map("question_id")
   content    String
-  isCorrect  Boolean  @map("is_correct")
+  isCorrect  Boolean @map("is_correct")
 
-  question   Question @relation(fields: [questionId], references: [id])
+  question      Question       @relation(fields: [questionId], references: [id], onDelete: Cascade)
   playerAnswers PlayerAnswer[]
 
   @@index([questionId])
   @@map("answers")
 }
 
+//
+// 🟢 ROOM
+//
 model Room {
-  id                     String      @id @default(uuid())
-  pin                    String      @unique
-  quizId                 String      @map("quiz_id")
-  hostId                 String      @map("host_id")
-  status                 RoomStatus  @default(WAITING)
-  currentQuestionIndex   Int         @default(0) @map("current_question_index")
-  questionStartedAt      DateTime?   // 🔥 hỗ trợ realtime + chống cheat
-  createdAt              DateTime    @default(now()) @map("created_at")
+  id        String     @id @default(uuid())
+  pin       String     @unique
+  quizId    String     @map("quiz_id")
+  hostId    String     @map("host_id")
+  status    RoomStatus @default(WAITING)
+  createdAt DateTime   @default(now()) @map("created_at")
 
-  quiz       Quiz     @relation(fields: [quizId], references: [id])
-  host       User     @relation("UserRooms", fields: [hostId], references: [id])
-  players    Player[]
+  quiz     Quiz          @relation(fields: [quizId], references: [id])
+  host     User          @relation("UserRooms", fields: [hostId], references: [id])
+  players  Player[]
+  sessions GameSession[]
 
   @@index([quizId])
   @@index([hostId])
-  @@index([pin])
   @@map("rooms")
 }
 
+//
+// 🟢 PLAYER
+//
 model Player {
-  id        String   @id @default(uuid())
-  roomId    String   @map("room_id")
-  nickname  String
-  score     Int      @default(0)
-  joinedAt  DateTime @default(now()) @map("joined_at")
-  isHost    Boolean  @default(false) @map("is_host")
-  room      Room     @relation(fields: [roomId], references: [id])
-  answers   PlayerAnswer[]
+  id       String   @id @default(uuid())
+  roomId   String   @map("room_id")
+  nickname String
+  joinedAt DateTime @default(now()) @map("joined_at")
 
+  room     Room            @relation(fields: [roomId], references: [id])
+  sessions PlayerSession[]
+
+  @@unique([roomId, nickname])
   @@index([roomId])
-  @@unique([roomId, nickname]) 
   @@map("players")
 }
 
-model PlayerAnswer {
-  id           String   @id @default(uuid())
-  playerId     String   @map("player_id")
-  questionId   String   @map("question_id")
-  answerId     String   @map("answer_id")
-  isCorrect    Boolean  @map("is_correct")
-  timeAnswered DateTime @default(now()) @map("time_answered")
-  scoreEarned  Int      @default(0) @map("score_earned")
+//
+// 🔥 GAME SESSION
+//
+model GameSession {
+  id        String     @id @default(uuid())
+  roomId    String     @map("room_id")
+  status    GameStatus @default(WAITING)
+  startedAt DateTime   @default(now()) @map("started_at")
+  endedAt   DateTime?  @map("ended_at")
 
-  player   Player   @relation(fields: [playerId], references: [id])
-  question Question @relation(fields: [questionId], references: [id])
-  answer   Answer   @relation(fields: [answerId], references: [id])
+  currentQuestionIndex Int       @default(0) @map("current_question_index")
+  questionStartedAt    DateTime? @map("question_started_at")
 
-  @@unique([playerId, questionId]) 
+  room    Room            @relation(fields: [roomId], references: [id])
+  players PlayerSession[]
 
+  @@index([roomId])
+  @@map("game_sessions")
+}
+
+//
+// 🔥 PLAYER SESSION
+//
+model PlayerSession {
+  id        String @id @default(uuid())
+  playerId  String @map("player_id")
+  sessionId String @map("session_id")
+  score     Int    @default(0)
+
+  player  Player         @relation(fields: [playerId], references: [id])
+  session GameSession    @relation(fields: [sessionId], references: [id])
+  answers PlayerAnswer[]
+
+  @@unique([playerId, sessionId])
+  @@index([sessionId])
   @@index([playerId])
+  @@map("player_sessions")
+}
+
+//
+// 🔥 PLAYER ANSWER (HISTORY → KHÔNG CASCADE)
+//
+model PlayerAnswer {
+  id              String @id @default(uuid())
+  playerSessionId String @map("player_session_id")
+  questionId      String @map("question_id")
+  answerId        String @map("answer_id")
+
+  // 🔥 snapshot chống sai lịch sử (optional nhưng nên có)
+  questionContent String? @map("question_content")
+  answerContent   String? @map("answer_content")
+
+  isCorrect    Boolean  @map("is_correct")
+  scoreEarned  Int      @default(0) @map("score_earned")
+  timeAnswered DateTime @default(now()) @map("time_answered")
+
+  playerSession PlayerSession @relation(fields: [playerSessionId], references: [id])
+  question      Question      @relation(fields: [questionId], references: [id])
+  answer        Answer        @relation(fields: [answerId], references: [id])
+
+  @@unique([playerSessionId, questionId])
+  @@index([playerSessionId])
   @@index([questionId])
-  @@index([answerId])
-
-  @@index([questionId, isCorrect])
-  @@index([playerId, scoreEarned])
-
+  @@index([playerSessionId, isCorrect]) // 🔥 optimize score
   @@map("player_answers")
 }
 
-model Session {
+//
+// 🔐 AUTH SESSION
+//
+model AuthSession {
   id           String   @id @default(uuid())
   userId       String   @map("user_id")
-  refreshToken String   @map("refresh_token") // 🔥 nên hash
+  refreshToken String   @map("refresh_token")
   expiresAt    DateTime @map("expires_at")
   createdAt    DateTime @default(now()) @map("created_at")
 
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id])
 
   @@index([userId])
   @@index([expiresAt])
-  @@map("sessions")
+  @@map("auth_sessions")
+}
+
+//
+// 📝 AUDIT LOG
+//
+model AuditLog {
+  id        String   @id @default(uuid())
+  action    String
+  entity    String
+  entityId  String?  @map("entity_id")
+  userId    String?  @map("user_id")
+  details   String?
+  ipAddress String?  @map("ip_address")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("audit_logs")
+}
+
+//
+// ⚠️ REPORT
+//
+model Report {
+  id         String   @id @default(uuid())
+  entityType String // e.g., "User", "Quiz"
+  entityId   String   @map("entity_id")
+  reason     String
+  status     String   @default("PENDING") // PENDING, RESOLVED, REJECTED
+  reporterId String   @map("reporter_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("reports")
+}
+
+//
+// 🔔 NOTIFICATION
+//
+model Notification {
+  id         String   @id @default(uuid())
+  title      String
+  message    String
+  targetType String // "GLOBAL", "USER"
+  targetId   String?  @map("target_id") // userId if targetType is USER
+  isRead     Boolean  @default(false) @map("is_read")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("notifications")
+}
+
+//
+// ⚙️ SETTING
+//
+model Setting {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       String // Lấy dạng JSON string nếu cần
+  description String?
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("settings")
 }
