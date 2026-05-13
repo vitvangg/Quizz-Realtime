@@ -14,6 +14,7 @@ interface QuizState {
   create: (data: { title: string; description?: string }) => Promise<any>;
   update: (id: string, data: any) => Promise<void>;
   delete: (id: string) => Promise<void>;
+  search: (q: string) => Promise<void>;
 }
 
 const getErrorMessage = (error: unknown, fallback: string) => {
@@ -107,6 +108,17 @@ export const useQuizStore = create<QuizState>((set) => ({
       toast.success("Xóa quiz thành công");
     } catch (error) {
       toast.error(getErrorMessage(error, "Xóa thất bại"));
+    } finally {
+      set({ loading: false });
+    }
+  },
+  search: async (q) => {
+    try {
+      set({ loading: true });
+      const data = await quizService.search(q);
+      set({ quizzes: data });
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Lỗi load quiz"));
     } finally {
       set({ loading: false });
     }

@@ -9,7 +9,7 @@ import { PrismaService } from 'src/prisma/prisma.service';
 
 @Injectable()
 export class QuizzsService {
-  constructor(private readonly prismaService: PrismaService) {}
+  constructor(private readonly prismaService: PrismaService) { }
 
   create(createQuizzDto: CreateQuizzDto, userId: string) {
     return this.prismaService.quiz.create({
@@ -37,6 +37,24 @@ export class QuizzsService {
   findByUserId(userId: string) {
     return this.prismaService.quiz.findMany({
       where: { createdBy: userId, deletedAt: null },
+      include: {
+        questions: {
+          include: { answers: true },
+        },
+      },
+    });
+  }
+
+  search(q: string, userId: string) {
+    return this.prismaService.quiz.findMany({
+      where: {
+        title: {
+          contains: q,
+          mode: "insensitive",
+        },
+        createdBy: userId,
+        deletedAt: null,
+      },
       include: {
         questions: {
           include: { answers: true },

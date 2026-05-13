@@ -42,5 +42,11 @@ export const quizService = {
     async delete(id: string) {
         const response = await api.delete(`/quizzs/${id}`);
         return response.data;
+    },
+
+    // Search quiz
+    async search(q: string) {
+        const response = await api.get(`/quizzs/search?q=${q}`);
+        return response.data;
     }
 };

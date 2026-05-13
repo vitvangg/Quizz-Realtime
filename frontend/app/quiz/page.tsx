@@ -7,10 +7,11 @@ import { useRoomStore } from "@/stores/room.store";
 import { useAuthStore } from "@/stores/auth.store";
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
-import { PlusCircle, BookOpen, LogOut, AlertTriangle, Trash2 } from "lucide-react";
+import { PlusCircle, BookOpen, LogOut, AlertTriangle, Trash2, Search } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { QuizCard } from "@/components/quiz/quiz-card";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -22,19 +23,28 @@ import {
 
 export default function MyQuizzesPage() {
   const router = useRouter();
-  const { quizzes, loading, getMyQuizzes, delete: deleteQuiz } = useQuizStore();
+  const { quizzes, loading, getMyQuizzes, delete: deleteQuiz, search } = useQuizStore();
   const { createRoom, loading: roomLoading, currentRoom, reset } = useRoomStore();
   const { user } = useAuthStore();
-  
+
   const [quizToDelete, setQuizToDelete] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  const [keyword, setKeyword] = useState("");
+
   useEffect(() => {
-    getMyQuizzes();
+    const timer = setTimeout(() => {
+      search(keyword);
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [keyword]);
+
+  useEffect(() => {
     return () => {
       reset();
     };
-  }, [getMyQuizzes, reset]);
+  }, [reset]);
 
   useEffect(() => {
     if (currentRoom) {
@@ -49,7 +59,7 @@ export default function MyQuizzesPage() {
 
   const handleConfirmDelete = async () => {
     if (!quizToDelete) return;
-    
+
     setIsDeleting(true);
     try {
       await deleteQuiz(quizToDelete);
@@ -98,6 +108,16 @@ export default function MyQuizzesPage() {
             </Button>
           </Link>
         </div>
+      </div>
+
+      <div className="relative mb-8">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+        <Input
+          placeholder="Tìm kiếm bộ câu hỏi theo tên..."
+          className="pl-10 h-12 rounded-xl border-2 focus-visible:ring-primary shadow-sm"
+
+          onChange={(e) => setKeyword(e.target.value)}
+        />
       </div>
 
       {loading ? (
