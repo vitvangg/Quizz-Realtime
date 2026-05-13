@@ -135,4 +135,19 @@ export const useAuthStore = create<authState>((set, get) => ({
             set({ isHydrated: true });
         }
     },
+
+    changePassword: async (data: any) => {
+        try {
+            set({ loading: true });
+            await authService.changePassword(data);
+            toast.success("Đổi mật khẩu thành công!");
+        } catch (error: unknown) {
+            console.error("Change password error:", error);
+            const serverMessage = getErrorMessage(error, "Lỗi không xác định.");
+            toast.error(`Đổi mật khẩu thất bại: ${serverMessage}`);
+            throw error;
+        } finally {
+            set({ loading: false });
+        }
+    },
 }));
