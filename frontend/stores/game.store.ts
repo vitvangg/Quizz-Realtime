@@ -15,9 +15,13 @@ interface GameStore {
   gameStatus: GameState;
   isHost: boolean;
 
-  // Freeze / Hard Lockdown
+  // Freeze / Hard Lockdown (Dev's feature)
   isFrozen: boolean;
   freezeMessage: string;
+
+  // Maintenance Mode (Your feature)
+  isMaintenance: boolean;
+  maintenanceMessage: string;
 
   currentQuestion: Question | null;
   questionIndex: number;
@@ -67,6 +71,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
   isFrozen: false,
   freezeMessage: '',
 
+  isMaintenance: false,
+  maintenanceMessage: '',
+
   currentQuestion: null,
   questionIndex: 0,
   totalQuestions: 0,
@@ -85,7 +92,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   countdown: 0,
   correctAnswerId: null,
-
   connectSocket: () => {
     const { socket } = get();
     if (socket) return; // already initialized
@@ -99,19 +105,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const newSocket = getSocket();
     set({ socket: newSocket });
   },
-
   disconnectSocket: () => {
-    // Socket is shared — never disconnect it here.
-    // This is called only on intentional full logout / app teardown.
+    // Socket dùng chung nên không ngắt kết nối thật, chỉ xóa reference trong store
     set({ socket: null, isConnected: false });
   },
 
   joinGame: (sessionId, roomId, playerId, nickname, isHost) => {
     const { socket, connectSocket } = get();
-
-    if (!socket?.connected) {
-      connectSocket();
-    }
+    if (!socket?.connected) connectSocket();
 
     const currentSocket = get().socket;
     if (!currentSocket) return;
@@ -120,7 +121,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
       'join_game',
       { sessionId, playerId, nickname },
       (response: any) => {
-        console.log('[GameSocket] join_game response:', response);
         if (response.success) {
           set({
             sessionId,
@@ -137,245 +137,136 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   startGame: async (roomId: string) => {
     const { socket, connectSocket } = get();
-
     if (!socket?.connected) {
       connectSocket();
-      await new Promise<void>((resolve) => {
-        const interval = setInterval(() => {
-          if (get().isConnected) {
-            clearInterval(interval);
-            resolve();
-          }
-        }, 50);
+      await new Promise<void>(r => {
+        const i = setInterval(() => { if (get().isConnected) { clearInterval(i); r(); } }, 50);
       });
     }
 
     const currentSocket = get().socket;
-    if (!currentSocket) {
-      toast.error('Socket not connected');
-      return null;
-    }
+    if (!currentSocket) return null;
 
     const authStore = useAuthStore.getState();
-    const jwt = authStore.accessToken;
-
-    console.log('[GameSocket] startGame: emitting host_start_game, socket.id=', currentSocket.id);
-
-    return new Promise<string | null>((resolve) => {
-      currentSocket.emit(
-        'host_start_game',
-        { roomId, jwt },
-        (response: any) => {
-          console.log('[GameSocket] host_start_game response:', response);
-          if (response.success) {
-            set({
-              sessionId: response.sessionId,
-              roomId,
-              isHost: true,
-            });
-            resolve(response.sessionId);
-          } else {
-            toast.error(response.error || 'Failed to start game');
-            resolve(null);
-          }
+    return new Promise((resolve) => {
+      currentSocket.emit('host_start_game', { roomId, jwt: authStore.accessToken }, (res: any) => {
+        if (res.success) {
+          set({ sessionId: res.sessionId, roomId, isHost: true });
+          resolve(res.sessionId);
+        } else {
+          toast.error(res.error || 'Failed to start game');
+          resolve(null);
         }
-      );
+      });
     });
   },
 
   nextQuestion: () => {
-    return new Promise<void>((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       const { socket, sessionId } = get();
-      if (!socket || !sessionId) {
-        reject(new Error('Not in game'));
-        return;
-      }
-
-      socket.emit(
-        'host_next_question',
-        { sessionId },
-        (response: any) => {
-          console.log('[GameSocket] host_next_question response:', response);
-          if (response.success) {
-            resolve();
-          } else {
-            toast.error(response.error || 'Failed to next question');
-            reject(new Error(response.error));
-          }
-        }
-      );
+      if (!socket || !sessionId) return reject(new Error('Not in game'));
+      socket.emit('host_next_question', { sessionId }, (res: any) => {
+        if (res.success) resolve();
+        else { toast.error(res.error); reject(new Error(res.error)); }
+      });
     });
   },
 
   endGame: () => {
-    return new Promise<void>((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       const { socket, sessionId } = get();
-      if (!socket || !sessionId) {
-        reject(new Error('Not in game'));
-        return;
-      }
-
-      socket.emit(
-        'host_end_game',
-        { sessionId },
-        (response: any) => {
-          console.log('[GameSocket] host_end_game response:', response);
-          if (response.success) {
-            resolve();
-          } else {
-            toast.error(response.error || 'Failed to end game');
-            reject(new Error(response.error));
-          }
-        }
-      );
+      if (!socket || !sessionId) return reject(new Error('Not in game'));
+      socket.emit('host_end_game', { sessionId }, (res: any) => {
+        if (res.success) resolve();
+        else { toast.error(res.error); reject(new Error(res.error)); }
+      });
     });
   },
 
   playAgain: async (sessionId: string, roomId: string) => {
     const { socket, connectSocket } = get();
-
-    if (!socket?.connected) {
-      connectSocket();
-      await new Promise<void>((resolve) => {
-        const interval = setInterval(() => {
-          if (get().isConnected) {
-            clearInterval(interval);
-            resolve();
-          }
-        }, 50);
-      });
-    }
+    if (!socket?.connected) connectSocket();
 
     const currentSocket = get().socket;
-    if (!currentSocket) {
-      toast.error('Socket not connected');
-      return null;
-    }
+    if (!currentSocket) return null;
 
-    return new Promise<string | null>((resolve, reject) => {
-      currentSocket.emit(
-        'host_play_again',
-        { sessionId, roomId },
-        (response: any) => {
-          console.log('[GameSocket] host_play_again response:', response);
-          if (response.success) {
-            set({
-              sessionId: response.sessionId,
-              roomId,
-              isHost: true,
-              // Reset game state for new session
-              gameStatus: GameState.WAITING,
-              currentQuestion: null,
-              hasAnswered: false,
-              selectedAnswerId: null,
-              leaderboard: [],
-              countdown: 0,
-              correctAnswerId: null,
-            });
-            resolve(response.sessionId);
-          } else {
-            toast.error(response.error || 'Failed to restart game');
-            reject(new Error(response.error));
-          }
+    return new Promise((resolve, reject) => {
+      currentSocket.emit('host_play_again', { sessionId, roomId }, (res: any) => {
+        if (res.success) {
+          set({
+            sessionId: res.sessionId,
+            roomId,
+            isHost: true,
+            gameStatus: GameState.WAITING,
+            currentQuestion: null,
+            hasAnswered: false,
+            selectedAnswerId: null,
+            leaderboard: [],
+            countdown: 0,
+            correctAnswerId: null,
+          });
+          resolve(res.sessionId);
+        } else {
+          toast.error(res.error);
+          reject(new Error(res.error));
         }
-      );
+      });
     });
   },
 
   getGameState: () => {
-    return new Promise<void>((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       const { socket, sessionId } = get();
-      if (!socket || !sessionId) {
-        reject(new Error('Not in game'));
-        return;
-      }
-
-      socket.emit(
-        'get_game_state',
-        { sessionId },
-        (response: any) => {
-          console.log('[GameSocket] get_game_state response:', response);
-          if (response.success) {
-            set({
-              gameStatus: response.state.status,
-              leaderboard: response.leaderboard,
-              sessionId: response.state.sessionId,
-              roomId: response.state.roomId,
-            });
-            resolve();
-          } else {
-            reject(new Error(response.error));
-          }
-        }
-      );
+      if (!socket || !sessionId) return reject(new Error('Not in game'));
+      socket.emit('get_game_state', { sessionId }, (res: any) => {
+        if (res.success) {
+          set({
+            gameStatus: res.state.status,
+            leaderboard: res.leaderboard,
+            sessionId: res.state.sessionId,
+            roomId: res.state.roomId,
+          });
+          resolve();
+        } else reject(new Error(res.error));
+      });
     });
   },
 
   submitAnswer: (answerId: string) => {
     const { socket, sessionId, myPlayerId, currentQuestion, hasAnswered } = get();
 
-    if (!socket || !sessionId) {
-      toast.error('Chưa kết nối game');
-      return;
-    }
-    if (!myPlayerId) {
-      toast.error('Không tìm thấy player ID — reload trang để thử lại');
-      return;
-    }
-    if (!currentQuestion || hasAnswered) {
-      return;
-    }
+    if (!socket || !sessionId) return toast.error('Chưa kết nối game');
+    if (!myPlayerId) return toast.error('Không tìm thấy player ID');
+    if (!currentQuestion || hasAnswered) return;
 
     set({ hasAnswered: true, selectedAnswerId: answerId });
 
-    socket.emit(
-      'submit_answer',
-      {
-        sessionId,
-        playerId: myPlayerId,
-        questionId: currentQuestion.id,
-        answerId,
-        clientTimestamp: Date.now(),
-      },
-      (response: any) => {
-        console.log('[GameSocket] submit_answer response:', response);
-        if (!response.success) {
-          toast.error(response.message || 'Failed to submit answer');
-          set({ hasAnswered: false, selectedAnswerId: null });
-        }
+    socket.emit('submit_answer', {
+      sessionId,
+      playerId: myPlayerId,
+      questionId: currentQuestion.id,
+      answerId,
+      clientTimestamp: Date.now(),
+    }, (res: any) => {
+      if (!res.success) {
+        toast.error(res.message || 'Failed to submit answer');
+        set({ hasAnswered: false, selectedAnswerId: null });
       }
-    );
+    });
   },
 
-  setQuestionStartTime: (time: number) => {
-    set({ questionStartTime: time });
-  },
+  setQuestionStartTime: (time: number) => set({ questionStartTime: time }),
 
   reset: () => {
-    // Reset gameplay state only — socket stays alive for other pages.
-    // Never disconnect the shared socket here.
     set({
-      sessionId: null,
-      roomId: null,
-      gameStatus: GameState.WAITING,
-      isHost: false,
-      isFrozen: false,
-      freezeMessage: '',
-      currentQuestion: null,
-      questionIndex: 0,
-      totalQuestions: 0,
-      questionStartTime: 0,
-      timeRemaining: 0,
-      hasAnswered: false,
-      selectedAnswerId: null,
-      leaderboard: [],
-      myPlayerId: null,
-      myNickname: null,
-      myScore: 0,
-      myRank: null,
-      countdown: 0,
-      correctAnswerId: null,
-      _pendingRedirect: null,
+      sessionId: null, roomId: null, gameStatus: GameState.WAITING,
+      isHost: false, isFrozen: false, freezeMessage: '',
+      isMaintenance: false, maintenanceMessage: '',
+      currentQuestion: null, questionIndex: 0, totalQuestions: 0,
+      questionStartTime: 0, timeRemaining: 0, hasAnswered: false,
+      selectedAnswerId: null, leaderboard: [], myPlayerId: null,
+      myNickname: null, myScore: 0, myRank: null, countdown: 0,
+      correctAnswerId: null, _pendingRedirect: null,
     });
   },
 }));

@@ -88,19 +88,97 @@ export class DashboardService {
   // MAINTENANCE
   // ============================================================================
 
-  async setMaintenance(adminId: string, enable: boolean) {
+  async setMaintenance(
+    adminId: string,
+    enable: boolean,
+    options?: { message?: string; scheduledFrom?: string; scheduledUntil?: string },
+  ) {
     this.logger.warn(`MAINTENANCE ${enable ? 'activated' : 'deactivated'} by admin ${adminId}`);
+
+    await this.redisService.setMaintenanceMode(enable);
+
+    if (enable && options) {
+      await this.redisService.set(
+        'system:config:maintenance_meta',
+        JSON.stringify({
+          message: options.message || 'Hệ thống sẽ bảo trì định kỳ.',
+          scheduledFrom: options.scheduledFrom || null,
+          scheduledUntil: options.scheduledUntil || null,
+          setAt: new Date().toISOString(),
+          setBy: adminId,
+        }),
+        'EX',
+        86400 * 7,
+      );
+    } else {
+      await this.redisService.del('system:config:maintenance_meta');
+    }
+
+    const label = options?.scheduledFrom
+      ? `từ ${options.scheduledFrom}${options.scheduledUntil ? ` đến ${options.scheduledUntil}` : ''}`
+      : '';
 
     this.dashboardGateway.broadcastEvent({
       type: 'CRITICAL',
-      message: `Chế độ Bảo trì ${enable ? 'đã BẬT (toàn bộ user bị kick)' : 'đã TẮT'}.`,
+      message: `🔧 Maintenance ${enable ? `BẬT ${label}` : 'TẮT'}: ${options?.message || ''}`,
       timestamp: new Date(),
       user: adminId,
     });
 
-    this.eventEmitter.emit('system.incident.maintenance', { enable });
+    this.eventEmitter.emit('system.incident.maintenance', {
+      enable,
+      message: options?.message,
+      scheduledFrom: options?.scheduledFrom,
+      scheduledUntil: options?.scheduledUntil,
+    });
+
+    await this.auditLogService.logSecurityEvent({
+      action: enable ? 'MAINTENANCE_ENABLE' : 'MAINTENANCE_DISABLE',
+      entity: 'SECURITY',
+      userId: adminId,
+      details: `Maintenance ${enable ? 'activated' : 'deactivated'} | ${label} | ${options?.message || ''}`,
+    });
 
     return { success: true, maintenance: enable };
+  }
+
+  async getActiveSessions() {
+    // Scan Redis để lấy tất cả game còn đang chạy
+    const keys = await this.redisService.keys('game:*');
+    const sessions: Array<{
+      sessionId: string;
+      roomId: string;
+      status: string;
+      currentQuestionIndex: number;
+      totalQuestions: number;
+      questionStartedAt: number | null;
+      timeLimit: number;
+    }> = [];
+
+    for (const key of keys) {
+      // Bỏ qua các key phụ (timer_pause, timer_meta)
+      if (key.includes(':timer_') || key.includes(':config:')) continue;
+
+      try {
+        const raw = await this.redisService.get(key);
+        if (!raw) continue;
+        const cache = JSON.parse(raw);
+
+        if (cache.status === 'FINISHED') continue;
+
+        sessions.push({
+          sessionId: cache.sessionId,
+          roomId: cache.roomId,
+          status: cache.status,
+          currentQuestionIndex: cache.currentQuestionIndex,
+          totalQuestions: cache.totalQuestions,
+          questionStartedAt: cache.questionStartedAt,
+          timeLimit: cache.timeLimit,
+        });
+      } catch { /* skip corrupt cache */ }
+    }
+
+    return { success: true, sessions };
   }
 
   // ============================================================================
@@ -112,12 +190,13 @@ export class DashboardService {
     return { success: true, bannedIps };
   }
 
-  async manualBanIp(ip: string, reason: string, adminId: string) {
-    await this.redisService.banIp(ip, `[Manual] ${reason}`);
+  async manualBanIp(ip: string, reason: string, adminId: string, ttlHours = 24) {
+    const ttlSeconds = ttlHours * 3600;
+    await this.redisService.banIp(ip, `[Manual] ${reason}`, ttlSeconds);
 
     this.dashboardGateway.broadcastEvent({
       type: 'WARNING',
-      message: `🛑 Manual Ban: IP ${ip} — ${reason}`,
+      message: `🛑 Manual Ban: IP ${ip} — ${reason} (TTL: ${ttlHours}h)`,
       timestamp: new Date(),
       user: adminId,
     });
@@ -127,7 +206,7 @@ export class DashboardService {
       entity: 'SECURITY',
       userId: adminId,
       ipAddress: ip,
-      details: `Manual ban by admin: ${reason}`,
+      details: `Manual ban by admin: ${reason} | TTL: ${ttlHours}h`,
     });
 
     return { success: true };

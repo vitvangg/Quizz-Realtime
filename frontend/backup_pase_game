@@ -83,6 +83,7 @@ function MaintenanceOverlay({ message }: { message: string }) {
     </div>
   );
 }
+
 export default function GamePage() {
   const params = useParams();
   const router = useRouter();
@@ -546,6 +547,7 @@ export default function GamePage() {
       </div>
     );
   }
+
   // Maintenance Overlay
   if (isMaintenance) {
     return <MaintenanceOverlay message={maintenanceMessage} />;
@@ -555,375 +557,378 @@ export default function GamePage() {
   if (isFrozen) {
     return <FreezeOverlay message={freezeMessage} />;
   }
-  if (isJoining) {
-    return (
-      <div className="min-h-screen bg-[#F4EDE0] flex items-center justify-center p-4">
-        <Card className="w-full max-w-md bg-white rounded-2xl shadow-[6px_6px_0_#1DAD97] border-2 border-[#1DAD97]/30">
-          <CardHeader className="text-center pb-2">
-            <CardTitle className="text-2xl text-[#111827]" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-              Dang ket noi...
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col items-center gap-4 pt-2">
-            <div className="w-8 h-8 border-4 border-[#1DAD97] border-t-transparent rounded-full animate-spin" />
-            <p className="text-[#111827]/60 text-sm" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-              Dang tham gia game
-            </p>
-          </CardContent>
-        </Card>
 
-        <style jsx global>{`
-          @import url('https://fonts.googleapis.com/css2?family=Delicious+Handrawn&display=swap');
-        `}</style>
-      </div>
-    );
-  }
-
-  // Countdown overlay
-  if (gameStatus === GameState.STARTING) {
-    return (
-      <div className="min-h-screen bg-[#F4EDE0] flex items-center justify-center overflow-hidden">
-        <div className="text-center">
-          <p className="text-lg text-[#111827]/60 mb-8" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-            Game sap bat dau
-          </p>
-
-          <div className="relative inline-block">
-            <span
-              className="text-[180px] md:text-[240px] text-[#1DAD97] leading-none"
-              style={{ fontFamily: 'Delicious Handrawn, cursive', fontWeight: 400 }}
-            >
-              {countdown}
-            </span>
-          </div>
-
-          <p className="text-2xl text-[#111827]/70 mt-8" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-            Chuan bi cau hoi
-          </p>
-        </div>
-
-        <style jsx global>{`
-          @import url('https://fonts.googleapis.com/css2?family=Delicious+Handrawn&display=swap');
-        `}</style>
-      </div>
-    );
-  }
-
-  // Waiting
-  if (gameStatus === GameState.WAITING) {
-    return (
-      <div className="min-h-screen bg-[#F4EDE0] flex items-center justify-center p-4">
-        <Card className="w-full max-w-md bg-white rounded-3xl shadow-[6px_6px_0_#1DAD97] border-2 border-[#1DAD97]/30">
-          <CardHeader className="text-center pb-2">
-            <CardTitle className="text-2xl text-[#111827]" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-              Dang cho game bat dau
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col items-center gap-4 pt-2">
-            <div className="w-8 h-8 border-4 border-[#1DAD97] border-t-transparent rounded-full animate-spin" />
-            <p className="text-[#111827]/60 text-sm" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-              {isHost ? 'Doi nguoi choi tham gia' : 'Cho host bat dau game'}
-            </p>
-          </CardContent>
-        </Card>
-
-        <style jsx global>{`
-          @import url('https://fonts.googleapis.com/css2?family=Delicious+Handrawn&display=swap');
-        `}</style>
-      </div>
-    );
-  }
-
-  // Question active
-  if (gameStatus === GameState.QUESTION_ACTIVE && currentQuestion) {
-    return (
-      <div className="min-h-screen bg-[#F4EDE0] p-4">
-        <div className="max-w-4xl mx-auto">
-          {/* Header */}
-          <div className="flex justify-between items-center mb-6 bg-white rounded-2xl p-4 shadow-[3px_3px_0_#1DAD97] border-2 border-[#1DAD97]/30">
-            <div className="text-[#111827] text-xl" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-              Cau {questionIndex + 1}/{totalQuestions}
-            </div>
-            <div className={`px-4 py-2 rounded-full text-lg ${localTimeRemaining <= 5 ? 'bg-[#DC2626] text-white' : 'bg-[#1DAD97] text-white'}`} style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-              {localTimeRemaining}s
-            </div>
-          </div>
-
-          {/* Question card */}
-          <Card className="mb-6 bg-white rounded-2xl shadow-[4px_4px_0_#1DAD97] border-2 border-[#1DAD97]/30">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-2xl text-center text-[#111827] leading-relaxed" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-                {currentQuestion.content}
+  if (gameStatus === GameState.WAITING || isJoining) {
+    if (isJoining) {
+      return (
+        <div className="min-h-screen bg-[#F4EDE0] flex items-center justify-center p-4">
+          <Card className="w-full max-w-md bg-white rounded-2xl shadow-[6px_6px_0_#1DAD97] border-2 border-[#1DAD97]/30">
+            <CardHeader className="text-center pb-2">
+              <CardTitle className="text-2xl text-[#111827]" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
+                Dang ket noi...
               </CardTitle>
             </CardHeader>
+            <CardContent className="flex flex-col items-center gap-4 pt-2">
+              <div className="w-8 h-8 border-4 border-[#1DAD97] border-t-transparent rounded-full animate-spin" />
+              <p className="text-[#111827]/60 text-sm" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
+                Dang tham gia game
+              </p>
+            </CardContent>
           </Card>
 
-          {/* Answer buttons */}
-          <div className="grid grid-cols-2 gap-4 mb-6">
-            {currentQuestion.answers.map((answer, index) => {
-              const colors = ['bg-[#1DAD97]', 'bg-[#F59E0B]', 'bg-[#8B5CF6]', 'bg-[#EC4899]'];
-              return (
-                <button
-                  key={answer.id}
-                  onClick={() => !isHost && handleSubmitAnswer(answer.id)}
-                  disabled={hasAnswered || isHost}
-                  className={`
+          <style jsx global>{`
+          @import url('https://fonts.googleapis.com/css2?family=Delicious+Handrawn&display=swap');
+        `}</style>
+        </div>
+      );
+    }
+
+    // Countdown overlay
+    if (gameStatus === GameState.STARTING) {
+      return (
+        <div className="min-h-screen bg-[#F4EDE0] flex items-center justify-center overflow-hidden">
+          <div className="text-center">
+            <p className="text-lg text-[#111827]/60 mb-8" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
+              Game sap bat dau
+            </p>
+
+            <div className="relative inline-block">
+              <span
+                className="text-[180px] md:text-[240px] text-[#1DAD97] leading-none"
+                style={{ fontFamily: 'Delicious Handrawn, cursive', fontWeight: 400 }}
+              >
+                {countdown}
+              </span>
+            </div>
+
+            <p className="text-2xl text-[#111827]/70 mt-8" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
+              Chuan bi cau hoi
+            </p>
+          </div>
+
+          <style jsx global>{`
+          @import url('https://fonts.googleapis.com/css2?family=Delicious+Handrawn&display=swap');
+        `}</style>
+        </div>
+      );
+    }
+
+    // Waiting
+    if (gameStatus === GameState.WAITING) {
+      return (
+        <div className="min-h-screen bg-[#F4EDE0] flex items-center justify-center p-4">
+          <Card className="w-full max-w-md bg-white rounded-3xl shadow-[6px_6px_0_#1DAD97] border-2 border-[#1DAD97]/30">
+            <CardHeader className="text-center pb-2">
+              <CardTitle className="text-2xl text-[#111827]" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
+                Dang cho game bat dau
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col items-center gap-4 pt-2">
+              <div className="w-8 h-8 border-4 border-[#1DAD97] border-t-transparent rounded-full animate-spin" />
+              <p className="text-[#111827]/60 text-sm" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
+                {isHost ? 'Doi nguoi choi tham gia' : 'Cho host bat dau game'}
+              </p>
+            </CardContent>
+          </Card>
+
+          <style jsx global>{`
+          @import url('https://fonts.googleapis.com/css2?family=Delicious+Handrawn&display=swap');
+        `}</style>
+        </div>
+      );
+    }
+
+    // Question active
+    if (gameStatus === GameState.QUESTION_ACTIVE && currentQuestion) {
+      return (
+        <div className="min-h-screen bg-[#F4EDE0] p-4">
+          <div className="max-w-4xl mx-auto">
+            {/* Header */}
+            <div className="flex justify-between items-center mb-6 bg-white rounded-2xl p-4 shadow-[3px_3px_0_#1DAD97] border-2 border-[#1DAD97]/30">
+              <div className="text-[#111827] text-xl" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
+                Cau {questionIndex + 1}/{totalQuestions}
+              </div>
+              <div className={`px-4 py-2 rounded-full text-lg ${localTimeRemaining <= 5 ? 'bg-[#DC2626] text-white' : 'bg-[#1DAD97] text-white'}`} style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
+                {localTimeRemaining}s
+              </div>
+            </div>
+
+            {/* Question card */}
+            <Card className="mb-6 bg-white rounded-2xl shadow-[4px_4px_0_#1DAD97] border-2 border-[#1DAD97]/30">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-2xl text-center text-[#111827] leading-relaxed" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
+                  {currentQuestion.content}
+                </CardTitle>
+              </CardHeader>
+            </Card>
+
+            {/* Answer buttons */}
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              {currentQuestion.answers.map((answer, index) => {
+                const colors = ['bg-[#1DAD97]', 'bg-[#F59E0B]', 'bg-[#8B5CF6]', 'bg-[#EC4899]'];
+                return (
+                  <button
+                    key={answer.id}
+                    onClick={() => !isHost && handleSubmitAnswer(answer.id)}
+                    disabled={hasAnswered || isHost}
+                    className={`
                     ${colors[index % 4]}
                     text-white text-xl py-8 px-6 rounded-2xl
                     transition-all duration-200 shadow-[3px_3px_0_#111827]/20
                     ${!isHost && !hasAnswered ? 'hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[5px_5px_0_#111827]/20 cursor-pointer active:translate-x-[1px] active:translate-y-[1px] active:shadow-[1px_1px_0_#111827]/20' : ''}
                     disabled:opacity-50 disabled:cursor-not-allowed
                   `}
-                  style={{ fontFamily: 'Delicious Handrawn, cursive' }}
-                >
-                  <span className="flex items-center gap-3">
-                    <span className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-lg">
-                      {index === 0 ? 'A' : index === 1 ? 'B' : index === 2 ? 'C' : 'D'}
+                    style={{ fontFamily: 'Delicious Handrawn, cursive' }}
+                  >
+                    <span className="flex items-center gap-3">
+                      <span className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-lg">
+                        {index === 0 ? 'A' : index === 1 ? 'B' : index === 2 ? 'C' : 'D'}
+                      </span>
+                      <span className="text-left flex-1">{answer.content}</span>
                     </span>
-                    <span className="text-left flex-1">{answer.content}</span>
-                  </span>
-                </button>
-              );
-            })}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Status message */}
+            {isHost ? (
+              <div className="text-center text-[#111827]/60 text-lg bg-white rounded-xl p-4 shadow-[2px_2px_0_#1DAD97] border border-[#1DAD97]/30">
+                Host dang theo doi cau hoi
+              </div>
+            ) : hasAnswered ? (
+              <div className="text-center text-[#16A34A] text-lg bg-[#16A34A]/10 rounded-xl p-4 border-2 border-[#16A34A]/30" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
+                Da gui dap an! Cho ket qua...
+              </div>
+            ) : (
+              <div className="text-center text-[#111827]/60 text-lg" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
+                Chon dap an cua ban
+              </div>
+            )}
+
+            {/* Score display */}
+            <div className="mt-6 text-center bg-white rounded-xl p-4 shadow-[2px_2px_0_#1DAD97] border border-[#1DAD97]/30" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
+              <span className="text-[#111827]/60">Diem cua ban: </span>
+              <span className="text-[#1DAD97]">{myScore} pts</span>
+              <span className="text-[#111827]/40 mx-2">|</span>
+              <span className="text-[#111827]/60">Xep hang: </span>
+              <span>#{myRank || '-'}</span>
+            </div>
           </div>
 
-          {/* Status message */}
-          {isHost ? (
-            <div className="text-center text-[#111827]/60 text-lg bg-white rounded-xl p-4 shadow-[2px_2px_0_#1DAD97] border border-[#1DAD97]/30">
-              Host dang theo doi cau hoi
-            </div>
-          ) : hasAnswered ? (
-            <div className="text-center text-[#16A34A] text-lg bg-[#16A34A]/10 rounded-xl p-4 border-2 border-[#16A34A]/30" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-              Da gui dap an! Cho ket qua...
-            </div>
-          ) : (
-            <div className="text-center text-[#111827]/60 text-lg" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-              Chon dap an cua ban
-            </div>
-          )}
-
-          {/* Score display */}
-          <div className="mt-6 text-center bg-white rounded-xl p-4 shadow-[2px_2px_0_#1DAD97] border border-[#1DAD97]/30" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-            <span className="text-[#111827]/60">Diem cua ban: </span>
-            <span className="text-[#1DAD97]">{myScore} pts</span>
-            <span className="text-[#111827]/40 mx-2">|</span>
-            <span className="text-[#111827]/60">Xep hang: </span>
-            <span>#{myRank || '-'}</span>
-          </div>
-        </div>
-
-        <style jsx global>{`
+          <style jsx global>{`
           @import url('https://fonts.googleapis.com/css2?family=Delicious+Handrawn&display=swap');
         `}</style>
-      </div>
-    );
-  }
+        </div>
+      );
+    }
 
-  // Question result
-  if (gameStatus === GameState.QUESTION_RESULT) {
-    return (
-      <div className="min-h-screen bg-[#F4EDE0] p-4">
-        <div className="max-w-4xl mx-auto">
-          {/* Result header */}
-          <div className="text-center mb-6">
-            <h2 className="text-3xl text-[#111827] mb-2" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Ket qua</h2>
-            {selectedAnswerId === correctAnswerId
-              ? <p className="text-[#16A34A] text-xl" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Chinh xac!</p>
-              : selectedAnswerId
-                ? <p className="text-[#DC2626] text-xl" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Chua dung!</p>
-                : <p className="text-[#D97706] text-xl" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Het gio!</p>}
-          </div>
+    // Question result
+    if (gameStatus === GameState.QUESTION_RESULT) {
+      return (
+        <div className="min-h-screen bg-[#F4EDE0] p-4">
+          <div className="max-w-4xl mx-auto">
+            {/* Result header */}
+            <div className="text-center mb-6">
+              <h2 className="text-3xl text-[#111827] mb-2" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Ket qua</h2>
+              {selectedAnswerId === correctAnswerId
+                ? <p className="text-[#16A34A] text-xl" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Chinh xac!</p>
+                : selectedAnswerId
+                  ? <p className="text-[#DC2626] text-xl" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Chua dung!</p>
+                  : <p className="text-[#D97706] text-xl" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Het gio!</p>}
+            </div>
 
-          {/* Question card */}
-          <Card className="mb-6 bg-white rounded-2xl shadow-[4px_4px_0_#1DAD97] border-2 border-[#1DAD97]/30">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-center text-[#111827]" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>{currentQuestion?.content}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {currentQuestion?.answers.map((answer, index) => {
-                  const isCorrect = answer.id === correctAnswerId;
-                  const isSelected = answer.id === selectedAnswerId;
-                  return (
-                    <div key={answer.id} className={`
+            {/* Question card */}
+            <Card className="mb-6 bg-white rounded-2xl shadow-[4px_4px_0_#1DAD97] border-2 border-[#1DAD97]/30">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-center text-[#111827]" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>{currentQuestion?.content}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {currentQuestion?.answers.map((answer, index) => {
+                    const isCorrect = answer.id === correctAnswerId;
+                    const isSelected = answer.id === selectedAnswerId;
+                    return (
+                      <div key={answer.id} className={`
                       p-4 rounded-xl flex items-center gap-3
                       ${isCorrect ? 'bg-[#16A34A] text-white shadow-[2px_2px_0_#111827]/20' : isSelected ? 'bg-[#DC2626] text-white shadow-[2px_2px_0_#111827]/20' : 'bg-[#111827]/10 text-[#111827] border border-[#111827]/10'}
                     `} style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-                      <span className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-sm">
-                        {index === 0 ? 'A' : index === 1 ? 'B' : index === 2 ? 'C' : 'D'}
-                      </span>
-                      <span className="flex-1">{answer.content}</span>
-                      {isCorrect && <span className="text-green-200">Correct</span>}
-                    </div>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Player: chỉ thấy điểm cá nhân */}
-          {!isHost && (
-            <Card className="mb-6 bg-white rounded-2xl shadow-[4px_4px_0_#1DAD97] border-2 border-[#1DAD97]/30">
-              <CardContent className="pt-6 text-center">
-                <div className="text-[#111827]/60 text-sm mb-2" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Diem cua ban</div>
-                <div className="text-5xl text-[#1DAD97] mb-1" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>{myScore} pts</div>
-                <div className="text-[#111827]/70" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Xep hang: <span className="text-[#111827]">#{myRank || '-'}</span></div>
+                        <span className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-sm">
+                          {index === 0 ? 'A' : index === 1 ? 'B' : index === 2 ? 'C' : 'D'}
+                        </span>
+                        <span className="flex-1">{answer.content}</span>
+                        {isCorrect && <span className="text-green-200">Correct</span>}
+                      </div>
+                    );
+                  })}
+                </div>
               </CardContent>
             </Card>
-          )}
 
-          {/* Host: thấy đầy đủ leaderboard */}
-          {isHost && (
-            <Card className="mb-6 bg-white rounded-2xl shadow-[4px_4px_0_#1DAD97] border-2 border-[#1DAD97]/30">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-center text-[#111827]" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Bang xep hang</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {leaderboard.slice(0, 5).map((entry, idx) => (
-                    <div key={entry.playerId} className={`
+            {/* Player: chỉ thấy điểm cá nhân */}
+            {!isHost && (
+              <Card className="mb-6 bg-white rounded-2xl shadow-[4px_4px_0_#1DAD97] border-2 border-[#1DAD97]/30">
+                <CardContent className="pt-6 text-center">
+                  <div className="text-[#111827]/60 text-sm mb-2" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Diem cua ban</div>
+                  <div className="text-5xl text-[#1DAD97] mb-1" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>{myScore} pts</div>
+                  <div className="text-[#111827]/70" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Xep hang: <span className="text-[#111827]">#{myRank || '-'}</span></div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Host: thấy đầy đủ leaderboard */}
+            {isHost && (
+              <Card className="mb-6 bg-white rounded-2xl shadow-[4px_4px_0_#1DAD97] border-2 border-[#1DAD97]/30">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-center text-[#111827]" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Bang xep hang</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {leaderboard.slice(0, 5).map((entry, idx) => (
+                      <div key={entry.playerId} className={`
                       flex justify-between items-center p-4 rounded-xl
                       ${entry.rank === 1 ? 'bg-[#F59E0B] text-white shadow-[2px_2px_0_#111827]/20' : 'bg-[#111827]/5 text-[#111827] border border-[#111827]/10'}
                     `} style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-                      <div className="flex items-center gap-3">
-                        <span className="text-lg font-bold">
-                          {idx === 0 ? '1st' : idx === 1 ? '2nd' : idx === 2 ? '3rd' : `${entry.rank}th`}
-                        </span>
-                        <span>{entry.nickname}</span>
+                        <div className="flex items-center gap-3">
+                          <span className="text-lg font-bold">
+                            {idx === 0 ? '1st' : idx === 1 ? '2nd' : idx === 2 ? '3rd' : `${entry.rank}th`}
+                          </span>
+                          <span>{entry.nickname}</span>
+                        </div>
+                        <span className="text-lg">{entry.score} pts</span>
                       </div>
-                      <span className="text-lg">{entry.score} pts</span>
-                    </div>
-                  ))}
-                  {leaderboard.length === 0 && (
-                    <p className="text-center text-[#111827]/50">Chua co du lieu</p>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          )}
+                    ))}
+                    {leaderboard.length === 0 && (
+                      <p className="text-center text-[#111827]/50">Chua co du lieu</p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
-          <div className="text-center text-[#111827]/50 text-sm mb-4" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-            {isHost ? `Diem cua ban (Host): ${myScore} pts` : `Diem cua ban: ${myScore} pts`}
+            <div className="text-center text-[#111827]/50 text-sm mb-4" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
+              {isHost ? `Diem cua ban (Host): ${myScore} pts` : `Diem cua ban: ${myScore} pts`}
+            </div>
+
+            {isHost && (
+              <Button
+                onClick={handleNextQuestion}
+                size="lg"
+                className="w-full bg-[#1DAD97] hover:bg-[#1a9a87] text-white rounded-xl shadow-[3px_3px_0_#111827]/20 text-lg py-6 border-2 border-[#1DAD97]"
+                style={{ fontFamily: 'Delicious Handrawn, cursive' }}
+              >
+                Tiep tuc
+              </Button>
+            )}
           </div>
 
-          {isHost && (
-            <Button
-              onClick={handleNextQuestion}
-              size="lg"
-              className="w-full bg-[#1DAD97] hover:bg-[#1a9a87] text-white rounded-xl shadow-[3px_3px_0_#111827]/20 text-lg py-6 border-2 border-[#1DAD97]"
-              style={{ fontFamily: 'Delicious Handrawn, cursive' }}
-            >
-              Tiep tuc
-            </Button>
-          )}
-        </div>
-
-        <style jsx global>{`
+          <style jsx global>{`
           @import url('https://fonts.googleapis.com/css2?family=Delicious+Handrawn&display=swap');
         `}</style>
-      </div>
-    );
-  }
+        </div>
+      );
+    }
 
-  // Game finished
-  if (gameStatus === GameState.FINISHED) {
-    return (
-      <div className="min-h-screen bg-[#F4EDE0] p-4">
-        <div className="max-w-4xl mx-auto">
-          {/* Game Over header */}
-          <div className="text-center mb-8">
-            <h1 className="text-5xl text-[#111827] mb-2" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Game Over!</h1>
-            <p className="text-xl text-[#111827]/70" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Ket qua cuoi cung</p>
-          </div>
+    // Game finished
+    if (gameStatus === GameState.FINISHED) {
+      return (
+        <div className="min-h-screen bg-[#F4EDE0] p-4">
+          <div className="max-w-4xl mx-auto">
+            {/* Game Over header */}
+            <div className="text-center mb-8">
+              <h1 className="text-5xl text-[#111827] mb-2" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Game Over!</h1>
+              <p className="text-xl text-[#111827]/70" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Ket qua cuoi cung</p>
+            </div>
 
-          {/* Player: chỉ thấy điểm cá nhân */}
-          {!isHost && (
-            <Card className="mb-6 bg-white rounded-2xl shadow-[4px_4px_0_#1DAD97] border-2 border-[#1DAD97]/30">
-              <CardContent className="pt-6 text-center">
-                <div className="text-[#111827]/60 text-sm mb-2" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Ket qua cua ban</div>
-                <div className="text-5xl text-[#1DAD97] mb-1" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>{myScore} pts</div>
-                <div className="text-[#111827]/70" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Xep hang: <span className="text-[#111827]">#{myRank || '-'}</span></div>
-              </CardContent>
-            </Card>
-          )}
+            {/* Player: chỉ thấy điểm cá nhân */}
+            {!isHost && (
+              <Card className="mb-6 bg-white rounded-2xl shadow-[4px_4px_0_#1DAD97] border-2 border-[#1DAD97]/30">
+                <CardContent className="pt-6 text-center">
+                  <div className="text-[#111827]/60 text-sm mb-2" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Ket qua cua ban</div>
+                  <div className="text-5xl text-[#1DAD97] mb-1" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>{myScore} pts</div>
+                  <div className="text-[#111827]/70" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Xep hang: <span className="text-[#111827]">#{myRank || '-'}</span></div>
+                </CardContent>
+              </Card>
+            )}
 
-          {/* Host: thấy đầy đủ leaderboard */}
-          {isHost && (
-            <Card className="mb-6 bg-white rounded-2xl shadow-[4px_4px_0_#1DAD97] border-2 border-[#1DAD97]/30">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-center text-2xl text-[#111827]" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Bang xep hang</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {leaderboard.map((entry, idx) => (
-                    <div key={entry.playerId} className={`
+            {/* Host: thấy đầy đủ leaderboard */}
+            {isHost && (
+              <Card className="mb-6 bg-white rounded-2xl shadow-[4px_4px_0_#1DAD97] border-2 border-[#1DAD97]/30">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-center text-2xl text-[#111827]" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Bang xep hang</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {leaderboard.map((entry, idx) => (
+                      <div key={entry.playerId} className={`
                       flex justify-between items-center p-4 rounded-xl text-lg
                       ${idx === 0 ? 'bg-[#F59E0B] text-white shadow-[3px_3px_0_#111827]/20' : idx === 1 ? 'bg-[#9CA3AF] text-white shadow-[2px_2px_0_#111827]/20' : idx === 2 ? 'bg-[#CD7F32] text-white shadow-[2px_2px_0_#111827]/20' : 'bg-[#111827]/5 text-[#111827] border border-[#111827]/10'}
                     `} style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-                      <div className="flex items-center gap-3">
-                        <span className="text-lg">
-                          {idx === 0 ? '1st' : idx === 1 ? '2nd' : idx === 2 ? '3rd' : `${entry.rank}th`}
-                        </span>
-                        <span>{entry.nickname}</span>
+                        <div className="flex items-center gap-3">
+                          <span className="text-lg">
+                            {idx === 0 ? '1st' : idx === 1 ? '2nd' : idx === 2 ? '3rd' : `${entry.rank}th`}
+                          </span>
+                          <span>{entry.nickname}</span>
+                        </div>
+                        <span className="text-lg">{entry.score} pts</span>
                       </div>
-                      <span className="text-lg">{entry.score} pts</span>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          )}
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
-          {/* Action buttons */}
-          {isHost ? (
-            <div className="flex gap-4">
-              <Button
-                onClick={handlePlayAgain}
-                className="flex-1 text-lg bg-[#1DAD97] hover:bg-[#1a9a87] text-white rounded-xl shadow-[3px_3px_0_#111827]/20 py-6 border-2 border-[#1DAD97]"
-                style={{ fontFamily: 'Delicious Handrawn, cursive' }}
-              >
-                Choi lai
-              </Button>
-              <Button
-                onClick={handleCloseRoom}
-                variant="outline"
-                className="flex-1 text-lg bg-white rounded-xl shadow-[3px_3px_0_#1DAD97] py-6 border-2 border-[#1DAD97]/50 text-[#111827]"
-                style={{ fontFamily: 'Delicious Handrawn, cursive' }}
-              >
-                Ve Quiz
-              </Button>
-            </div>
-          ) : (
-            <div className="flex gap-4">
-              <Button
-                onClick={handleLeaveRoom}
-                variant="outline"
-                className="flex-1 text-lg bg-white rounded-xl shadow-[3px_3px_0_#1DAD97] py-6 border-2 border-[#1DAD97]/50 text-[#111827]"
-                style={{ fontFamily: 'Delicious Handrawn, cursive' }}
-              >
-                Roi phong
-              </Button>
-              <Button
-                onClick={() => router.push('/')}
-                className="flex-1 text-lg bg-[#1DAD97] hover:bg-[#1a9a87] text-white rounded-xl shadow-[3px_3px_0_#111827]/20 py-6 border-2 border-[#1DAD97]"
-                style={{ fontFamily: 'Delicious Handrawn, cursive' }}
-              >
-                Ve Trang chu
-              </Button>
-            </div>
-          )}
-        </div>
+            {/* Action buttons */}
+            {isHost ? (
+              <div className="flex gap-4">
+                <Button
+                  onClick={handlePlayAgain}
+                  className="flex-1 text-lg bg-[#1DAD97] hover:bg-[#1a9a87] text-white rounded-xl shadow-[3px_3px_0_#111827]/20 py-6 border-2 border-[#1DAD97]"
+                  style={{ fontFamily: 'Delicious Handrawn, cursive' }}
+                >
+                  Choi lai
+                </Button>
+                <Button
+                  onClick={handleCloseRoom}
+                  variant="outline"
+                  className="flex-1 text-lg bg-white rounded-xl shadow-[3px_3px_0_#1DAD97] py-6 border-2 border-[#1DAD97]/50 text-[#111827]"
+                  style={{ fontFamily: 'Delicious Handrawn, cursive' }}
+                >
+                  Ve Quiz
+                </Button>
+              </div>
+            ) : (
+              <div className="flex gap-4">
+                <Button
+                  onClick={handleLeaveRoom}
+                  variant="outline"
+                  className="flex-1 text-lg bg-white rounded-xl shadow-[3px_3px_0_#1DAD97] py-6 border-2 border-[#1DAD97]/50 text-[#111827]"
+                  style={{ fontFamily: 'Delicious Handrawn, cursive' }}
+                >
+                  Roi phong
+                </Button>
+                <Button
+                  onClick={() => router.push('/')}
+                  className="flex-1 text-lg bg-[#1DAD97] hover:bg-[#1a9a87] text-white rounded-xl shadow-[3px_3px_0_#111827]/20 py-6 border-2 border-[#1DAD97]"
+                  style={{ fontFamily: 'Delicious Handrawn, cursive' }}
+                >
+                  Ve Trang chu
+                </Button>
+              </div>
+            )}
+          </div>
 
-        <style jsx global>{`
+          <style jsx global>{`
           @import url('https://fonts.googleapis.com/css2?family=Delicious+Handrawn&display=swap');
         `}</style>
+        </div>
+      );
+    }
+
+    return (
+      <div className="min-h-screen bg-[#F4EDE0] flex items-center justify-center">
+        <div className="text-[#111827]/50">Đang tải...</div>
       </div>
     );
   }
-
-  return (
-    <div className="min-h-screen bg-[#F4EDE0] flex items-center justify-center">
-      <div className="text-[#111827]/50">Đang tải...</div>
-    </div>
-  );
 }
