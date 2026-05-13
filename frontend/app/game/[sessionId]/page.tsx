@@ -60,6 +60,31 @@ function FreezeOverlay({ message }: { message: string }) {
   );
 }
 
+// ============================================================================
+// MAINTENANCE OVERLAY
+// ============================================================================
+function MaintenanceOverlay({ message }: { message: string }) {
+  const [countdown, setCountdown] = useState(5);
+  useEffect(() => {
+    if (countdown <= 0) return;
+    const t = setTimeout(() => setCountdown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [countdown]);
+
+  return (
+    <div className="fixed inset-0 z-[9998] flex flex-col items-center justify-center bg-gray-950/98">
+      <div className="mb-5 text-6xl">🔧</div>
+      <h1 className="text-2xl font-bold text-white mb-2">Hệ thống đang bảo trì</h1>
+      <p className="text-gray-400 text-sm max-w-md text-center px-6 mb-6">
+        {message || 'Chúng tôi đang nâng cấp hệ thống. Vui lòng quay lại sau ít phút.'}
+      </p>
+      {countdown > 0 && (
+        <p className="text-gray-500 text-xs">Ngắt kết nối sau <span className="text-white font-bold">{countdown}s</span></p>
+      )}
+    </div>
+  );
+}
+
 export default function GamePage() {
   const params = useParams();
   const router = useRouter();
@@ -70,6 +95,8 @@ export default function GamePage() {
     isHost,
     isFrozen,
     freezeMessage,
+    isMaintenance,
+    maintenanceMessage,
     currentQuestion,
     questionIndex,
     totalQuestions,
@@ -277,7 +304,12 @@ export default function GamePage() {
     );
   }
 
-  // 🚨 Hard Freeze Overlay — hiển thị trên tất cả mọi state
+  // 🔧 Maintenance Overlay
+  if (isMaintenance) {
+    return <MaintenanceOverlay message={maintenanceMessage} />;
+  }
+
+  // 🚨 Hard Freeze Overlay
   if (isFrozen) {
     return <FreezeOverlay message={freezeMessage} />;
   }

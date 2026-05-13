@@ -54,10 +54,15 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     private readonly roomGateway: RoomGateway,
     private readonly redisService: RedisService,
     private readonly eventEmitter: EventEmitter2,
-  ) {}
+  ) { }
 
   afterInit(server: Server) {
     this.logger.log('[GameGateway] Initialized');
+  }
+
+  /** Dùng bởi DashboardMetricsService để đếm kết nối hiện tại */
+  getConnectionCount(): number {
+    return this.socketMap.size;
   }
 
   // ============================================================================
@@ -145,15 +150,26 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   handleKillSwitch(payload?: { pin?: string }) {
     if (payload?.pin) {
       this.logger.error(`🚨 TARGETED KILL SWITCH: Room [${payload.pin}]`);
-      if (this.server) {
-        this.server.in(payload.pin).disconnectSockets(true);
-      }
+      if (this.server) this.server.in(payload.pin).disconnectSockets(true);
     } else {
       this.logger.error('🚨 GLOBAL KILL SWITCH: Disconnecting ALL game sockets!');
-      if (this.server) {
-        this.server.disconnectSockets(true);
-      }
+      if (this.server) this.server.disconnectSockets(true);
     }
+  }
+
+  @OnEvent('system.incident.maintenance')
+  handleMaintenance(payload: { enable: boolean; message?: string; scheduledFrom?: string; scheduledUntil?: string }) {
+    this.logger.warn(`[MAINTENANCE] ${payload.enable ? 'ON' : 'OFF'}`);
+    if (this.server) {
+      this.server.emit('system:maintenance', {
+        maintenance: payload.enable,
+        message: payload.message || '',
+        scheduledFrom: payload.scheduledFrom || null,
+        scheduledUntil: payload.scheduledUntil || null,
+        timestamp: new Date().toISOString(),
+      });
+    }
+    // Không kick người dùng — đây chỉ là thông báo
   }
 
   // ============================================================================
@@ -305,8 +321,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
       const cached = await this.gameSessionService.getSessionState(payload.sessionId);
       if (cached.status !== GameState.QUESTION_RESULT &&
-          cached.status !== GameState.LEADERBOARD &&
-          cached.status !== GameState.QUESTION_ACTIVE) {
+        cached.status !== GameState.LEADERBOARD &&
+        cached.status !== GameState.QUESTION_ACTIVE) {
         return { success: false, error: 'Cannot advance question in current state' };
       }
 

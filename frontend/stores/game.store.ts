@@ -29,6 +29,10 @@ interface GameStore {
   isFrozen: boolean;
   freezeMessage: string;
 
+  // Maintenance Mode
+  isMaintenance: boolean;
+  maintenanceMessage: string;
+
   currentQuestion: Question | null;
   questionIndex: number;
   totalQuestions: number;
@@ -74,6 +78,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   isFrozen: false,
   freezeMessage: '',
+
+  isMaintenance: false,
+  maintenanceMessage: '',
 
   currentQuestion: null,
   questionIndex: 0,
@@ -189,20 +196,22 @@ export const useGameStore = create<GameStore>((set, get) => ({
       toast.error(error.message);
     });
 
-    // 🚨 SYSTEM FREEZE: OPS Admin bật Hard Freeze
+    // 🚨 SYSTEM FREEZE
     newSocket.on('system:freeze', (data: { freeze: boolean; message: string }) => {
-      console.warn('[GameSocket] System freeze:', data);
       set({ isFrozen: data.freeze, freezeMessage: data.message || '' });
-      if (data.freeze) {
-        toast.warning('⚠️ Hệ thống tạm dừng. Đang xử lý sự cố an ninh...');
-      } else {
-        toast.success('✅ Hệ thống hoạt động trở lại!');
-      }
+      if (data.freeze) toast.warning('⚠️ Hệ thống tạm dừng. Đang xử lý sự cố an ninh...');
+      else toast.success('✅ Hệ thống hoạt động trở lại!');
     });
 
-    // ⏱️ TIMER RESUME: Cập nhật lại đồng hồ sau khi Unfreeze
+    // 🔧 MAINTENANCE MODE
+    newSocket.on('system:maintenance', (data: { maintenance: boolean; message: string }) => {
+      set({ isMaintenance: data.maintenance, maintenanceMessage: data.message || '' });
+      if (data.maintenance) toast.error('🔧 Hệ thống đang bảo trì. Bạn sẽ bị ngắt kết nối sau 5 giây.');
+      else toast.success('✅ Bảo trì hoàn tất. Hệ thống đã sẵn sàng!');
+    });
+
+    // ⏱️ TIMER RESUME
     newSocket.on('timer_resume', (data: { remainingSeconds: number }) => {
-      console.log('[GameSocket] Timer resumed, remaining:', data.remainingSeconds);
       set({ timeRemaining: data.remainingSeconds });
     });
 
@@ -414,6 +423,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       isHost: false,
       isFrozen: false,
       freezeMessage: '',
+      isMaintenance: false,
+      maintenanceMessage: '',
       currentQuestion: null,
       questionIndex: 0,
       totalQuestions: 0,
