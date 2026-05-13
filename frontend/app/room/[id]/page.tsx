@@ -27,15 +27,18 @@ export default function RoomPage() {
 
   // Handle joining the room
   const handleJoin = useCallback(async () => {
-    if (!isConnected || !roomId || hasJoinedRef.current) {
-      console.log('[RoomPage] Skipping join:', { isConnected, hasJoined: hasJoinedRef.current });
+    // Skip only if already joined or no socket (not yet initialized).
+    // Wait for isConnected if socket exists — socket connects asynchronously.
+    if (hasJoinedRef.current || !socket) {
+      if (!socket) {
+        console.log('[RoomPage] Skipping join: socket not yet initialized');
+      }
       return;
     }
 
     console.log('[RoomPage] Joining room:', { roomId, isHostFromUrl, user: !!user });
 
     if (isHostFromUrl && user) {
-      // Host: join via WebSocket with JWT to authenticate
       try {
         const nickname = user.email?.split('@')[0] || 'Host';
         await joinRoomById(roomId, nickname, accessToken || undefined);
@@ -46,19 +49,19 @@ export default function RoomPage() {
         hasJoinedRef.current = true;
       }
     } else {
-      // Guest: get room state
+      // Guest: fetch room state. Socket is already joined to the room
+      // from the JoinRoomDialog flow via join_by_id — no need to rejoin.
       await getRoomState(roomId);
       hasJoinedRef.current = true;
     }
-  }, [isConnected, roomId, isHostFromUrl, user, accessToken]);
+  }, [socket, roomId, isHostFromUrl, user, accessToken, joinRoomById, getRoomState]);
 
   // Connect socket only once
   useEffect(() => {
     if (!roomId) return;
-    
+
     console.log('[RoomPage] Mounting, socket:', !!socket);
-    
-    // Only connect if socket doesn't exist
+
     if (!socket) {
       connectSocket();
     }
@@ -66,12 +69,12 @@ export default function RoomPage() {
     return () => {
       console.log('[RoomPage] Unmounting');
     };
-  }, [roomId]);
+  }, [roomId, socket]);
 
-  // Join room when connected
+  // Join room when socket becomes available OR when isConnected flips true
   useEffect(() => {
     handleJoin();
-  }, [handleJoin]);
+  }, [handleJoin, isConnected]);
 
   // When room data is loaded and user is host from URL, ensure host identity
   useEffect(() => {

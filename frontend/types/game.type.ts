@@ -39,6 +39,11 @@ export interface GameStartingPayload {
   countdown: number;
 }
 
+export interface GameRedirectPayload {
+  url: string;
+  sessionId: string;
+}
+
 export interface CountdownTickPayload {
   remaining: number;
 }
@@ -61,6 +66,12 @@ export interface QuestionResultPayload {
 export interface GameEndedPayload {
   leaderboard: LeaderboardEntry[];
   totalQuestions: number;
+}
+
+export interface GameRestartPayload {
+  newSessionId: string;
+  newRoomId: string;
+  countdown: number;
 }
 
 export interface GameJoinedPayload {
