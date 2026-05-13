@@ -6,7 +6,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
-import { PlusCircle, Save, ArrowLeft, LayoutGrid, Loader2 } from "lucide-react";
+import { 
+  PlusCircle, 
+  Save, 
+  ArrowLeft, 
+  LayoutGrid, 
+  Loader2,
+  Info,
+  FileText 
+} from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { useQuizStore } from "@/stores/quiz.store";
@@ -14,6 +22,8 @@ import { useQuestionStore } from "@/stores/question.store";
 import { useAnswerStore } from "@/stores/answer.store";
 import { QuestionCard } from "@/components/quiz/question-card";
 import { quizService } from "@/services/quiz.service";
+import { QuizCategory, CATEGORY_LABELS } from "@/types/quiz.type";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface Answer {
   id: string;
@@ -34,22 +44,23 @@ export default function EditQuizPage() {
   const quizId = params.id as string;
 
   const [title, setTitle] = useState("");
+  const [category, setCategory] = useState<QuizCategory>(QuizCategory.KHAC);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  
+
   const quizStore = useQuizStore();
   const questionStore = useQuestionStore();
   const answerStore = useAnswerStore();
 
   const [questions, setQuestions] = useState<Question[]>([]);
 
-  // Load dữ liệu cũ và đổ vào form
   const loadQuizData = useCallback(async () => {
     try {
       setLoading(true);
       const quiz = await quizService.getById(quizId);
       setTitle(quiz.title);
-      
+      setCategory(quiz.category || QuizCategory.KHAC);
+
       if (quiz.questions && quiz.questions.length > 0) {
         const formattedQuestions = quiz.questions.map((q: any) => ({
           id: q.id,
@@ -63,7 +74,6 @@ export default function EditQuizPage() {
         }));
         setQuestions(formattedQuestions);
       } else {
-        // Nếu quiz chưa có câu hỏi nào (trường hợp hiếm), tạo sẵn 1 câu trống
         setQuestions([{
           id: "q-" + Date.now(),
           content: "",
@@ -86,12 +96,11 @@ export default function EditQuizPage() {
     loadQuizData();
   }, [loadQuizData]);
 
-  // Các logic điều khiển form (Giống hệt trang Create)
   const addQuestion = () => {
     setQuestions([
       ...questions,
       {
-        id: "q-" + Date.now(),
+        id: "q-" + Date.now() + Math.random(),
         content: "",
         timeLimit: 20,
         answers: [
@@ -121,7 +130,7 @@ export default function EditQuizPage() {
             ...q,
             answers: [
               ...q.answers,
-              { id: "a-" + Date.now(), content: "", isCorrect: false },
+              { id: "a-" + Date.now() + Math.random(), content: "", isCorrect: false },
             ],
           };
         }
@@ -156,7 +165,7 @@ export default function EditQuizPage() {
                 return { ...a, [field]: value };
               }
               if (field === "isCorrect" && value === true) {
-                 return { ...a, isCorrect: false };
+                return { ...a, isCorrect: false };
               }
               return a;
             }),
@@ -167,13 +176,23 @@ export default function EditQuizPage() {
     );
   };
 
+  const moveQuestion = (index: number, direction: 'up' | 'down') => {
+    const newIndex = direction === 'up' ? index - 1 : index + 1;
+    if (newIndex < 0 || newIndex >= questions.length) return;
+
+    const newQuestions = [...questions];
+    const [movedItem] = newQuestions.splice(index, 1);
+    newQuestions.splice(newIndex, 0, movedItem);
+
+    setQuestions(newQuestions);
+  };
+
   const handleUpdate = async () => {
     if (!title.trim()) {
       toast.error("Vui lòng nhập tên Quiz!");
       return;
     }
 
-    // Validate
     for (let i = 0; i < questions.length; i++) {
       if (!questions[i].content.trim()) {
         toast.error(`Câu hỏi ${i + 1} chưa có nội dung!`);
@@ -188,21 +207,15 @@ export default function EditQuizPage() {
 
     setSaving(true);
     try {
-      // 1. Cập nhật Tiêu đề Quiz
-      await quizStore.update(quizId, { title });
-
-      // 2. Lấy dữ liệu hiện tại để xóa
+      await quizStore.update(quizId, { title, category });
       const currentQuizData = await quizService.getById(quizId);
 
-      // Xóa tất cả questions cũ một cách đồng thời và đợi tất cả hoàn tất
       if (currentQuizData.questions && currentQuizData.questions.length > 0) {
         await Promise.all(
           currentQuizData.questions.map((q: any) => questionStore.delete(q.id))
         );
       }
 
-      // 3. Tạo lại toàn bộ từ đầu
-      // Chúng ta tạo tuần tự để đảm bảo orderIndex đúng
       for (let i = 0; i < questions.length; i++) {
         const q = questions[i];
         const newQuestion = await questionStore.create({
@@ -213,19 +226,17 @@ export default function EditQuizPage() {
         });
 
         const questionId = newQuestion.id;
-        // Tạo các câu trả lời cho câu hỏi này
-        await Promise.all(
-          q.answers.map((a) => answerStore.create({
+        for (const a of q.answers) {
+          await answerStore.create({
             questionId,
             content: a.content,
             isCorrect: a.isCorrect
-          }))
-        );
+          });
+        }
       }
 
       toast.success("Cập nhật bộ Quiz thành công!");
       router.push("/quiz");
-
     } catch (error) {
       toast.error("Có lỗi xảy ra khi lưu thay đổi");
     } finally {
@@ -236,84 +247,132 @@ export default function EditQuizPage() {
   if (loading) {
     return (
       <div className="h-[60vh] flex flex-col items-center justify-center gap-4">
-        <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-        <p className="text-muted-foreground font-medium animate-pulse">Đang tải nội dung bộ Quiz...</p>
+        <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+        <p className="text-muted-foreground font-black animate-pulse uppercase tracking-widest">Đang tải nội dung...</p>
       </div>
     );
   }
 
   return (
-    <div className="max-w-5xl mx-auto py-8 px-4 space-y-8 pb-32">
-      {/* Header Section */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 sticky top-0 z-10 bg-background/80 backdrop-blur-md py-4 border-b">
-        <div className="flex items-center gap-4">
+    <div className="max-w-4xl mx-auto py-12 px-4 space-y-12 pb-32">
+      {/* HEADER */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 sticky top-16 z-40 bg-background/90 backdrop-blur-xl py-6 border-b transition-all duration-300">
+        <div className="flex items-center gap-5">
           <Link href="/quiz">
-            <Button variant="outline" size="icon" className="rounded-full">
-              <ArrowLeft className="h-4 w-4" />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="rounded-2xl bg-muted hover:bg-primary hover:text-white transition-all"
+            >
+              <ArrowLeft className="h-5 w-5" />
             </Button>
           </Link>
+
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Chỉnh sửa bộ Quiz</h1>
-            <p className="text-sm text-muted-foreground flex items-center gap-1">
-              <LayoutGrid className="h-3 w-3" /> Thay đổi nội dung của các câu hỏi
+            <h1 className="text-3xl font-black tracking-tighter">
+              Chỉnh sửa Quiz
+            </h1>
+            <p className="text-sm text-muted-foreground font-medium flex items-center gap-1.5">
+              Cập nhật nội dung thử thách
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => router.back()} disabled={saving}>
-            Hủy bỏ
-          </Button>
-          <Button className="gap-2 px-8 shadow-lg shadow-primary/20" onClick={handleUpdate} disabled={saving}>
-            <Save className="h-4 w-4" />
-            {saving ? "Đang lưu..." : "Cập nhật bộ Quiz"}
+
+        <div className="flex items-center gap-3">
+          <Button
+            className="gap-2 px-8 py-6 rounded-2xl shadow-xl shadow-primary/20 font-black text-lg transition-all hover:scale-105"
+            onClick={handleUpdate}
+            disabled={saving}
+          >
+            {saving ? "Đang lưu..." : "Lưu thay đổi"}
           </Button>
         </div>
       </div>
 
-      {/* Quiz Info Card */}
-      <Card className="border-2 border-primary/10 shadow-sm">
-        <CardContent className="pt-6 space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="title" className="text-base font-bold text-primary">Tên bộ Quiz</Label>
-            <Input
-              id="title"
-              placeholder="Tên bộ Quiz..."
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="text-xl font-semibold py-6 border-2 focus-visible:border-primary transition-all"
-            />
+      {/* QUIZ INFO SECTION */}
+      <section className="space-y-4">
+        <div className="flex items-center gap-2 px-2 text-primary">
+          <Info className="h-4 w-4" />
+          <span className="text-xs font-black uppercase tracking-widest">Thông tin cơ bản</span>
+        </div>
+        <Card className="border-2 border-primary/10 shadow-sm bg-gradient-to-br from-background to-muted/30 overflow-hidden rounded-3xl">
+          <CardContent className="pt-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-3">
+                <Label htmlFor="title" className="text-sm font-black text-muted-foreground uppercase tracking-widest px-1">
+                  Tên bộ sưu tập
+                </Label>
+                <Input
+                  id="title"
+                  placeholder="Tên Quiz..."
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  className="text-2xl font-black py-8 border-2 border-transparent bg-background focus:border-primary/50 transition-all rounded-2xl"
+                />
+              </div>
+
+              <div className="space-y-3">
+                <Label htmlFor="category" className="text-sm font-black text-muted-foreground uppercase tracking-widest px-1">
+                  Danh mục
+                </Label>
+                <Select value={category} onValueChange={(value) => setCategory(value as QuizCategory)}>
+                  <SelectTrigger className="text-xl font-black py-8 border-2 border-transparent bg-background focus:border-primary/50 transition-all rounded-2xl h-auto">
+                    <SelectValue placeholder="Chọn danh mục" />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-2xl border-2">
+                    {Object.entries(CATEGORY_LABELS).map(([value, label]) => (
+                      <SelectItem key={value} value={value} className="py-3 font-bold rounded-xl">
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </section>
+
+      {/* QUESTIONS LIST */}
+      <section className="space-y-10">
+        <div className="flex items-center justify-between px-2">
+          <div className="flex items-center gap-2 text-primary">
+            <FileText className="h-4 w-4" />
+            <span className="text-xs font-black uppercase tracking-widest">Danh sách câu hỏi ({questions.length})</span>
           </div>
-        </CardContent>
-      </Card>
+        </div>
 
-      {/* Questions List */}
-      <div className="space-y-10">
-        {questions.map((q, index) => (
-          <QuestionCard
-            key={q.id}
-            question={q}
-            index={index}
-            onUpdate={updateQuestion}
-            onRemove={removeQuestion}
-            onUpdateAnswer={updateAnswer}
-            onAddAnswer={addAnswer}
-            onRemoveAnswer={removeAnswer}
-            canRemove={questions.length > 1}
-          />
-        ))}
-      </div>
+        <div className="space-y-8">
+          {questions.map((q, index) => (
+            <QuestionCard
+              key={q.id}
+              question={q}
+              index={index}
+              totalQuestions={questions.length}
+              onUpdate={updateQuestion}
+              onRemove={removeQuestion}
+              onUpdateAnswer={updateAnswer}
+              onAddAnswer={addAnswer}
+              onRemoveAnswer={removeAnswer}
+              onMove={moveQuestion}
+              canRemove={questions.length > 1}
+            />
+          ))}
+        </div>
+      </section>
 
-      {/* Add Question Button */}
-      <div className="flex justify-center pt-4">
-        <Button 
-          variant="outline" 
-          size="lg" 
-          className="gap-2 w-full max-w-md border-dashed border-2 py-8 text-lg hover:bg-primary/5 hover:border-primary/50 transition-all group" 
+      {/* ADD QUESTION BUTTON */}
+      <div className="flex justify-center pt-8">
+        <Button
+          variant="outline"
+          className="group gap-3 w-full max-w-lg border-dashed border-2 py-12 text-xl font-black rounded-3xl hover:border-primary/50 hover:bg-primary/5 hover:text-primary transition-all duration-300"
           onClick={addQuestion}
           disabled={saving}
         >
-          <PlusCircle className="h-6 w-6 text-muted-foreground group-hover:text-primary transition-colors" />
-          Thêm câu hỏi mới
+          <div className="bg-primary/10 p-2 rounded-xl group-hover:bg-primary group-hover:text-white transition-colors">
+            <PlusCircle className="h-8 w-8" />
+          </div>
+          Thêm câu hỏi tiếp theo
         </Button>
       </div>
     </div>

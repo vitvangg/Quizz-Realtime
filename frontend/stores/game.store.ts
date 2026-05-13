@@ -15,6 +15,10 @@ interface GameStore {
   gameStatus: GameState;
   isHost: boolean;
 
+  // Freeze / Hard Lockdown
+  isFrozen: boolean;
+  freezeMessage: string;
+
   currentQuestion: Question | null;
   questionIndex: number;
   totalQuestions: number;
@@ -59,6 +63,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
   roomId: null,
   gameStatus: GameState.WAITING,
   isHost: false,
+
+  isFrozen: false,
+  freezeMessage: '',
 
   currentQuestion: null,
   questionIndex: 0,
@@ -352,6 +359,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       roomId: null,
       gameStatus: GameState.WAITING,
       isHost: false,
+      isFrozen: false,
+      freezeMessage: '',
       currentQuestion: null,
       questionIndex: 0,
       totalQuestions: 0,

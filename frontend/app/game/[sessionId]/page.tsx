@@ -19,6 +19,8 @@ export default function GamePage() {
   const {
     gameStatus,
     isHost,
+    isFrozen,
+    freezeMessage,
     currentQuestion,
     questionIndex,
     totalQuestions,

@@ -4,15 +4,19 @@ import {
   SubscribeMessage,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  OnGatewayInit,
   MessageBody,
   ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { OnEvent } from '@nestjs/event-emitter';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { GameSessionService, GameState } from './game-session.service';
 import { RoomService } from '../room/room.service';
 import { RoomGateway } from '../room/room.gateway';
+import { RedisService } from '../redis/redis.service';
 
 interface PlayerIdentity {
   userId?: string;
@@ -30,7 +34,7 @@ interface PlayerIdentity {
   },
   namespace: '/game',
 })
-export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit {
   @WebSocketServer()
   server: Server;
 
@@ -39,15 +43,38 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private socketMap = new Map<string, PlayerIdentity>();
   private sessionSockets = new Map<string, Set<string>>();
 
+  // Lưu callback để có thể resume timer khi unfreeze
+  private sessionCallbacks = new Map<string, (data: any) => void>();
+
   constructor(
     private readonly gameSessionService: GameSessionService,
     private readonly roomService: RoomService,
     private readonly jwtService: JwtService,
     private readonly roomGateway: RoomGateway,
+    private readonly redisService: RedisService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
+  afterInit(server: Server) {
+    this.logger.log('[GameGateway] Initialized');
+  }
+
+  // ============================================================================
+  // CONNECTION HANDLING (với IP Ban check)
+  // ============================================================================
+
   async handleConnection(client: Socket) {
-    this.logger.log(`[GameGateway] Client connected: ${client.id}`);
+    const ip = client.handshake.address;
+
+    // 🛡️ Lớp 1: Block IP bị blacklist ngay tại handshake
+    const isBanned = await this.redisService.isIpBanned(ip);
+    if (isBanned) {
+      this.logger.warn(`🛑 Rejected BANNED IP: ${ip} (socket: ${client.id})`);
+      client.disconnect(true);
+      return;
+    }
+
+    this.logger.log(`[GameGateway] Client connected: ${client.id} (IP: ${ip})`);
   }
 
   async handleDisconnect(client: Socket) {
@@ -74,6 +101,69 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     this.socketMap.delete(client.id);
   }
+
+  // ============================================================================
+  // SYSTEM INCIDENT EVENTS (từ DashboardService via EventEmitter)
+  // ============================================================================
+
+  @OnEvent('system.incident.lockdown')
+  async handleLockdown(payload: { enable: boolean; message: string }) {
+    this.logger.warn(`[SYSTEM FREEZE] broadcast freeze=${payload.enable}`);
+
+    if (this.server) {
+      this.server.emit('system:freeze', {
+        freeze: payload.enable,
+        message: payload.message,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    if (payload.enable) {
+      // FREEZE: Dừng tất cả question timer
+      const paused = await this.gameSessionService.pauseAllTimers();
+      this.logger.warn(`[FREEZE] Paused ${paused.size} session timers`);
+    } else {
+      // UNFREEZE: Resume timer với thời gian còn lại
+      for (const [sessionId, callback] of this.sessionCallbacks.entries()) {
+        const remainingMs = await this.gameSessionService.getTimerRemainingMs(sessionId);
+        if (remainingMs !== null && remainingMs > 0) {
+          const remainingSec = Math.ceil(remainingMs / 1000);
+          this.logger.log(`[UNFREEZE] Resuming session ${sessionId} with ${remainingSec}s remaining`);
+
+          // Thông báo frontend thời gian còn lại
+          this.server.to(sessionId).emit('timer_resume', {
+            remainingSeconds: remainingSec,
+          });
+
+          // Lên lịch lại timer với thời gian còn lại
+          await this.gameSessionService.scheduleQuestionEnd(
+            sessionId,
+            remainingSec,
+            callback,
+          );
+        }
+      }
+    }
+  }
+
+  @OnEvent('system.incident.kill_switch')
+  handleKillSwitch(payload?: { pin?: string }) {
+    if (payload?.pin) {
+      this.logger.error(`🚨 TARGETED KILL SWITCH: Room [${payload.pin}]`);
+      if (this.server) {
+        this.server.in(payload.pin).disconnectSockets(true);
+      }
+    } else {
+      this.logger.error('🚨 GLOBAL KILL SWITCH: Disconnecting ALL game sockets!');
+      if (this.server) {
+        this.server.disconnectSockets(true);
+      }
+    }
+  }
+
+  // ============================================================================
+  // GAME EVENTS
+  // ============================================================================
 
   @SubscribeMessage('host_join_game')
   async handleHostJoinGame(
@@ -253,10 +343,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         serverTime: Date.now(),
       });
 
+      const questionEndCallback = (data: any) => this.handleQuestionEnd(result.session.id, data);
+      this.sessionCallbacks.set(result.session.id, questionEndCallback);
       this.gameSessionService.scheduleQuestionEnd(
         result.session.id,
         result.firstQuestion.timeLimit,
-        (data) => this.handleQuestionEnd(result.session.id, data),
+        questionEndCallback,
       );
 
       return { success: true, sessionId: result.session.id };
@@ -296,10 +388,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         serverTime: Date.now(),
       });
 
+      const nextCallback = (data: any) => this.handleQuestionEnd(payload.sessionId, data);
+      this.sessionCallbacks.set(payload.sessionId, nextCallback);
       this.gameSessionService.scheduleQuestionEnd(
         payload.sessionId,
         result.question.timeLimit,
-        (data) => this.handleQuestionEnd(payload.sessionId, data),
+        nextCallback,
       );
 
       return { success: true };

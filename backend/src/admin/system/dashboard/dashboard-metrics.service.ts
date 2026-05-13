@@ -26,15 +26,18 @@ export class DashboardMetricsService implements OnModuleInit, OnModuleDestroy {
       const stats = await pidusage(process.pid);
       
       const metrics = {
-        cpu: stats.cpu, // CPU usage %
-        memory: stats.memory, // Memory in bytes
+        cpu: stats.cpu,
+        memory: stats.memory,
         uptime: process.uptime(),
         freeMem: os.freemem(),
         totalMem: os.totalmem(),
         timestamp: new Date().toISOString(),
       };
 
-      // Push ra frontend qua WebSocket
+      this.logger.log(
+        `[Metrics] CPU: ${metrics.cpu.toFixed(2)}% | RAM: ${(metrics.memory / 1024 / 1024).toFixed(1)}MB | System: ${(metrics.freeMem / 1024 / 1024 / 1024).toFixed(2)}GB free`,
+      );
+
       this.systemGateway.broadcastMetrics(metrics);
     } catch (err) {
       this.logger.error(`Failed to collect metrics: ${err.message}`);
