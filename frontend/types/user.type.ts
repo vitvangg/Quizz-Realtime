@@ -1,7 +1,9 @@
 export interface User {
-    id: number;
+    id: string;
     email: string;
-    username?: string;
+    fullName?: string;
+    avatar?: string;
+    phoneNumber?: string;
+    bio?: string;
     role?: string;
-    // Thêm các trường khác nếu cần
 }
