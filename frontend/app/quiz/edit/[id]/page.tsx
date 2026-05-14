@@ -6,14 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
-import { 
-  PlusCircle, 
-  Save, 
-  ArrowLeft, 
-  LayoutGrid, 
+import {
+  PlusCircle,
+  Save,
+  ArrowLeft,
+  LayoutGrid,
   Loader2,
   Info,
-  FileText 
+  FileText
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -116,9 +116,29 @@ export default function EditQuizPage() {
     setQuestions(questions.filter((q) => q.id !== id));
   };
 
-  const updateQuestion = (id: string, field: keyof Question, value: any) => {
+  const updateQuestion = (
+    id: string,
+    field: keyof Question,
+    value: any
+  ) => {
+    // 🔥 Nếu sửa timeLimit của câu đầu tiên
+    // thì apply cho toàn bộ câu hỏi
+    if (field === "timeLimit" && questions[0]?.id === id) {
+      setQuestions(
+        questions.map((q) => ({
+          ...q,
+          timeLimit: value,
+        }))
+      );
+
+      return;
+    }
+
+    // 🔥 Các trường hợp khác → update riêng
     setQuestions(
-      questions.map((q) => (q.id === id ? { ...q, [field]: value } : q))
+      questions.map((q) =>
+        q.id === id ? { ...q, [field]: value } : q
+      )
     );
   };
 
@@ -201,6 +221,16 @@ export default function EditQuizPage() {
       const hasCorrect = questions[i].answers.some(a => a.isCorrect);
       if (!hasCorrect) {
         toast.error(`Câu hỏi ${i + 1} chưa chọn đáp án đúng!`);
+        return;
+      }
+      const emptyAnswerIndex = questions[i].answers.findIndex(
+        (a) => !a.content.trim()
+      );
+
+      if (emptyAnswerIndex !== -1) {
+        toast.error(
+          `Câu hỏi ${i + 1} đang thiếu nội dung đáp án ${emptyAnswerIndex + 1}!`
+        );
         return;
       }
     }

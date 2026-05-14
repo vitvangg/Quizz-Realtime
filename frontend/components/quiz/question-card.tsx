@@ -196,21 +196,21 @@ export function QuestionCard({
                   )
                 }
                 className="
-                  w-full
-                  min-h-[100px]
-                  p-4
-                  rounded-2xl
-                  bg-muted/30
-                  border-2
-                  border-transparent
-                  focus:border-primary/50
-                  focus:bg-background
-                  transition-all
-                  outline-none
-                  text-lg
-                  font-medium
-                  resize-none
-                "
+                    w-full
+                    min-h-[100px]
+                    p-4
+                    rounded-2xl
+                    bg-muted/30
+                    border-2
+                    border-transparent
+                    focus:border-primary/50
+                    focus:bg-background
+                    transition-all
+                    outline-none
+                    text-lg
+                    font-medium
+                    resize-none
+                  "
               />
             )}
           </div>
@@ -239,96 +239,98 @@ export function QuestionCard({
             <div className="grid gap-4 sm:grid-cols-2">
               {question.answers.map((a, aIndex) => (
                 <div
-                    key={a.id}
-  onClick={() => {
-    if (!readOnly && onUpdateAnswer) {
-      onUpdateAnswer(question.id, a.id, 'isCorrect', true);
-    }
-  }}
-  className={`
-    group/answer
-    relative
-    flex
-    items-center
-    gap-3
-    rounded-2xl
-    border-2
-    p-4
-    transition-all
-    ${a.isCorrect
-      ? "border-green-500 bg-green-50/50 shadow-sm"
-      : "border-muted-foreground/10 bg-muted/20 hover:border-primary/30"
-    }
-    ${!readOnly ? "cursor-pointer" : ""}
-  `}
->
-  {/* CORRECT SELECTOR */}
-  <div
-    className={`
-      shrink-0
-      transition-transform
-      ${a.isCorrect ? "text-green-600 scale-110" : "text-muted-foreground/30"}
+                  key={a.id}
+                  onClick={() => {
+                    if (!readOnly && onUpdateAnswer) {
+                      onUpdateAnswer(question.id, a.id, 'isCorrect', true);
+                    }
+                  }}
+                  className={`
+      group/answer
+      relative
+      flex
+      items-center
+      gap-3
+      rounded-2xl
+      border-2
+      p-4
+      transition-all
+      ${a.isCorrect
+                      ? "border-green-500 bg-green-50/50 shadow-sm"
+                      : "border-muted-foreground/10 bg-muted/20 hover:border-primary/30"
+                    }
+      ${!readOnly ? "cursor-pointer" : ""}
     `}
-  >
-    {a.isCorrect ? (
-      <CheckCircle2 className="h-6 w-6" />
-    ) : (
-      <Circle className="h-6 w-6" />
-    )}
-  </div>
-
-  {/* INPUT */}
-  {readOnly ? (
-    <span className={`font-bold ${a.isCorrect ? "text-green-800" : ""}`}>
-      {a.content}
-    </span>
-  ) : (
-    <Input
-      placeholder={`Đáp án ${aIndex + 1}...`}
-      value={a.content}
-      onChange={(e) =>
-        onUpdateAnswer?.(
-          question.id,
-          a.id,
-          "content",
-          e.target.value
-        )
-      }
-      className={`
-        border-0
-        bg-transparent
-        shadow-none
-        focus-visible:ring-0
-        font-bold
-        p-0
-        ${a.isCorrect ? "text-green-800" : ""}
+                >
+                  {/* CORRECT SELECTOR */}
+                  <div
+                    className={`
+        shrink-0
+        transition-transform
+        ${a.isCorrect ? "text-green-600 scale-110" : "text-muted-foreground/30"}
       `}
-    />
-  )}
+                  >
+                    {a.isCorrect ? (
+                      <CheckCircle2 className="h-6 w-6" />
+                    ) : (
+                      <Circle className="h-6 w-6" />
+                    )}
+                  </div>
 
-  {/* REMOVE ANSWER */}
-  {!readOnly && question.answers.length > 2 && (
-    <Button
-      variant="ghost"
-      size="icon"
-      className="
-        opacity-0
-        group-hover/answer:opacity-100
-        h-8
-        w-8
-        rounded-full
-        hover:bg-destructive/10
-        hover:text-destructive
-        transition-all
-      "
-      onClick={() =>
-        onRemoveAnswer?.(question.id, a.id)
-      }
-    >
-      <Trash2 className="h-4 w-4" />
-    </Button>
-  )}
-</div>
+                  {/* INPUT */}
+                  {readOnly ? (
+                    <span className={`font-bold ${a.isCorrect ? "text-green-800" : ""}`}>
+                      {a.content}
+                    </span>
+                  ) : (
+                    <Input
+                      placeholder={`Đáp án ${aIndex + 1}...`}
+                      value={a.content}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) =>
+                        onUpdateAnswer?.(
+                          question.id,
+                          a.id,
+                          "content",
+                          e.target.value
+                        )
+                      }
+                      className={`
+          border-0
+          bg-transparent
+          shadow-none
+          focus-visible:ring-0
+          font-bold
+          p-0
+          ${a.isCorrect ? "text-green-800" : ""}
+        `}
+                    />
+                  )}
+
+                  {/* REMOVE ANSWER */}
+                  {!readOnly && question.answers.length > 2 && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="
+          opacity-0
+          group-hover/answer:opacity-100
+          h-8
+          w-8
+          rounded-full
+          hover:bg-destructive/10
+          hover:text-destructive
+          transition-all
+        "
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRemoveAnswer?.(question.id, a.id);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
               ))}
             </div>
           </div>
