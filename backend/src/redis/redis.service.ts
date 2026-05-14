@@ -52,31 +52,59 @@ export class RedisService extends Redis implements OnModuleDestroy {
     return val === 'true';
   }
 
+  async setMaintenanceMode(enable: boolean): Promise<void> {
+    await this.set('system:config:maintenance', enable ? 'true' : 'false');
+  }
+
+  async isMaintenanceMode(): Promise<boolean> {
+    const val = await this.get('system:config:maintenance');
+    return val === 'true';
+  }
+
   // ============================================================================
   // IP BLACKLIST
   // ============================================================================
 
-  async banIp(ip: string, reason: string = 'Spam detected'): Promise<void> {
-    const data = JSON.stringify({ reason, timestamp: Date.now() });
+  async banIp(ip: string, reason: string = 'Spam detected', ttlSeconds = 86400): Promise<void> {
+    const expiresAt = Date.now() + ttlSeconds * 1000;
+    const data = JSON.stringify({ reason, timestamp: Date.now(), expiresAt });
     await this.hset('blacklist:ips', ip, data);
+    // Lưu TTL riêng để tự unban
+    await this.set(`blacklist:ttl:${ip}`, '1', 'EX', ttlSeconds);
   }
 
   async unbanIp(ip: string): Promise<void> {
     await this.hdel('blacklist:ips', ip);
+    await this.del(`blacklist:ttl:${ip}`);
   }
 
-  async getBannedIps(): Promise<Array<{ ip: string; reason: string; timestamp: number }>> {
+  async getBannedIps(): Promise<Array<{ ip: string; reason: string; timestamp: number; expiresAt?: number }>> {
     const data = await this.hgetall('blacklist:ips');
     if (!data) return [];
-    return Object.entries(data).map(([ip, infoStr]) => {
+    const now = Date.now();
+    const result: Array<{ ip: string; reason: string; timestamp: number; expiresAt?: number }> = [];
+    for (const [ip, infoStr] of Object.entries(data)) {
       const info = JSON.parse(infoStr as string);
-      return { ip, ...info };
-    });
+      // Tự động dọn IP đã hết TTL (Redis TTL key đã xóa nhưng hash vẫn còn)
+      if (info.expiresAt && info.expiresAt < now) {
+        await this.hdel('blacklist:ips', ip);
+        continue;
+      }
+      result.push({ ip, ...info });
+    }
+    return result;
   }
 
   async isIpBanned(ip: string): Promise<boolean> {
     const isBanned = await this.hexists('blacklist:ips', ip);
-    return isBanned === 1;
+    if (isBanned !== 1) return false;
+    // Kiểm tra TTL — nếu đã hết hạn thì tự unban
+    const ttlAlive = await this.exists(`blacklist:ttl:${ip}`);
+    if (ttlAlive === 0) {
+      await this.hdel('blacklist:ips', ip);
+      return false;
+    }
+    return true;
   }
 
   // ============================================================================

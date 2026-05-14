@@ -1,0 +1,25 @@
+services:
+  k6-spam:
+    image: grafana/k6
+    volumes:
+      - ./load-tests:/scripts
+    environment:
+      - BASE_URL=ws://backend:5000/socket.io/?EIO=4&transport=websocket
+    command: run /scripts/socket-spam.js
+    networks:
+      - quizz-network
+
+  k6-ddos:
+    image: grafana/k6
+    volumes:
+      - ./load-tests:/scripts
+    environment:
+      - BASE_URL=http://backend:5000
+    command: run /scripts/ddos-attack.js
+    networks:
+      - quizz-network
+
+networks:
+  quizz-network:
+    external: true
+    name: quizz-realtime_default # Matches the default network name created by the main compose

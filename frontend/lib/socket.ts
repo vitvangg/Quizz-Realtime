@@ -136,6 +136,33 @@ safeOn(sharedSocket, 'error', (error: { message: string }) => {
   console.error('[SharedSocket] Error:', error);
 });
 
+// 🚨 SYSTEM FREEZE: Ngừng toàn bộ hoạt động game
+safeOn(sharedSocket, 'system:freeze', (data: { freeze: boolean; message: string }) => {
+  console.warn('[SharedSocket] System freeze event:', data);
+  emitToStore({ isFrozen: data.freeze, freezeMessage: data.message || '' });
+});
+
+// 🔧 MAINTENANCE MODE: Thông báo bảo trì và ngắt kết nối
+safeOn(sharedSocket, 'system:maintenance', (data: { maintenance: boolean; message: string }) => {
+  console.warn('[SharedSocket] Maintenance event:', data);
+  emitToStore({ isMaintenance: data.maintenance, maintenanceMessage: data.message || '' });
+});
+
+// ⏱️ TIMER RESUME: Cập nhật lại thời gian sau khi unfreeze
+safeOn(sharedSocket, 'timer_resume', (data: { remainingSeconds: number }) => {
+  emitToStore({ timeRemaining: data.remainingSeconds });
+});
+
+// 🚪 ROOM CLOSED
+safeOn(sharedSocket, 'room_closed', (data: { reason: string }) => {
+  emitToStore({ roomClosedReason: data.reason });
+});
+
+// 📈 SCORE UPDATE
+safeOn(sharedSocket, 'score_update', (data: { leaderboard: any[] }) => {
+  emitToStore({ leaderboard: data.leaderboard });
+});
+
 /** Returns the shared socket instance. */
 export function getSocket(): Socket {
   return sharedSocket;

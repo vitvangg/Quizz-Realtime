@@ -62,15 +62,29 @@ export default function QuizLayout({
                   <p className="text-sm font-bold leading-none">{user.email?.split('@')[0]}</p>
                   <p className="text-[10px] text-muted-foreground uppercase font-black">Người tạo</p>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="rounded-full bg-muted hover:bg-muted/80 h-10 w-10 overflow-hidden"
-                  onClick={handleLogout}
-                  title="Đăng xuất"
-                >
-                  <LogOut className="h-4 w-4 text-destructive" />
-                </Button>
+                
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="rounded-full bg-muted hover:bg-muted/80 h-10 w-10 overflow-hidden"
+                    asChild
+                  >
+                    <Link href="/profile" title="Hồ sơ cá nhân">
+                      <User className="h-4 w-4 text-primary" />
+                    </Link>
+                  </Button>
+
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="rounded-full bg-muted hover:bg-muted/80 h-10 w-10 overflow-hidden"
+                    onClick={handleLogout}
+                    title="Đăng xuất"
+                  >
+                    <LogOut className="h-4 w-4 text-destructive" />
+                  </Button>
+                </div>
               </div>
             ) : (
               <Button asChild className="rounded-full px-6">
