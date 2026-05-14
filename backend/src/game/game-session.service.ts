@@ -56,7 +56,8 @@ export class GameSessionService {
         quiz: {
           include: {
             questions: {
-              include: { answers: true },
+              where: { deletedAt: null },
+              include: { answers: { where: { deletedAt: null } } },
               orderBy: { orderIndex: 'asc' },
             },
           },
@@ -131,9 +132,12 @@ export class GameSessionService {
       7200,
     );
 
+    // Add regular players to leaderboard (their player.id values)
     await this.initLeaderboard(session.id, room.players.map((p) => p.id));
 
-    this.logger.log(`Game session ${session.id} started for room ${roomId}`);
+    this.logger.log(
+      `Game session ${session.id} started for room ${roomId} | ${room.players.length} players`,
+    );
 
     return {
       session,
@@ -160,7 +164,8 @@ export class GameSessionService {
             quiz: {
               include: {
                 questions: {
-                  include: { answers: true },
+                  where: { deletedAt: null },
+                  include: { answers: { where: { deletedAt: null } } },
                   orderBy: { orderIndex: 'asc' },
                 },
               },
@@ -210,7 +215,8 @@ export class GameSessionService {
             quiz: {
               include: {
                 questions: {
-                  include: { answers: true },
+                  where: { deletedAt: null },
+                  include: { answers: { where: { deletedAt: null } } },
                   orderBy: { orderIndex: 'asc' },
                 },
               },
@@ -246,6 +252,12 @@ export class GameSessionService {
       questionStartedAt: null,
     });
 
+    // Update DB so reload reads correct state
+    await this.prisma.gameSession.update({
+      where: { id: sessionId },
+      data: { currentQuestionIndex: cached.currentQuestionIndex },
+    });
+
     callback(resultData);
 
     if (cached.currentQuestionIndex >= cached.totalQuestions - 1) {
@@ -274,7 +286,8 @@ export class GameSessionService {
             quiz: {
               include: {
                 questions: {
-                  include: { answers: true },
+                  where: { deletedAt: null },
+                  include: { answers: { where: { deletedAt: null } } },
                   orderBy: { orderIndex: 'asc' },
                 },
               },
@@ -297,6 +310,8 @@ export class GameSessionService {
     });
 
     const nextQuestion = room.room.quiz.questions[nextIndex];
+
+    this.logger.log(`[GameSessionService] nextQuestion: nextIndex=${nextIndex}, questionId=${nextQuestion.id}, questionContent="${nextQuestion.content}"`);
 
     const newCache: GameCache = {
       ...cached,
@@ -379,6 +394,17 @@ export class GameSessionService {
     const session = await this.prisma.gameSession.findUnique({
       where: { id: sessionId },
       include: {
+        room: {
+          include: {
+            quiz: {
+              include: {
+                questions: {
+                  where: { deletedAt: null },
+                },
+              },
+            },
+          },
+        },
         players: {
           include: { player: true },
           orderBy: { score: 'desc' },
@@ -394,7 +420,8 @@ export class GameSessionService {
       sessionId: session.id,
       roomId: session.roomId,
       status: cached?.status || GameState.WAITING,
-      currentQuestionIndex: session.currentQuestionIndex,
+      currentQuestionIndex: cached?.currentQuestionIndex ?? session.currentQuestionIndex,
+      totalQuestions: cached?.totalQuestions ?? session.room.quiz.questions.length,
       cachedStatus: cached?.status,
     };
   }
@@ -415,7 +442,8 @@ export class GameSessionService {
             quiz: {
               include: {
                 questions: {
-                  include: { answers: true },
+                  where: { deletedAt: null },
+                  include: { answers: { where: { deletedAt: null } } },
                   orderBy: { orderIndex: 'asc' },
                 },
               },
@@ -436,6 +464,7 @@ export class GameSessionService {
     // Compute remaining time based on server clock
     let remainingTime: number | null = null;
     let currentQuestion: any = null;
+    let correctAnswerId: string | null = null;
 
     if (cached && cached.status === GameState.QUESTION_ACTIVE && cached.questionStartedAt) {
       const elapsed = (Date.now() - cached.questionStartedAt) / 1000;
@@ -449,6 +478,20 @@ export class GameSessionService {
           timeLimit: questionData.timeLimit,
         };
       }
+    } else if (cached && cached.status === GameState.QUESTION_RESULT) {
+      // Restore current question and correct answer for QUESTION_RESULT state
+      const questionData = session.room.quiz.questions[cached.currentQuestionIndex];
+      if (questionData) {
+        currentQuestion = {
+          id: questionData.id,
+          content: questionData.content,
+          answers: questionData.answers.map((a: any) => ({ id: a.id, content: a.content })),
+          timeLimit: questionData.timeLimit,
+        };
+        // Find correct answer
+        const correctAnswer = questionData.answers.find((a: any) => a.isCorrect);
+        correctAnswerId = correctAnswer?.id || null;
+      }
     }
 
     const leaderboard = await this.getLeaderboard(sessionId);
@@ -456,13 +499,26 @@ export class GameSessionService {
     return {
       sessionId: session.id,
       roomId: session.roomId,
+      room: {
+        hostId: session.room.hostId,
+      },
       status: cached?.status || GameState.WAITING,
       currentQuestionIndex: cached?.currentQuestionIndex ?? 0,
       totalQuestions: cached?.totalQuestions ?? session.room.quiz.questions.length,
       remainingTime,
       currentQuestion,
+      correctAnswerId,
       leaderboard,
+      serverTime: Date.now(), // Thời điểm server trả response
+      questionStartedAt: cached?.questionStartedAt || null, // Thời điểm câu hỏi bắt đầu (server time)
     };
+  }
+
+  /**
+   * Alias for getFullGameState - used by GameGateway for socket-based state recovery
+   */
+  async getFullSessionState(sessionId: string) {
+    return this.getFullGameState(sessionId);
   }
 
   async getSessionWithQuiz(sessionId: string) {
@@ -474,6 +530,7 @@ export class GameSessionService {
             quiz: {
               include: {
                 questions: {
+                  where: { deletedAt: null },
                   orderBy: { orderIndex: 'asc' },
                 },
               },
@@ -594,6 +651,16 @@ export class GameSessionService {
     }
   }
 
+  /**
+   * Updates the questionStartedAt timestamp in cache.
+   * Used after countdown ends to reset the timer for the actual question.
+   */
+  async updateQuestionStartTime(sessionId: string, startTime: number) {
+    await this.updateGameCache(sessionId, {
+      questionStartedAt: startTime,
+    });
+  }
+
   private async initLeaderboard(sessionId: string, playerIds: string[]) {
     if (playerIds.length === 0) return;
 
@@ -625,17 +692,31 @@ export class GameSessionService {
     }
 
     const playerIds = leaderboard.map((l) => l.playerId);
+
+    // Separate player IDs (actual players) from host IDs (format: host_<userId>)
+    const actualPlayerIds = playerIds.filter((id) => !id.startsWith('host_'));
+    const hostUserIds = playerIds
+      .filter((id) => id.startsWith('host_'))
+      .map((id) => id.replace('host_', ''));
+
+    // Query players table for regular players
     const players = await this.prisma.player.findMany({
-      where: { id: { in: playerIds } },
+      where: { id: { in: actualPlayerIds } },
       select: { id: true, nickname: true },
     });
-
     const playerMap = new Map(players.map((p) => [p.id, p.nickname]));
+
+    // Query users table for hosts
+    const hostUsers = await this.prisma.user.findMany({
+      where: { id: { in: hostUserIds } },
+      select: { id: true, fullName: true },
+    });
+    const hostMap = new Map(hostUsers.map((u) => [`host_${u.id}`, u.fullName || 'Host']));
 
     return leaderboard.map((l, index) => ({
       rank: index + 1,
       playerId: l.playerId,
-      nickname: playerMap.get(l.playerId) || 'Unknown',
+      nickname: playerMap.get(l.playerId) || hostMap.get(l.playerId) || 'Unknown',
       score: l.score,
     }));
   }
@@ -649,6 +730,19 @@ export class GameSessionService {
       score: parseInt(score || '0', 10),
       rank: rank !== null ? rank + 1 : null,
     };
+  }
+
+  /**
+   * Lấy danh sách questionIds mà player đã trả lời trong session
+   * Dùng để khôi phục trạng thái hasAnswered khi reload
+   */
+  async getPlayerAnsweredQuestions(sessionId: string, playerId: string): Promise<string[]> {
+    const playerSession = await this.prisma.playerSession.findFirst({
+      where: { sessionId, playerId },
+      include: { answers: true },
+    });
+
+    return playerSession?.answers.map((pa) => pa.questionId) || [];
   }
 
   async submitAnswer(

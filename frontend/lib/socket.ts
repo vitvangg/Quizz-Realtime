@@ -99,20 +99,21 @@ safeOn(sharedSocket, 'countdown_tick', (data: { remaining: number }) => {
   emitToStore({ countdown: data.remaining });
 });
 
-safeOn(sharedSocket, 'question_start', (data: any) => {
-  console.log('[SharedSocket] question_start:', data);
-  emitToStore({
-    gameStatus: 'QUESTION_ACTIVE',
-    currentQuestion: data.question,
-    questionIndex: data.questionIndex,
-    totalQuestions: data.totalQuestions,
-    questionStartTime: data.serverTime,
-    timeRemaining: data.question.timeLimit,
-    hasAnswered: false,
-    selectedAnswerId: null,
-    correctAnswerId: null,
-  });
-});
+// Comment: question_start handled by game page listener to avoid double processing
+// safeOn(sharedSocket, 'question_start', (data: any) => {
+//   console.log('[SharedSocket] question_start:', data);
+//   emitToStore({
+//     gameStatus: 'QUESTION_ACTIVE',
+//     currentQuestion: data.question,
+//     questionIndex: data.questionIndex,
+//     totalQuestions: data.totalQuestions,
+//     questionStartTime: data.serverTime,
+//     timeRemaining: data.question.timeLimit,
+//     hasAnswered: false,
+//     selectedAnswerId: null,
+//     correctAnswerId: null,
+//   });
+// });
 
 safeOn(sharedSocket, 'question_result', (data: any) => {
   console.log('[SharedSocket] question_result:', data);

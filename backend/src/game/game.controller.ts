@@ -1,4 +1,4 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import { GameSessionService } from './game-session.service';
 
 @Controller('games')
@@ -13,5 +13,18 @@ export class GameController {
   @Get(':sessionId/state')
   async getGameState(@Param('sessionId') sessionId: string) {
     return this.gameSessionService.getFullGameState(sessionId);
+  }
+
+  /**
+   * Lấy danh sách questionIds mà player đã trả lời trong session
+   * Dùng để khôi phục trạng thái hasAnswered khi reload
+   */
+  @Get(':sessionId/answered-questions')
+  async getPlayerAnsweredQuestions(
+    @Param('sessionId') sessionId: string,
+    @Query('playerId') playerId: string,
+  ) {
+    const answeredQuestions = await this.gameSessionService.getPlayerAnsweredQuestions(sessionId, playerId);
+    return { answeredQuestions };
   }
 }

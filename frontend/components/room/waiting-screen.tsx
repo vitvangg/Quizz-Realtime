@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PlayerList } from './player-list';
 import { useRoomStore } from '@/stores/room.store';
 import { useGameStore } from '@/stores/game.store';
+import { useAuthStore } from '@/stores/auth.store';
 import { GameState } from '@/types/game.type';
 import { toast } from 'sonner';
 
@@ -155,7 +156,13 @@ export function WaitingScreen({ roomId }: WaitingScreenProps) {
       const sessionId = await gameStore.startGame(currentRoom.id);
 
       if (sessionId) {
+        // Save both hostSessionId and hostUserId for re-authentication after reload
+        const authStore = useAuthStore.getState();
         sessionStorage.setItem('hostSessionId', sessionId);
+        if (authStore.user?.id) {
+          sessionStorage.setItem('hostUserId', String(authStore.user.id));
+          console.log('[WaitingScreen] Saved hostUserId:', authStore.user.id);
+        }
         toast.success('Game bắt đầu!', { id: 'start-game' });
       }
     } catch (error) {
