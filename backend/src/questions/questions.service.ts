@@ -1,15 +1,24 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+
 import { CreateQuestionDto } from './dto/create-question.dto';
 import { UpdateQuestionDto } from './dto/update-question.dto';
+
 import { PrismaService } from 'src/prisma/prisma.service';
 
 @Injectable()
 export class QuestionsService {
-  constructor(private readonly prismaService: PrismaService) {}
+  constructor(private readonly prismaService: PrismaService) { }
 
   async checkQuestionOwner(questionId: string, userId: string) {
-    const question = await this.prismaService.question.findUnique({
-      where: { id: questionId },
+    const question = await this.prismaService.question.findFirst({
+      where: {
+        id: questionId,
+        deletedAt: null,
+      },
       select: {
         quiz: {
           select: {
@@ -19,23 +28,32 @@ export class QuestionsService {
       },
     });
 
-    if (!question) throw new NotFoundException('khong ton tai quétion');
+    if (!question) {
+      throw new NotFoundException('Question not found');
+    }
 
     if (question.quiz.createdBy !== userId) {
-      throw new ForbiddenException('not alloewd');
+      throw new ForbiddenException('Not allowed');
     }
   }
 
   async create(createQuestionDto: CreateQuestionDto, userId: string) {
-    const quiz = await this.prismaService.quiz.findUnique({
-      where: { id: createQuestionDto.quizId },
-      select: { createdBy: true },
+    const quiz = await this.prismaService.quiz.findFirst({
+      where: {
+        id: createQuestionDto.quizId,
+        deletedAt: null,
+      },
+      select: {
+        createdBy: true,
+      },
     });
 
-    if (!quiz) throw new NotFoundException('Quiz not found');
+    if (!quiz) {
+      throw new NotFoundException('Quiz not found');
+    }
 
     if (quiz.createdBy !== userId) {
-      throw new ForbiddenException('not allowed');
+      throw new ForbiddenException('Not allowed');
     }
 
     return this.prismaService.question.create({
@@ -50,22 +68,57 @@ export class QuestionsService {
 
   findAll() {
     return this.prismaService.question.findMany({
-      orderBy: { orderIndex: 'desc' },
-      include: { answers: true },
+      where: {
+        deletedAt: null,
+      },
+      orderBy: {
+        orderIndex: 'asc',
+      },
+      include: {
+        answers: {
+          where: {
+            deletedAt: null,
+          },
+          orderBy: {
+            content: 'asc',
+          },
+        },
+      },
     });
   }
 
   findByQuizId(quizId: string) {
     return this.prismaService.question.findMany({
-      where: { quizId },
-      orderBy: { orderIndex: 'desc' },
-      include: { answers: true },
+      where: {
+        quizId,
+        deletedAt: null,
+      },
+      orderBy: {
+        orderIndex: 'asc',
+      },
+      include: {
+        answers: {
+          where: {
+            deletedAt: null,
+          },
+        },
+      },
     });
   }
 
   findOne(id: string) {
-    return this.prismaService.question.findUnique({
-      where: { id },
+    return this.prismaService.question.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+      },
+      include: {
+        answers: {
+          where: {
+            deletedAt: null,
+          },
+        },
+      },
     });
   }
 
@@ -75,12 +128,17 @@ export class QuestionsService {
     userId: string,
   ) {
     await this.checkQuestionOwner(id, userId);
+
     const question = await this.findOne(id);
+
     if (!question) {
       throw new NotFoundException('Question not found');
     }
+
     return this.prismaService.question.update({
-      where: { id },
+      where: {
+        id,
+      },
       data: {
         ...updateQuestionDto,
       },
@@ -89,15 +147,26 @@ export class QuestionsService {
 
   async remove(id: string, userId: string) {
     await this.checkQuestionOwner(id, userId);
-    
-    // 1. Xóa tất cả Answers của câu hỏi này trước
-    await this.prismaService.answer.deleteMany({
-      where: { questionId: id }
+
+    // Soft delete all answers
+    await this.prismaService.answer.updateMany({
+      where: {
+        questionId: id,
+        deletedAt: null,
+      },
+      data: {
+        deletedAt: new Date(),
+      },
     });
 
-    // 2. Sau đó mới xóa Question
-    return this.prismaService.question.delete({
-      where: { id },
+    // Soft delete question
+    return this.prismaService.question.update({
+      where: {
+        id,
+      },
+      data: {
+        deletedAt: new Date(),
+      },
     });
   }
 }
