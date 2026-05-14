@@ -46,6 +46,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   // Lưu callback để có thể resume timer khi unfreeze
   private sessionCallbacks = new Map<string, (data: any) => void>();
 
+  // Host disconnect tracking - sessionId -> { hostSocketId, timeout }
+  private hostDisconnectTimeouts = new Map<string, NodeJS.Timeout>();
+  private readonly HOST_RECONNECT_GRACE_MS = 10000; // 10 seconds grace period
+
   constructor(
     private readonly gameSessionService: GameSessionService,
     private readonly roomService: RoomService,
@@ -94,6 +98,76 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
     if (!identity) return;
 
+    // Nếu là host, bắt đầu grace period trước khi terminate session
+    if (identity.isHost && identity.sessionId) {
+      this.handleHostDisconnect(client, identity);
+    } else {
+      // Non-host: simply remove from session
+      this.removeSocketFromSession(client, identity);
+    }
+
+    this.socketMap.delete(client.id);
+  }
+
+  /**
+   * Xử lý khi host disconnect - bắt đầu grace period
+   */
+  private async handleHostDisconnect(client: Socket, identity: PlayerIdentity) {
+    const { sessionId } = identity;
+    
+    if (!sessionId) {
+      this.removeSocketFromSession(client, identity);
+      return;
+    }
+
+    // Hủy timeout cũ nếu có (trong trường hợp host reconnect rồi disconnect lại)
+    this.cancelHostGraceTimeout(sessionId);
+
+    this.logger.log(`[GameGateway] Host disconnected, starting ${this.HOST_RECONNECT_GRACE_MS}ms grace period for session ${sessionId}`);
+
+    // Đánh dấu host đang offline
+    this.hostDisconnectTimeouts.set(sessionId, setTimeout(async () => {
+      this.logger.log(`[GameGateway] Host grace period expired for session ${sessionId}, terminating`);
+      await this.terminateSession(sessionId, 'HOST_DISCONNECTED');
+    }, this.HOST_RECONNECT_GRACE_MS));
+
+    // Notify players that host is temporarily disconnected
+    this.server.to(sessionId).emit('host_disconnected', {
+      sessionId,
+      gracePeriod: this.HOST_RECONNECT_GRACE_MS,
+    });
+  }
+
+  /**
+   * Xử lý khi host reconnect - hủy grace period
+   */
+  private handleHostReconnect(sessionId: string) {
+    const existingTimeout = this.hostDisconnectTimeouts.get(sessionId);
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+      this.hostDisconnectTimeouts.delete(sessionId);
+      this.logger.log(`[GameGateway] Host reconnected within grace period, session ${sessionId} continues`);
+      
+      // Notify players that host is back
+      this.server.to(sessionId).emit('host_reconnected', { sessionId });
+    }
+  }
+
+  /**
+   * Hủy host grace timeout
+   */
+  private cancelHostGraceTimeout(sessionId: string) {
+    const existingTimeout = this.hostDisconnectTimeouts.get(sessionId);
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+      this.hostDisconnectTimeouts.delete(sessionId);
+    }
+  }
+
+  /**
+   * Xóa socket khỏi session
+   */
+  private removeSocketFromSession(client: Socket, identity: PlayerIdentity) {
     if (identity.sessionId) {
       const sockets = this.sessionSockets.get(identity.sessionId);
       if (sockets) {
@@ -103,8 +177,48 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         }
       }
     }
+  }
 
-    this.socketMap.delete(client.id);
+  /**
+   * Terminate session và cleanup toàn bộ
+   */
+  private async terminateSession(sessionId: string, reason: 'HOST_EXITED' | 'GAME_FINISHED' | 'HOST_DISCONNECTED') {
+    this.logger.log(`[GameGateway] Terminating session ${sessionId} with reason: ${reason}`);
+
+    // 1. Cancel any pending timer
+    this.gameSessionService.cancelTimer(sessionId);
+
+    // 2. Cancel host grace timeout nếu có
+    this.cancelHostGraceTimeout(sessionId);
+
+    // 3. Emit session_closed to all players BEFORE cleanup
+    this.server.to(sessionId).emit('session_closed', {
+      sessionId,
+      reason,
+    });
+
+    // 4. Cleanup server state
+    await this.gameSessionService.cleanupSession(sessionId);
+
+    // 5. Update DB status to CLOSED
+    await this.gameSessionService.closeSession(sessionId);
+
+    // 6. Remove all sockets from session room
+    const sockets = this.sessionSockets.get(sessionId);
+    if (sockets) {
+      for (const socketId of sockets) {
+        const socket = this.server.sockets.sockets.get(socketId);
+        if (socket) {
+          socket.leave(sessionId);
+        }
+      }
+      this.sessionSockets.delete(sessionId);
+    }
+
+    // 7. Clear callbacks
+    this.sessionCallbacks.delete(sessionId);
+
+    this.logger.log(`[GameGateway] Session ${sessionId} terminated successfully`);
   }
 
   // ============================================================================
@@ -210,8 +324,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       totalQuestions: fullState?.totalQuestions ?? 0,
       leaderboard: fullState?.leaderboard || [],
       remainingTime,
+      // Include correctAnswerId for QUESTION_RESULT state restoration
+      correctAnswerId: fullState?.correctAnswerId || null,
     };
-    this.logger.log(`[GameGateway] buildReloadResponse: status=${response.status}, questionIndex=${response.questionIndex}, total=${response.totalQuestions}, currentQuestion=${!!response.currentQuestion}`);
+    this.logger.log(`[GameGateway] buildReloadResponse: status=${response.status}, questionIndex=${response.questionIndex}, correctAnswerId=${response.correctAnswerId}`);
     return response;
   }
 
@@ -281,33 +397,38 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   @SubscribeMessage('host_join_game')
   async handleHostJoinGame(
     @ConnectedSocket() client: Socket,
-    @MessageBody() payload: { sessionId: string; jwt?: string; userId?: string },
+    @MessageBody() payload: { sessionId: string; jwt: string },
   ) {
     try {
-      // 1. Verify host identity
-      let hostId: string = 'unknown';
-      let isActualHost = false;
+      // JWT là source of truth DUY NHẤT cho user identity
+      // KHÔNG bao giờ trust payload.userId, sessionStorage, hay query params
+      let hostId: string;
 
-      if (payload.jwt) {
-        try {
-          const decoded = this.jwtService.verify(payload.jwt);
-          hostId = decoded.sub || decoded.id;
-        } catch {
-          if (payload.userId) hostId = payload.userId;
-        }
-      } else if (payload.userId) {
-        hostId = payload.userId;
+      if (!payload.jwt) {
+        this.logger.warn(`[GameGateway] host_join_game rejected: no JWT provided`);
+        return { success: false, error: 'Authentication required' };
       }
 
-      // 2. Get session state
+      try {
+        const decoded = this.jwtService.verify(payload.jwt);
+        hostId = decoded.sub || decoded.id;
+      } catch (jwtError) {
+        this.logger.warn(`[GameGateway] host_join_game rejected: invalid JWT`);
+        return { success: false, error: 'Invalid or expired token' };
+      }
+
+      if (!hostId) {
+        this.logger.warn(`[GameGateway] host_join_game rejected: could not extract user ID from JWT`);
+        return { success: false, error: 'Invalid token: missing user ID' };
+      }
+
+      // Get session state to verify host status
       const fullState = await this.gameSessionService.getFullSessionState(payload.sessionId);
 
-      // 3. Verify against DB
-      if (fullState?.room?.hostId && hostId === fullState.room.hostId) {
-        isActualHost = true;
-      }
+      // Verify against DB - only room.hostId determines actual host
+      const isActualHost = !!(fullState?.room?.hostId && hostId === fullState.room.hostId);
 
-      // 4. Register socket
+      // Register socket with identity
       client.join(payload.sessionId);
       const identity: PlayerIdentity = {
         userId: hostId,
@@ -319,7 +440,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       };
       this.registerSocketToSession(client, payload.sessionId, identity);
 
-      this.logger.log(`[GameGateway] Registered socket ${client.id} as isHost=${isActualHost}, session=${payload.sessionId}`);
+      // If this is a host reconnect, cancel the grace timeout
+      if (isActualHost) {
+        this.handleHostReconnect(payload.sessionId);
+      }
+
+      this.logger.log(`[GameGateway] Registered socket ${client.id} as isHost=${isActualHost}, session=${payload.sessionId}, userId=${hostId}`);
 
       return {
         success: true,
@@ -339,23 +465,32 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   @SubscribeMessage('host_start_game')
   async handleHostStartGame(
     @ConnectedSocket() client: Socket,
-    @MessageBody() payload: { roomId: string; jwt?: string },
+    @MessageBody() payload: { roomId: string; jwt: string },
   ) {
     try {
+      // JWT là source of truth DUY NHẤT
+      if (!payload.jwt) {
+        this.logger.warn(`[GameGateway] host_start_game rejected: no JWT`);
+        return { success: false, error: 'Authentication required' };
+      }
+
       let hostId: string;
-      if (payload.jwt) {
+      try {
         const decoded = this.jwtService.verify(payload.jwt);
         hostId = decoded.sub || decoded.id;
-      } else {
-        const identity = this.verifyHost(client);
-        if (!identity) return { success: false, error: 'Only host can start game' };
-        hostId = identity.userId || identity.playerId;
+      } catch (jwtError) {
+        this.logger.warn(`[GameGateway] host_start_game rejected: invalid JWT`);
+        return { success: false, error: 'Invalid or expired token' };
+      }
+
+      if (!hostId) {
+        return { success: false, error: 'Invalid token: missing user ID' };
       }
 
       // Start game
       const result = await this.gameSessionService.startGame(payload.roomId, hostId);
 
-      // Register socket
+      // Register socket with verified host identity
       client.join(result.session.id);
       const identity: PlayerIdentity = {
         userId: hostId,
@@ -468,16 +603,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       const identity = this.verifyHost(client);
       if (!identity) return { success: false, error: 'Only host can close room' };
 
-      this.gameSessionService.cancelTimer(payload.sessionId);
-
-      // Notify all sockets in session
-      const sessionSockets = this.sessionSockets.get(payload.sessionId);
-      if (sessionSockets) {
-        for (const socketId of sessionSockets) {
-          const socket = this.server.sockets.sockets.get(socketId);
-          socket?.emit('room_closed', { reason: 'Host da roi phong' });
-        }
-      }
+      // Terminate session with HOST_EXITED reason
+      await this.terminateSession(payload.sessionId, 'HOST_EXITED');
 
       return { success: true };
     } catch (error) {

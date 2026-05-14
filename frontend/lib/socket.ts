@@ -6,9 +6,8 @@ const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000'
 
 /**
  * Single shared socket instance.
- * Listeners registered ONCE at module load — survive all SPA navigation.
- * Pages do NOT register listeners here. State updates flow from socket → store via
- * registered callbacks. If store isn't ready yet, events are queued.
+ * IMPORTANT: Socket connection is controlled by auth state.
+ * We don't auto-connect because we need auth token to be ready first.
  */
 
 // Module-level listeners map to prevent duplicate registration
@@ -20,12 +19,39 @@ function safeOn(socket: Socket, event: string, handler: SocketHandler) {
   socket.on(event, handler);
 }
 
+// Socket instance - auth token will be set when connecting
 const sharedSocket: Socket = io(`${SOCKET_URL}/game`, {
-  autoConnect: true,
+  autoConnect: false, // IMPORTANT: Don't auto-connect - wait for auth
   reconnection: true,
   reconnectionAttempts: 5,
   reconnectionDelay: 1000,
 });
+
+// Store the auth token to attach to socket connections
+let _authToken: string | null = null;
+
+export function setSocketAuthToken(token: string | null) {
+  _authToken = token;
+  
+  // If connected, disconnect and reconnect with new token
+  // This ensures socket always has the latest auth token
+  if (sharedSocket.connected) {
+    const currentAuth = (sharedSocket.auth as any)?.token;
+    if (currentAuth !== token) {
+      sharedSocket.disconnect();
+      sharedSocket.connect();
+    }
+  }
+}
+
+export function connectSocketWithAuth(token: string) {
+  setSocketAuthToken(token);
+  
+  if (!sharedSocket.connected) {
+    (sharedSocket as any).auth = { token };
+    sharedSocket.connect();
+  }
+}
 
 // ── Module-level redirect state (survives Zustand resets) ──────────────────────────
 /**
@@ -115,14 +141,16 @@ safeOn(sharedSocket, 'countdown_tick', (data: { remaining: number }) => {
 //   });
 // });
 
-safeOn(sharedSocket, 'question_result', (data: any) => {
-  console.log('[SharedSocket] question_result:', data);
-  emitToStore({
-    gameStatus: 'QUESTION_RESULT',
-    leaderboard: data.leaderboard,
-    correctAnswerId: data.correctAnswer?.id || null,
-  });
-});
+// Comment: question_result is handled by game page listener to avoid double processing
+// The game page handler needs to also update myScore/myRank from the leaderboard
+// safeOn(sharedSocket, 'question_result', (data: any) => {
+//   console.log('[SharedSocket] question_result:', data);
+//   emitToStore({
+//     gameStatus: 'QUESTION_RESULT',
+//     leaderboard: data.leaderboard,
+//     correctAnswerId: data.correctAnswer?.id || null,
+//   });
+// });
 
 safeOn(sharedSocket, 'game_ended', (data: any) => {
   console.log('[SharedSocket] game_ended:', data);

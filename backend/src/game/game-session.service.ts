@@ -389,6 +389,60 @@ export class GameSessionService {
     return finalResults;
   }
 
+  /**
+   * Cleanup session - xóa cache và timer (không xóa DB)
+   */
+  async cleanupSession(sessionId: string): Promise<void> {
+    this.logger.log(`[GameSessionService] Cleaning up session ${sessionId}`);
+
+    // Cancel timer
+    this.cancelTimer(sessionId);
+
+    // Delete Redis cache
+    await this.redis.del(`game:cache:${sessionId}`);
+    await this.redis.del(`game:timer:${sessionId}`);
+    await this.redis.del(`game:timer_meta:${sessionId}`);
+    await this.redis.del(`game:timer_pause:${sessionId}`);
+
+    // Delete leaderboard
+    await this.redis.del(`game:leaderboard:${sessionId}`);
+
+    this.logger.log(`[GameSessionService] Session ${sessionId} cleaned up`);
+  }
+
+  /**
+   * Close session - cập nhật DB status
+   */
+  async closeSession(sessionId: string): Promise<void> {
+    this.logger.log(`[GameSessionService] Closing session ${sessionId}`);
+
+    const session = await this.prisma.gameSession.findUnique({
+      where: { id: sessionId },
+      select: { roomId: true },
+    });
+
+    await this.prisma.$transaction(async (tx) => {
+      // Update session status
+      await tx.gameSession.update({
+        where: { id: sessionId },
+        data: {
+          status: 'CLOSED' as any,
+          endedAt: new Date(),
+        },
+      });
+
+      // Update room status
+      if (session?.roomId) {
+        await tx.room.update({
+          where: { id: session.roomId },
+          data: { status: 'CLOSED' as any },
+        });
+      }
+    });
+
+    this.logger.log(`[GameSessionService] Session ${sessionId} closed in DB`);
+  }
+
   async getSessionState(sessionId: string) {
     const cached = await this.getGameCache(sessionId);
     const session = await this.prisma.gameSession.findUnique({

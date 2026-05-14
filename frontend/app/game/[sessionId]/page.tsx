@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { useGameStore } from '@/stores/game.store';
@@ -10,6 +10,7 @@ import { GameState } from '@/types/game.type';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { apiClient } from '@/lib/apiClient';
+import { getSocket, connectSocketWithAuth, registerStoreUpdater } from '@/lib/socket';
 // ============================================================================
 // FREEZE OVERLAY COMPONENT
 // ============================================================================
@@ -112,12 +113,37 @@ export default function GamePage() {
 
   const [localTimeRemaining, setLocalTimeRemaining] = useState(0);
   const [isJoining, setIsJoining] = useState(true);
+  const [authReady, setAuthReady] = useState(false);
   // Track nếu đã recover state từ HTTP API (sau reload)
   const [hasRecoveredFromHttp, setHasRecoveredFromHttp] = useState(false);
 
   // Track if recovery has been initiated to prevent double execution
   // (effect may run twice due to React StrictMode or re-renders)
   const hasRecoveredRef = useRef(false);
+
+  // ── Wait for auth hydration before any game logic ────────────────────────────
+  // This effect runs ONCE when auth hydrates, ensuring auth token is available
+  useEffect(() => {
+    const checkAuth = () => {
+      const authStore = useAuthStore.getState();
+      if (authStore.isHydrated) {
+        setAuthReady(true);
+        console.log('[GamePage] Auth hydrated, accessToken available:', !!authStore.accessToken);
+      }
+    };
+
+    // Check immediately
+    checkAuth();
+
+    // Also subscribe to auth changes
+    const unsubscribe = useAuthStore.subscribe((state) => {
+      if (state.isHydrated) {
+        setAuthReady(true);
+      }
+    });
+
+    return unsubscribe;
+  }, []);
 
   // ── Setup socket + listeners ONCE (never cleanup on unmount) ─────────────────
   // reset() is intentionally NOT called here — the socket must survive navigation
@@ -127,13 +153,13 @@ export default function GamePage() {
       return;
     }
 
-    const gameStore = useGameStore.getState();
-    if (!gameStore.socket?.connected) {
-      gameStore.connectSocket();
-    }
+    // Register store updater
+    registerStoreUpdater((updater) => {
+      useGameStore.setState(updater);
+    });
 
-    const socket = gameStore.socket;
-    if (!socket) return;
+    const socket = getSocket();
+    useGameStore.setState({ socket });
 
     const handleGameStarting = (data: { sessionId: string; countdown: number }) => {
       console.log('[GamePage] game_starting:', data);
@@ -160,7 +186,9 @@ export default function GamePage() {
       }
 
       // Check if this is a NEW question or the SAME question (after reload/reconnect)
-      // Only reset hasAnswered for truly NEW questions
+      // Only reset hasAnswered/selectedAnswerId for truly NEW questions
+      // correctAnswerId is SERVER DATA and should NEVER be reset here
+      // It will be set by question_result event
       const isNewQuestion = state.currentQuestion?.id !== data.question.id;
       const shouldResetAnswer = isNewQuestion || state.gameStatus !== GameState.QUESTION_ACTIVE;
 
@@ -185,12 +213,17 @@ export default function GamePage() {
         questionIndex: data.questionIndex,
         totalQuestions: data.totalQuestions,
         countdown: 0,
-        // Only reset hasAnswered if it's a genuinely NEW question
-        // If recovering state after reload, preserve hasAnswered
+        // Only reset player's answer state if it's a genuinely NEW question
+        // If recovering state after reload, preserve hasAnswered and selectedAnswerId
         hasAnswered: shouldResetAnswer ? false : state.hasAnswered,
         selectedAnswerId: shouldResetAnswer ? null : state.selectedAnswerId,
-        correctAnswerId: null,
-        // Update timer - use question.timeLimit as base for NEW questions
+        // CORRECT: correctAnswerId is NEVER reset here - question_result sets it
+        // This fixes the bug where correct answer would flash and disappear
+        // timeRemaining will be updated below
+      });
+      
+      // Update timer separately to preserve correctAnswerId
+      useGameStore.setState({
         timeRemaining: newTimeRemaining,
         questionStartTime: Date.now(),
       });
@@ -239,6 +272,60 @@ export default function GamePage() {
         leaderboard: data.leaderboard || [],
         currentQuestion: null,
       });
+    };
+
+    const handleHostDisconnected = (data: { sessionId: string; gracePeriod: number }) => {
+      console.log('[GamePage] host_disconnected:', data);
+      toast.warning('Host đang mất kết nối. Đang chờ reconnect...', {
+        duration: data.gracePeriod,
+      });
+    };
+
+    const handleHostReconnected = () => {
+      console.log('[GamePage] host_reconnected');
+      toast.success('Host đã kết nối lại!');
+    };
+
+    const handleSessionClosed = (data: { sessionId: string; reason: 'HOST_EXITED' | 'GAME_FINISHED' | 'HOST_DISCONNECTED' }) => {
+      console.log('[GamePage] session_closed:', data);
+      const storedHostSessionId = sessionStorage.getItem('hostSessionId');
+      const isHostSession = storedHostSessionId === data.sessionId;
+
+      // Clear session-related storage
+      sessionStorage.removeItem('hostSessionId');
+      sessionStorage.removeItem('hostUserId');
+      sessionStorage.removeItem('playerId');
+      sessionStorage.removeItem('playerNickname');
+      sessionStorage.removeItem('currentRoomId');
+
+      // Reset stores
+      useGameStore.getState().reset();
+      useRoomStore.getState().reset();
+
+      // Redirect based on reason and role
+      if (data.reason === 'GAME_FINISHED') {
+        if (isHostSession) {
+          toast.info('Game đã kết thúc!');
+          router.push('/quiz');
+        } else {
+          toast.info('Game đã kết thúc!');
+          router.push('/');
+        }
+      } else if (data.reason === 'HOST_EXITED') {
+        if (isHostSession) {
+          router.push('/quiz');
+        } else {
+          toast.warning('Host đã rời phòng');
+          router.push('/');
+        }
+      } else if (data.reason === 'HOST_DISCONNECTED') {
+        if (isHostSession) {
+          router.push('/quiz');
+        } else {
+          toast.error('Mất kết nối với host. Phiên chơi đã kết thúc.');
+          router.push('/');
+        }
+      }
     };
 
     const handleScoreUpdate = (data: any) => {
@@ -325,6 +412,9 @@ export default function GamePage() {
     socket.on('score_update', handleScoreUpdate);
     socket.on('game_redirect', handleGameRedirect);
     socket.on('room_closed', handleRoomClosed);
+    socket.on('host_disconnected', handleHostDisconnected);
+    socket.on('host_reconnected', handleHostReconnected);
+    socket.on('session_closed', handleSessionClosed);
 
     return () => {
       socket.off('game_starting', handleGameStarting);
@@ -335,6 +425,9 @@ export default function GamePage() {
       socket.off('score_update', handleScoreUpdate);
       socket.off('game_redirect', handleGameRedirect);
       socket.off('room_closed', handleRoomClosed);
+      socket.off('host_disconnected', handleHostDisconnected);
+      socket.off('host_reconnected', handleHostReconnected);
+      socket.off('session_closed', handleSessionClosed);
     };
   }, [sessionId, router]);
 
@@ -351,90 +444,77 @@ export default function GamePage() {
   }, [pendingRedirect, sessionId, router]);
 
   // ── Authoritative state recovery via HTTP + socket join ───────────────────────
-  // window.location.href causes a full page reload: old JS context destroyed, new
-  // socket connects fresh. Socket events emitted before this effect runs are lost.
-  // The HTTP call is the authoritative state source — it always reflects the
-  // current game state regardless of socket timing.
+  // CRITICAL: This effect waits for auth hydration before running.
+  // This prevents race conditions where game join happens before auth is ready.
+  // 
+  // Correct flow:
+  // 1. Auth hydrates (token available)
+  // 2. Connect socket with auth token
+  // 3. Wait for socket connection
+  // 4. Emit host_join_game or join_game
+  // 5. Server verifies JWT and sets identity
+  // 6. UI renders correctly
   useEffect(() => {
     if (!sessionId || sessionId === 'undefined') return;
 
-    // Prevent double execution - if already recovered, skip
+    // Wait for auth to hydrate
+    if (!authReady) {
+      console.log('[GamePage] Waiting for auth to hydrate...');
+      return;
+    }
+
+    // Prevent double execution
     if (hasRecoveredRef.current) {
       console.log('[GamePage] Skipping double recovery');
       return;
     }
+    hasRecoveredRef.current = true;
 
-    // isHost detection: sessionStorage.setItem('hostSessionId', ...) is called in
-    // waiting-screen.tsx ONLY when the user is the host who clicked "Start Game".
-    // PRIORITY: If hostSessionId matches sessionId → ALWAYS treat as host, IGNORE player data.
-    // This prevents host from becoming player on page reload.
+    // Get auth state
+    const authStore = useAuthStore.getState();
+    const accessToken = authStore.accessToken;
+    console.log('[GamePage] Auth ready, token available:', !!accessToken);
+
+    // Session storage for host/player detection
     const storedHostSessionId = sessionStorage.getItem('hostSessionId');
-    const storedHostUserId = sessionStorage.getItem('hostUserId'); // Saved when host starts game
     const storedPlayerId = sessionStorage.getItem('playerId');
     const storedNickname = sessionStorage.getItem('playerNickname');
     const storedRoomId = sessionStorage.getItem('currentRoomId');
     
-    // isHostFromStorage: Highest priority - if this matches, user is definitely host
+    // Determine role AFTER auth is ready
     const isHostFromStorage = storedHostSessionId === sessionId;
-    const isHost = isHostFromStorage;
-    // isPlayer: Only if NOT a host (from storage) AND has player credentials
-    const isPlayer = !isHost && !!storedPlayerId && !!storedNickname;
+    const isPlayer = !isHostFromStorage && !!storedPlayerId && !!storedNickname;
+    console.log('[GamePage] Role: isHostFromStorage=', isHostFromStorage, 'isPlayer=', isPlayer);
 
-    // Hoisted so both recoverState and joinSocketRoom can reference it.
     let httpData: any = null;
 
     const recoverState = async () => {
-      // Set flag để socket handlers không ghi đè state trong quá trình recover
       useGameStore.setState({ _isRecovering: true });
 
       try {
         const response = await apiClient.get(`/games/${sessionId}/state`);
         httpData = response.data;
-
         console.log('[GamePage] HTTP state recovered:', httpData);
 
-        // Reset game state for new session BEFORE applying HTTP state
-        // Note: hasAnswered và selectedAnswerId sẽ được set đúng sau khi check API
         useGameStore.setState({
           currentQuestion: null,
           leaderboard: [],
           countdown: 0,
           correctAnswerId: null,
-          // Giữ nguyên hasAnswered và selectedAnswerId - sẽ update sau
         });
 
-        // Đặt biến để track player đã trả lời chưa
         let playerHasAnswered = false;
-        let playerAnsweredQuestionId: string | null = null;
 
         if (httpData.status === 'QUESTION_ACTIVE' && httpData.currentQuestion) {
-          // Calculate remaining time using server's questionStartedAt for accuracy
-          // This ensures host and player see the same countdown
           let adjustedRemainingTime: number;
-
           if (httpData.questionStartedAt && httpData.serverTime) {
-            // Use server timestamps for accurate calculation
-            const serverTime = httpData.serverTime;
-            const questionStartedAt = httpData.questionStartedAt;
-            const timeLimit = httpData.currentQuestion.timeLimit || 15;
-            const elapsedSeconds = (serverTime - questionStartedAt) / 1000;
-            // Adjust for network latency from server to client
-            const clientReceiveTime = Date.now();
-            const networkLatencyMs = Math.max(0, clientReceiveTime - serverTime);
-            const networkLatencySec = networkLatencyMs / 1000;
-            adjustedRemainingTime = Math.max(0, Math.ceil(timeLimit - elapsedSeconds - networkLatencySec));
+            const elapsedSeconds = (httpData.serverTime - httpData.questionStartedAt) / 1000;
+            const networkLatencySec = Math.max(0, (Date.now() - httpData.serverTime) / 1000);
+            adjustedRemainingTime = Math.max(0, Math.ceil((httpData.currentQuestion.timeLimit || 15) - elapsedSeconds - networkLatencySec));
           } else {
-            // Fallback: use remainingTime from server with basic adjustment
-            const serverTime = httpData.serverTime || Date.now();
-            const clientReceiveTime = Date.now();
-            const networkLatencyMs = Math.max(0, clientReceiveTime - serverTime);
-            const networkLatencySec = Math.ceil(networkLatencyMs / 1000);
-            adjustedRemainingTime = Math.max(0, (httpData.remainingTime || httpData.currentQuestion.timeLimit || 15) - networkLatencySec);
+            adjustedRemainingTime = Math.max(0, (httpData.remainingTime || httpData.currentQuestion.timeLimit || 15) - 1);
           }
 
-          console.log(`[GamePage] Timer sync: questionStartedAt=${httpData.questionStartedAt}, serverTime=${httpData.serverTime}, adjusted=${adjustedRemainingTime}s`);
-
-          // Active question — recover immediately so UI renders without waiting for socket
           useGameStore.setState({
             gameStatus: GameState.QUESTION_ACTIVE,
             currentQuestion: httpData.currentQuestion,
@@ -442,11 +522,9 @@ export default function GamePage() {
             totalQuestions: httpData.totalQuestions,
             timeRemaining: adjustedRemainingTime,
             questionStartTime: Date.now(),
-            // Không restore leaderboard ở đây - player không cần thấy trong lúc đang làm
             leaderboard: [],
           });
         } else if (httpData.status === 'QUESTION_RESULT') {
-          // Restore full state including question and correct answer for result display
           useGameStore.setState({
             gameStatus: GameState.QUESTION_RESULT,
             currentQuestion: httpData.currentQuestion || null,
@@ -454,7 +532,6 @@ export default function GamePage() {
             leaderboard: httpData.leaderboard || [],
             questionIndex: httpData.currentQuestionIndex,
             totalQuestions: httpData.totalQuestions,
-            // Restore player answer info if available
             hasAnswered: httpData.hasAnswered ?? false,
             selectedAnswerId: httpData.selectedAnswerId || null,
           });
@@ -479,164 +556,92 @@ export default function GamePage() {
             myNickname: storedNickname,
           });
 
-          // Check if player already answered the current question BEFORE setting any state
           if (httpData.status === 'QUESTION_ACTIVE' && httpData.currentQuestion) {
             try {
-              const answeredRes = await apiClient.get(
-                `/games/${sessionId}/answered-questions?playerId=${storedPlayerId}`
-              );
+              const answeredRes = await apiClient.get(`/games/${sessionId}/answered-questions?playerId=${storedPlayerId}`);
               const answeredQuestions: string[] = answeredRes.data.answeredQuestions || [];
-              const currentQuestionId = httpData.currentQuestion?.id;
-
-              if (currentQuestionId && answeredQuestions.includes(currentQuestionId)) {
-                console.log('[GamePage] Player already answered this question:', currentQuestionId);
+              if (answeredQuestions.includes(httpData.currentQuestion?.id)) {
                 playerHasAnswered = true;
-                playerAnsweredQuestionId = currentQuestionId;
               }
-            } catch (answeredErr) {
-              console.error('[GamePage] Failed to fetch answered questions:', answeredErr);
-            }
+            } catch {}
           }
 
-          // Chỉ restore myScore khi game đã kết thúc hoặc đang hiển thị kết quả
-          // KHÔNG restore score trong QUESTION_ACTIVE để tránh player thấy điểm trước khi hết giờ
           const myEntry = httpData.leaderboard?.find((e: any) => e.playerId === storedPlayerId);
           const showScore = httpData.status === 'QUESTION_RESULT' || httpData.status === 'FINISHED';
-
-          // myScore: LUÔN restore từ leaderboard (nếu có) để player thấy điểm
-          const myScore = myEntry?.score ?? 0;
-          const myRank = myEntry?.rank ?? null;
-
-          console.log('[GamePage] recoverState: myScore from leaderboard:', myScore, 'rank:', myRank);
-
           useGameStore.setState({
-            // hasAnswered: chỉ set true nếu player đã trả lời câu hiện tại
             hasAnswered: playerHasAnswered,
             selectedAnswerId: null,
-            // myScore: LUÔN restore từ leaderboard
-            myScore,
-            myRank,
+            myScore: myEntry?.score ?? 0,
+            myRank: myEntry?.rank ?? null,
           });
-        } else if (isHost) {
-          const authStore = useAuthStore.getState();
+        } else if (isHostFromStorage) {
           useGameStore.setState({
             sessionId,
             roomId: httpData.roomId || null,
             isHost: true,
-            myPlayerId: 'host_' + authStore.user?.id,
+            myPlayerId: `host_${authStore.user?.id || 'unknown'}`,
             myNickname: authStore.user?.email?.split('@')[0] || 'Host',
           });
         }
       } catch (err: any) {
         console.error('[GamePage] HTTP state recovery failed:', err?.message);
-        // On HTTP failure, still try to join the session
         useGameStore.setState({
           hasAnswered: false,
           selectedAnswerId: null,
           isHost: !!storedHostSessionId && storedHostSessionId === sessionId,
           myPlayerId: storedPlayerId,
           myNickname: storedNickname,
-          _isRecovering: false, // Reset flag on error
+          _isRecovering: false,
         });
       } finally {
         setIsJoining(false);
-        // KHÔNG reset _isRecovering ở đây - sẽ reset sau khi join_game callback xong
       }
     };
 
-    // Join socket room for real-time events after HTTP recovery is done.
-    // Even if HTTP fails, we still join the socket.
     const joinSocketRoom = () => {
-      const gameStore = useGameStore.getState();
-      const socket = gameStore.socket;
-      if (!socket?.connected) return;
+      const socket = useGameStore.getState().socket;
+      if (!socket) {
+        console.error('[GamePage] Socket not available');
+        return;
+      }
 
-      if (isPlayer && storedPlayerId && storedNickname) {
-        // Normal case: player joined via room flow with sessionStorage data
-        socket.emit('join_game', { sessionId, playerId: storedPlayerId, nickname: storedNickname }, (response: any) => {
+      if (isHostFromStorage && accessToken) {
+        // HOST: Join with JWT - server will verify
+        console.log('[GamePage] Joining as HOST with JWT');
+        socket.emit('host_join_game', { sessionId, jwt: accessToken }, (response: any) => {
           if (response.success && response.state) {
-            console.log('[GamePage] join_game confirmed (player)');
-            console.log('[GamePage] storedPlayerId:', storedPlayerId);
-            console.log('[GamePage] response leaderboard:', response.state.leaderboard);
-            const state = useGameStore.getState();
-
-            // Find my entry in leaderboard to restore myScore
-            const myEntry = response.state.leaderboard?.find((e: any) => e.playerId === storedPlayerId);
-            const myScore = myEntry?.score ?? state.myScore ?? 0;
-            const myRank = myEntry?.rank ?? state.myRank ?? null;
-
-            // During QUESTION_ACTIVE, don't show leaderboard to player (to avoid cheating)
-            // But ALWAYS restore myScore if player has already answered
-            const showLeaderboard = response.state.status !== GameState.QUESTION_ACTIVE;
-
-            console.log('[GamePage] Restoring myScore:', myScore, 'rank:', myRank, 'showLeaderboard:', showLeaderboard);
-
-            useGameStore.setState({
-              sessionId,
-              roomId: response.state.roomId || storedRoomId,
-              isHost: false,
-              myPlayerId: storedPlayerId,
-              myNickname: storedNickname,
-              gameStatus: response.state.status || GameState.WAITING,
-              currentQuestion: response.state.currentQuestion || null,
-              questionIndex: response.state.questionIndex ?? 0,
-              totalQuestions: response.state.totalQuestions ?? 0,
-              // Leaderboard: chỉ hiển thị khi không phải QUESTION_ACTIVE
-              leaderboard: showLeaderboard ? (response.state.leaderboard || []) : state.leaderboard,
-              timeRemaining: response.state.remainingTime ?? response.state.currentQuestion?.timeLimit ?? 0,
-              // KHÔNG ghi đè hasAnswered, selectedAnswerId khi đang recover
-              // hasAnswered và selectedAnswerId đã được set đúng từ recoverState
-              // myScore: LUÔN restore từ leaderboard (nếu có) để player thấy điểm
-              myScore,
-              myRank,
-              // Hoàn tất recover - socket handlers giờ có thể update state
-              _isRecovering: false,
-            });
-          }
-        });
-      } else if (isHost) {
-        // Host: has sessionStorage hostSessionId matching sessionId
-        const authStore = useAuthStore.getState();
-        // Use storedHostUserId if authStore.user is null (after reload)
-        const hostUserId = authStore.user?.id || storedHostUserId;
-        const emitPayload = { 
-          sessionId, 
-          jwt: authStore.accessToken,
-          userId: hostUserId,
-        };
-        console.log('[GamePage] Host join emit payload:', emitPayload);
-        // Send both JWT and userId for verification
-        // userId is used by server when JWT is expired/invalid
-        socket.emit('host_join_game', emitPayload, (response: any) => {
-          if (response.success && response.state) {
-            console.log('[GamePage] host_join_game confirmed, isActualHost:', response.isActualHost, 'isHostFromStorage:', isHostFromStorage);
-            // CRITICAL: Use server's isActualHost as the authoritative source of truth
-            // The server verifies JWT/DB to determine if user is actually the host
-            // This prevents non-hosts from seeing host controls if sessionStorage is incorrect
-            // Even if sessionStorage has hostSessionId, server says we're not host → we're not host
-            const actualIsHost = response.isActualHost && isHostFromStorage;
+            console.log('[GamePage] host_join_game success, isActualHost:', response.isActualHost);
+            
+            // Trust server's verification
+            const actualIsHost = response.isActualHost;
+            // Only set correctAnswerId if in QUESTION_RESULT state
+            const correctAnswerId = response.state.status === 'QUESTION_RESULT' 
+              ? (response.state.correctAnswerId || httpData?.correctAnswerId || null)
+              : null;
+            
             useGameStore.setState({
               sessionId,
               roomId: response.state.roomId || httpData?.roomId || null,
               isHost: actualIsHost,
-              myPlayerId: actualIsHost ? 'host_' + hostUserId : (response.state.myPlayerId || storedPlayerId || null),
+              myPlayerId: actualIsHost ? `host_${authStore.user?.id || 'unknown'}` : (response.state.myPlayerId || storedPlayerId || null),
               myNickname: actualIsHost 
                 ? (authStore.user?.email?.split('@')[0] || 'Host')
-                : (response.state.nickname || storedNickname || authStore.user?.email?.split('@')[0] || `Player_${Date.now() % 1000}`),
+                : (response.state.nickname || storedNickname || authStore.user?.email?.split('@')[0] || `Player`),
               gameStatus: response.state.status || GameState.WAITING,
-              currentQuestion: response.state.currentQuestion || null,
+              currentQuestion: response.state.currentQuestion || httpData?.currentQuestion || null,
               questionIndex: response.state.questionIndex ?? 0,
               totalQuestions: response.state.totalQuestions ?? 0,
-              leaderboard: response.state.leaderboard || [],
+              leaderboard: response.state.leaderboard || httpData?.leaderboard || [],
               timeRemaining: response.state.remainingTime ?? response.state.currentQuestion?.timeLimit ?? 0,
-              _isRecovering: false, // Hoàn tất recover
+              correctAnswerId, // Set from server if in QUESTION_RESULT
+              _isRecovering: false,
             });
             if (!actualIsHost) {
-              console.log('[GamePage] Server says user is NOT the host, hiding host controls');
+              console.warn('[GamePage] Server rejected host identity - user is NOT the host');
             }
           } else {
-            // Server rejected the host join entirely - fall back to player mode
-            console.log('[GamePage] host_join_game failed:', response.error, '- falling back to player mode');
+            console.error('[GamePage] host_join_game failed:', response.error);
+            // Fallback to player mode
             const fallbackNickname = storedNickname || authStore.user?.email?.split('@')[0] || `Player_${Date.now() % 1000}`;
             socket.emit('join_game', { sessionId, playerId: storedPlayerId || null, nickname: fallbackNickname }, (playerResponse: any) => {
               if (playerResponse.success && playerResponse.state) {
@@ -647,62 +652,98 @@ export default function GamePage() {
                   myPlayerId: playerResponse.state.myPlayerId || storedPlayerId,
                   myNickname: fallbackNickname,
                   gameStatus: playerResponse.state.status || GameState.WAITING,
-                  currentQuestion: playerResponse.state.currentQuestion || null,
+                  currentQuestion: playerResponse.state.currentQuestion || httpData?.currentQuestion || null,
                   questionIndex: playerResponse.state.questionIndex ?? 0,
                   totalQuestions: playerResponse.state.totalQuestions ?? 0,
-                  leaderboard: playerResponse.state.leaderboard || [],
+                  leaderboard: playerResponse.state.leaderboard || httpData?.leaderboard || [],
                   timeRemaining: playerResponse.state.remainingTime ?? playerResponse.state.currentQuestion?.timeLimit ?? 0,
                   _isRecovering: false,
                 });
+              } else {
+                useGameStore.setState({ _isRecovering: false });
               }
             });
           }
         });
-      } else {
-        // Fallback: player without sessionStorage data (navigated directly or guest join)
-        // Emit join_game with any available data so they can still participate
-        const fallbackNickname = storedNickname || `Player_${Date.now() % 1000}`;
-        socket.emit('join_game', { sessionId, playerId: storedPlayerId || null, nickname: fallbackNickname }, (response: any) => {
+      } else if (isPlayer && storedPlayerId && storedNickname) {
+        // PLAYER: Normal join
+        console.log('[GamePage] Joining as PLAYER');
+        socket.emit('join_game', { sessionId, playerId: storedPlayerId, nickname: storedNickname }, (response: any) => {
           if (response.success && response.state) {
-            console.log('[GamePage] join_game confirmed (fallback player)');
+            console.log('[GamePage] join_game success');
+            const myEntry = response.state.leaderboard?.find((e: any) => e.playerId === storedPlayerId);
+            const showLeaderboard = response.state.status !== GameState.QUESTION_ACTIVE;
+            // Only set correctAnswerId if in QUESTION_RESULT state
+            const correctAnswerId = response.state.status === 'QUESTION_RESULT'
+              ? (response.state.correctAnswerId || httpData?.correctAnswerId || null)
+              : null;
+            
             useGameStore.setState({
               sessionId,
-              roomId: response.state.roomId || httpData?.roomId || storedRoomId,
+              roomId: response.state.roomId || storedRoomId,
               isHost: false,
-              myPlayerId: response.state.myPlayerId || storedPlayerId,
-              myNickname: fallbackNickname,
+              myPlayerId: storedPlayerId,
+              myNickname: storedNickname,
               gameStatus: response.state.status || GameState.WAITING,
-              currentQuestion: response.state.currentQuestion || null,
+              currentQuestion: response.state.currentQuestion || httpData?.currentQuestion || null,
               questionIndex: response.state.questionIndex ?? 0,
               totalQuestions: response.state.totalQuestions ?? 0,
-              leaderboard: response.state.leaderboard || [],
+              leaderboard: showLeaderboard ? (response.state.leaderboard || httpData?.leaderboard || []) : useGameStore.getState().leaderboard,
               timeRemaining: response.state.remainingTime ?? response.state.currentQuestion?.timeLimit ?? 0,
-              _isRecovering: false, // Hoàn tất recover
+              correctAnswerId, // Set from server if in QUESTION_RESULT
+              myScore: myEntry?.score ?? useGameStore.getState().myScore ?? 0,
+              myRank: myEntry?.rank ?? useGameStore.getState().myRank ?? null,
+              _isRecovering: false,
             });
+          } else {
+            useGameStore.setState({ _isRecovering: false });
           }
         });
+      } else {
+        // No stored credentials - use HTTP state
+        console.log('[GamePage] No stored credentials, using HTTP state only');
+        useGameStore.setState({ _isRecovering: false });
       }
     };
 
-    const gameStore = useGameStore.getState();
-    if (gameStore.socket?.connected) {
-      recoverState().then(() => {
-        hasRecoveredRef.current = true;
-        joinSocketRoom();
-      });
-    } else {
-      // Wait for socket connection, then recover state and join
-      const interval = setInterval(() => {
-        if (useGameStore.getState().socket?.connected) {
-          clearInterval(interval);
-          recoverState().then(() => {
-            hasRecoveredRef.current = true;
-            joinSocketRoom();
-          });
+    // Main flow: connect socket with auth, then recover state, then join room
+    const initGame = async () => {
+      const socket = getSocket();
+      
+      // Connect socket with auth token if not connected
+      if (!socket.connected) {
+        console.log('[GamePage] Connecting socket with auth token...');
+        if (accessToken) {
+          connectSocketWithAuth(accessToken);
+        } else {
+          socket.connect();
         }
-      }, 50);
-    }
-  }, [sessionId]);
+        
+        // Wait for connection
+        await new Promise<void>((resolve) => {
+          if (socket.connected) {
+            resolve();
+          } else {
+            socket.once('connect', () => resolve());
+          }
+        });
+        console.log('[GamePage] Socket connected:', socket.id);
+      }
+
+      // Recover HTTP state
+      await recoverState();
+      
+      // Join socket room
+      joinSocketRoom();
+    };
+
+    initGame().catch((err) => {
+      console.error('[GamePage] initGame error:', err);
+      setIsJoining(false);
+      useGameStore.setState({ _isRecovering: false });
+    });
+
+  }, [sessionId, authReady]);
 
   // ── Local countdown timer ────────────────────────────────────────────────────
   // Uses timeRemaining from store if available (after reload recovery),
@@ -1041,7 +1082,9 @@ export default function GamePage() {
               <div className="space-y-3">
                 {currentQuestion?.answers.map((answer, index) => {
                   const isCorrect = answer.id === correctAnswerId;
-                  const isSelected = answer.id === selectedAnswerId;
+                  // Host không thấy đáp án player chọn - chỉ thấy đáp án đúng
+                  // Player thấy đáp án mình chọn (highlight đỏ nếu sai)
+                  const isSelected = !isHost && answer.id === selectedAnswerId;
                   return (
                     <div key={answer.id} className={`
                       p-4 rounded-xl flex items-center gap-3
