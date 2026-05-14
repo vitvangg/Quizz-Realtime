@@ -12,7 +12,7 @@ interface AIState {
     setTopic: (topic: string) => void;
     setAmount: (amount: number) => void;
     setRequirements: (requirements: string) => void;
-    generate: () => Promise<any[]>;
+    generate: () => Promise<any>;
     reset: () => void;
 }
 
@@ -37,18 +37,23 @@ export const useAIStore = create<AIState>((set, get) => ({
         const { topic, amount, requirements } = get();
         if (!topic.trim()) {
             toast.error("Vui lòng nhập chủ đề!");
-            return [];
+            return null;
         }
 
         try {
             set({ loading: true });
             const data = await generateQuizAI(topic, amount, requirements);
-            toast.success(`AI đã tạo ${data.length} câu hỏi!`);
+            
+            const questionCount = data?.questions?.length || 0;
+            if (questionCount > 0) {
+                toast.success(`AI đã tạo ${questionCount} câu hỏi!`);
+            }
+            
             return data;
         } catch (error) {
             const message = getErrorMessage(error, "Không thể generate câu hỏi");
             toast.error(Array.isArray(message) ? message.join(", ") : message);
-            return [];
+            return null;
         } finally {
             set({ loading: false });
         }

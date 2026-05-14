@@ -12,15 +12,15 @@ interface AIComponentProps {
 }
 
 export function AIComponent({ onQuestionsGenerated }: AIComponentProps) {
-    const { 
-        loading, 
-        topic, 
-        amount, 
-        requirements, 
-        setTopic, 
-        setAmount, 
-        setRequirements, 
-        generate 
+    const {
+        loading,
+        topic,
+        amount,
+        requirements,
+        setTopic,
+        setAmount,
+        setRequirements,
+        generate
     } = useAIStore();
 
     const handleGenerate = async () => {
@@ -36,9 +36,9 @@ export function AIComponent({ onQuestionsGenerated }: AIComponentProps) {
                     isCorrect: a.isCorrect,
                 })),
             }));
-            onQuestionsGenerated({ 
-                questions: formattedQuestions, 
-                category: data.category 
+            onQuestionsGenerated({
+                questions: formattedQuestions,
+                category: data.category
             });
         }
     };
