@@ -21,16 +21,29 @@ export class QuizzsService {
       },
     });
   }
-
   findAll() {
     return this.prismaService.quiz.findMany({
-      where: { deletedAt: null },
+      where: {
+        deletedAt: null,
+      },
+
       orderBy: {
         createdAt: 'desc',
       },
+
       include: {
         questions: {
-          include: { answers: true },
+          where: {
+            deletedAt: null,
+          },
+
+          include: {
+            answers: {
+              where: {
+                deletedAt: null,
+              },
+            },
+          },
         },
       },
     });
@@ -38,10 +51,24 @@ export class QuizzsService {
 
   findByUserId(userId: string) {
     return this.prismaService.quiz.findMany({
-      where: { createdBy: userId, deletedAt: null },
+      where: {
+        createdBy: userId,
+        deletedAt: null,
+      },
+
       include: {
         questions: {
-          include: { answers: true },
+          where: {
+            deletedAt: null,
+          },
+
+          include: {
+            answers: {
+              where: {
+                deletedAt: null,
+              },
+            },
+          },
         },
       },
     });
@@ -49,19 +76,35 @@ export class QuizzsService {
 
   findByCategory(userId: string, category: string) {
     return this.prismaService.quiz.findMany({
-      where: { createdBy: userId, deletedAt: null, category: category.toUpperCase() as QuizCategory },
+      where: {
+        createdBy: userId,
+        deletedAt: null,
+        category: category.toUpperCase() as QuizCategory,
+      },
+
       include: {
         questions: {
-          include: { answers: true },
+          where: {
+            deletedAt: null,
+          },
+
+          include: {
+            answers: {
+              where: {
+                deletedAt: null,
+              },
+            },
+          },
         },
       },
     });
   }
 
 
-
   search(q: string, userId: string) {
-    const isCategory = Object.values(QuizCategory).includes(q.toUpperCase() as QuizCategory);
+    const isCategory = Object.values(QuizCategory).includes(
+      q.toUpperCase() as QuizCategory,
+    );
 
     return this.prismaService.quiz.findMany({
       where: {
@@ -72,27 +115,41 @@ export class QuizzsService {
           {
             title: {
               contains: q,
-              mode: "insensitive",
+              mode: 'insensitive',
             },
           },
+
           {
             questions: {
               some: {
+                deletedAt: null,
+
                 content: {
                   contains: q,
-                  mode: "insensitive",
+                  mode: 'insensitive',
                 },
               },
             },
           },
-          ...(isCategory ? [{ category: q.toUpperCase() as QuizCategory }] : []),
+
+          ...(isCategory
+            ? [{ category: q.toUpperCase() as QuizCategory }]
+            : []),
         ],
       },
 
       include: {
         questions: {
+          where: {
+            deletedAt: null,
+          },
+
           include: {
-            answers: true,
+            answers: {
+              where: {
+                deletedAt: null,
+              },
+            },
           },
         },
       },
@@ -101,14 +158,26 @@ export class QuizzsService {
 
   findOne(id: string) {
     return this.prismaService.quiz.findFirst({
-      where: { id, deletedAt: null },
+      where: {
+        id,
+        deletedAt: null,
+      },
+
       include: {
         questions: {
+          where: {
+            deletedAt: null,
+          },
+
           include: {
-            answers: true
-          }
-        }
-      }
+            answers: {
+              where: {
+                deletedAt: null,
+              },
+            },
+          },
+        },
+      },
     });
   }
 

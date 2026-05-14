@@ -125,11 +125,15 @@ model Question {
   timeLimit  Int    @map("time_limit")
   orderIndex Int    @map("order_index")
 
+  deletedAt DateTime? @map("deleted_at")
+
   quiz          Quiz           @relation(fields: [quizId], references: [id], onDelete: Cascade)
   answers       Answer[]
   playerAnswers PlayerAnswer[]
 
   @@index([quizId])
+  @@index([deletedAt])
+
   @@map("questions")
 }
 
@@ -139,10 +143,14 @@ model Answer {
   content    String
   isCorrect  Boolean @map("is_correct")
 
+  deletedAt DateTime? @map("deleted_at")
+
   question      Question       @relation(fields: [questionId], references: [id], onDelete: Cascade)
   playerAnswers PlayerAnswer[]
 
   @@index([questionId])
+  @@index([deletedAt])
+
   @@map("answers")
 }
 

@@ -183,13 +183,13 @@ export default function QuizBuilderPage() {
 
         // Nếu chỉ có 1 câu hỏi và nó trống, thì thay thế bằng danh sách mới
         const isFirstQuestionEmpty = questions.length === 1 && !questions[0].content.trim();
-        
+
         if (isFirstQuestionEmpty) {
           setQuestions(importedQuestions);
         } else {
           setQuestions([...questions, ...importedQuestions]);
         }
-        
+
         toast.success(`Đã nhập thành công ${importedQuestions.length} câu hỏi${detectedCategory ? ` thuộc danh mục ${CATEGORY_LABELS[detectedCategory]}` : ""}!`);
       } else {
         toast.error("Không tìm thấy dữ liệu hợp lệ trong file.");
@@ -252,6 +252,20 @@ export default function QuizBuilderPage() {
     field: keyof Question,
     value: any
   ) => {
+    // 🔥 Nếu sửa timeLimit của câu đầu tiên
+    // thì apply cho toàn bộ câu hỏi
+    if (field === "timeLimit" && questions[0]?.id === id) {
+      setQuestions(
+        questions.map((q) => ({
+          ...q,
+          timeLimit: value,
+        }))
+      );
+
+      return;
+    }
+
+    // 🔥 Các trường hợp khác → update riêng
     setQuestions(
       questions.map((q) =>
         q.id === id ? { ...q, [field]: value } : q
@@ -358,9 +372,14 @@ export default function QuizBuilderPage() {
         toast.error(`Câu hỏi ${i + 1} chưa chọn đáp án đúng!`);
         return;
       }
-      const hasEmptyAnswer = questions[i].answers.some((a) => !a.content.trim());
-      if (hasEmptyAnswer) {
-        toast.error(`Câu hỏi ${i + 1} có đáp án trống!`);
+      const emptyAnswerIndex = questions[i].answers.findIndex(
+        (a) => !a.content.trim()
+      );
+
+      if (emptyAnswerIndex !== -1) {
+        toast.error(
+          `Câu hỏi ${i + 1} đang thiếu nội dung đáp án ${emptyAnswerIndex + 1}!`
+        );
         return;
       }
     }
