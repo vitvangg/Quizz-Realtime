@@ -3,9 +3,9 @@ import { check, sleep } from 'k6';
 
 export const options = {
   stages: [
-    { duration: '1m', target: 100 }, // Ramp up to 100 players
-    { duration: '3m', target: 100 }, // Stay at 100 players
-    { duration: '1m', target: 0 },   // Ramp down
+    { duration: '2m', target: 10000 }, // Ramp up to 10,000 players
+    { duration: '5m', target: 10000 }, // Stay at 10,000 players
+    { duration: '1m', target: 0 },     // Ramp down
   ],
 };
 
@@ -51,6 +51,16 @@ export default function () {
       }
     });
 
+    socket.on('close', () => {
+      // closed
+    });
+
+    socket.on('error', (e) => {
+      if (e.error() != "websocket: close 1006 (abnormal closure): unexpected EOF") {
+        console.log('Socket Error: ', e.error());
+      }
+    });
+
     // Stay connected for the duration of the test
     socket.setTimeout(() => {
       socket.close();
@@ -58,4 +68,9 @@ export default function () {
   });
 
   check(res, { 'connected': (r) => r && r.status === 101 });
+  
+  // If connection failed, sleep a bit so we don't spam infinite loop
+  if (!res || res.status !== 101) {
+    sleep(1);
+  }
 }
