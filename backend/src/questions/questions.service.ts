@@ -8,10 +8,14 @@ import { CreateQuestionDto } from './dto/create-question.dto';
 import { UpdateQuestionDto } from './dto/update-question.dto';
 
 import { PrismaService } from 'src/prisma/prisma.service';
+import { CloudinaryService } from 'src/common/cloudinary/cloudinary.service';
 
 @Injectable()
 export class QuestionsService {
-  constructor(private readonly prismaService: PrismaService) { }
+  constructor(
+    private readonly prismaService: PrismaService,
+    private readonly cloudinaryService: CloudinaryService,
+  ) { }
 
   async checkQuestionOwner(questionId: string, userId: string) {
     const question = await this.prismaService.question.findFirst({
@@ -62,6 +66,8 @@ export class QuestionsService {
         content: createQuestionDto.content,
         timeLimit: createQuestionDto.timeLimit,
         orderIndex: createQuestionDto.orderIndex,
+        imageUrl: createQuestionDto.imageUrl,
+        imageId: createQuestionDto.imageId,
       },
     });
   }
@@ -145,8 +151,50 @@ export class QuestionsService {
     });
   }
 
+  async uploadImage(id: string, userId: string, file: Express.Multer.File) {
+    await this.checkQuestionOwner(id, userId);
+
+    const question = await this.prismaService.question.findFirst({
+      where: { id },
+    });
+
+    if (!question) {
+        throw new NotFoundException('Question not found');
+    }
+
+    // Upload to Cloudinary
+    const result = await this.cloudinaryService.uploadFile(file, 'questions');
+
+    // Delete old image if exists
+    if (question.imageId) {
+      await this.cloudinaryService.deleteFile(question.imageId);
+    }
+
+    // Update question in DB
+    return this.prismaService.question.update({
+      where: { id },
+      data: {
+        imageUrl: result.secure_url,
+        imageId: result.public_id,
+      },
+    });
+  }
+
   async remove(id: string, userId: string) {
     await this.checkQuestionOwner(id, userId);
+
+    const question = await this.prismaService.question.findFirst({
+      where: { id },
+    });
+
+    if (!question) {
+        throw new NotFoundException('Question not found');
+    }
+
+    // Delete image from Cloudinary if exists
+    if (question.imageId) {
+      await this.cloudinaryService.deleteFile(question.imageId);
+    }
 
     // Soft delete all answers
     await this.prismaService.answer.updateMany({
@@ -166,6 +214,8 @@ export class QuestionsService {
       },
       data: {
         deletedAt: new Date(),
+        imageUrl: null,
+        imageId: null,
       },
     });
   }

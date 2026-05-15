@@ -2,11 +2,11 @@
 
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { 
-  Clock, 
-  Edit, 
-  Play, 
-  Trash2, 
+import {
+  Clock,
+  Edit,
+  Play,
+  Trash2,
   Tag,
   Calculator,
   Atom,
@@ -177,13 +177,13 @@ export function QuizCard({ quiz, roomLoading, onDelete, onStartGame }: QuizCardP
         </div>
       </CardContent>
 
-      <CardFooter 
+      <CardFooter
         className="pt-2 pb-6 px-6 grid grid-cols-2 gap-3"
         onClick={(e) => e.stopPropagation()}
       >
-        <Button 
-          variant="outline" 
-          className="w-full gap-2 rounded-xl font-bold border-2 hover:bg-muted" 
+        <Button
+          variant="outline"
+          className="w-full gap-2 rounded-xl font-bold border-2 hover:bg-muted"
           onClick={() => {
             router.push(`/quiz/edit/${quiz.id}`);
           }}
