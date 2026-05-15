@@ -27,15 +27,33 @@ interface GameCache {
   questionStartedAt: number | null;
   timeLimit: number;
   questionIds: string[];
+  /** Timer version - incremented each time a new timer is scheduled */
+  timerVersion: number;
+  /** Question version - incremented each time question changes (start/end) */
+  questionVersion: number;
 }
 
 interface QuestionTimer {
   sessionId: string;
   timeout: NodeJS.Timeout;
   questionIndex: number;
-  scheduledAt: number;     // thời điểm lên lịch
-  totalMs: number;         // tổng thời gian (ms)
+  scheduledAt: number;
+  totalMs: number;
+  /** Timer version at schedule time - used to detect stale callbacks */
+  timerVersion: number;
 }
+
+/**
+ * Source of truth mapping for game session state:
+ * - Redis Cache (game:{sessionId}): Real-time runtime state (status, questionIndex, timerVersion)
+ * - Prisma DB (GameSession): Persistent state for recovery and audit
+ * - Redis Leaderboard (leaderboard:{sessionId}): Sorted set of scores
+ * 
+ * Write order policy:
+ * - For status changes: Update Redis FIRST, then DB (Redis is authoritative for runtime)
+ * - For question transitions: Update cache atomically with version increment
+ * - For score changes: Write to Redis leaderboard and DB in same logical operation
+ */
 
 @Injectable()
 export class GameSessionService {
@@ -123,6 +141,8 @@ export class GameSessionService {
       questionStartedAt: Date.now(),
       timeLimit: firstQuestion.timeLimit || 20,
       questionIds,
+      timerVersion: 1,
+      questionVersion: 1,
     };
 
     await this.redis.set(
@@ -201,12 +221,21 @@ export class GameSessionService {
     };
   }
 
-  async handleQuestionEnd(sessionId: string, callback: (data: any) => void) {
+  async handleQuestionEnd(sessionId: string, callback: (data: any) => void): Promise<{ questionIndex: number; isLastQuestion: boolean }> {
+    // STEP 1: Read current state (Redis cache is authoritative for runtime state)
     const cached = await this.getGameCache(sessionId);
     if (!cached) {
       throw new NotFoundException('Game not found in cache');
     }
 
+    // CRITICAL: Validate we're in QUESTION_ACTIVE state
+    // If status changed (e.g., host ended game), skip processing
+    if (cached.status !== GameState.QUESTION_ACTIVE) {
+      this.logger.warn(`[handleQuestionEnd:${sessionId}] Skipping - game status is ${cached.status}, not QUESTION_ACTIVE`);
+      return { questionIndex: cached.currentQuestionIndex, isLastQuestion: cached.currentQuestionIndex >= cached.totalQuestions - 1 };
+    }
+
+    // STEP 2: Fetch full session data from DB for question details
     const room = await this.prisma.gameSession.findUnique({
       where: { id: sessionId },
       include: {
@@ -231,51 +260,61 @@ export class GameSessionService {
       throw new NotFoundException('Session not found');
     }
 
-    const currentQuestion =
-      room.room.quiz.questions[cached.currentQuestionIndex];
+    const currentQuestion = room.room.quiz.questions[cached.currentQuestionIndex];
     const correctAnswer = currentQuestion.answers.find((a) => a.isCorrect);
-
-    const leaderboard = await this.getLeaderboard(sessionId);
+    const isLastQuestion = cached.currentQuestionIndex >= cached.totalQuestions - 1;
 
     const resultData = {
       questionIndex: cached.currentQuestionIndex,
       correctAnswer: correctAnswer
         ? { id: correctAnswer.id, content: correctAnswer.content }
         : null,
-      leaderboard: leaderboard.slice(0, 10),
-      isLastQuestion:
-        cached.currentQuestionIndex >= cached.totalQuestions - 1,
-      // Include question data so frontend can verify question match
+      isLastQuestion,
       question: {
         id: currentQuestion.id,
         content: currentQuestion.content,
       },
     };
 
+    // STEP 3: Update cache status FIRST (Redis authoritative for runtime)
+    // Increment questionVersion to invalidate any pending timer callbacks
     await this.updateGameCache(sessionId, {
       status: GameState.QUESTION_RESULT,
       questionStartedAt: null,
+      timerVersion: (cached.timerVersion || 0) + 1,
     });
 
-    // Update DB so reload reads correct state
+    // STEP 4: Update DB SECOND (for persistence/recovery)
     await this.prisma.gameSession.update({
       where: { id: sessionId },
       data: { currentQuestionIndex: cached.currentQuestionIndex },
     });
 
+    // STEP 5: Get leaderboard AFTER cache update
+    const leaderboard = await this.getLeaderboard(sessionId);
+    resultData['leaderboard'] = leaderboard.slice(0, 10);
+
+    // STEP 6: Invoke callback with complete data
     callback(resultData);
 
-    if (cached.currentQuestionIndex >= cached.totalQuestions - 1) {
+    // STEP 7: Auto-end game if last question
+    if (isLastQuestion) {
       await this.endGame(sessionId, callback);
     }
 
-    return resultData;
+    return { questionIndex: cached.currentQuestionIndex, isLastQuestion };
   }
 
-  async nextQuestion(sessionId: string, callback: (data: any) => void) {
+  async nextQuestion(sessionId: string, callback: (data: any) => void): Promise<{ questionIndex: number; question: any; totalQuestions: number }> {
+    // STEP 1: Read current cache state
     const cached = await this.getGameCache(sessionId);
     if (!cached) {
       throw new NotFoundException('Game not found in cache');
+    }
+
+    // STEP 2: Validate state - must be in QUESTION_RESULT to advance
+    if (cached.status !== GameState.QUESTION_RESULT) {
+      throw new BadRequestException(`Cannot advance question - game status is ${cached.status}, expected QUESTION_RESULT`);
     }
 
     const nextIndex = cached.currentQuestionIndex + 1;
@@ -283,6 +322,7 @@ export class GameSessionService {
       throw new BadRequestException('No more questions');
     }
 
+    // STEP 3: Fetch full session data from DB
     const room = await this.prisma.gameSession.findUnique({
       where: { id: sessionId },
       include: {
@@ -306,6 +346,16 @@ export class GameSessionService {
       throw new NotFoundException('Session not found');
     }
 
+    // STEP 4: Re-validate state after DB read (detect race with handleQuestionEnd)
+    const recheckCache = await this.getGameCache(sessionId);
+    if (!recheckCache || recheckCache.status !== GameState.QUESTION_RESULT) {
+      throw new ConflictException('Game state changed during transition');
+    }
+    if (recheckCache.currentQuestionIndex !== cached.currentQuestionIndex) {
+      throw new ConflictException('Question already advanced');
+    }
+
+    // STEP 5: Update DB first (for consistency with other services)
     await this.prisma.gameSession.update({
       where: { id: sessionId },
       data: {
@@ -315,15 +365,19 @@ export class GameSessionService {
     });
 
     const nextQuestion = room.room.quiz.questions[nextIndex];
-
     this.logger.log(`[GameSessionService] nextQuestion: nextIndex=${nextIndex}, questionId=${nextQuestion.id}, questionContent="${nextQuestion.content}"`);
 
+    // STEP 6: Update Redis cache SECOND with atomic increment
+    const newQuestionVersion = (cached.questionVersion || 0) + 1;
+    const newTimerVersion = (cached.timerVersion || 0) + 1;
     const newCache: GameCache = {
       ...cached,
       currentQuestionIndex: nextIndex,
       status: GameState.QUESTION_ACTIVE,
       questionStartedAt: Date.now(),
       timeLimit: nextQuestion.timeLimit || 20,
+      questionVersion: newQuestionVersion,
+      timerVersion: newTimerVersion,
     };
 
     await this.redis.set(
@@ -604,14 +658,44 @@ export class GameSessionService {
     sessionId: string,
     timeLimit: number,
     onEnd: (data: any) => void,
-  ) {
+  ): Promise<number> {
     this.cancelTimer(sessionId);
 
     const totalMs = timeLimit * 1000;
     const scheduledAt = Date.now();
 
-    // Lưu callback ref qua closure — Redis chỉ lưu metadata
+    // Get current cache to extract timerVersion
+    const cached = await this.getGameCache(sessionId);
+    const timerVersion = (cached?.timerVersion || 0) + 1;
+
+    // CRITICAL: Create timer with version check to prevent stale callbacks
+    // The callback captures current timerVersion - will be validated before execution
     const timeout = setTimeout(async () => {
+      // STALE CHECK: Validate timer version before executing
+      // If version mismatch, this callback is stale and should not run
+      const currentCache = await this.getGameCache(sessionId);
+      if (!currentCache) {
+        // Session was cleaned up - ignore callback
+        this.logger.warn(`[Timer:${sessionId}] Stale callback ignored - session cleaned up`);
+        this.activeTimers.delete(sessionId);
+        return;
+      }
+
+      // Check if timer version has changed (means new timer was scheduled)
+      if (currentCache.timerVersion !== timerVersion) {
+        this.logger.warn(`[Timer:${sessionId}] Stale callback ignored - version mismatch (expected ${timerVersion}, got ${currentCache.timerVersion})`);
+        this.activeTimers.delete(sessionId);
+        return;
+      }
+
+      // Check if game is in valid state for question end
+      if (currentCache.status !== GameState.QUESTION_ACTIVE) {
+        this.logger.warn(`[Timer:${sessionId}] Stale callback ignored - game not in QUESTION_ACTIVE (status=${currentCache.status})`);
+        this.activeTimers.delete(sessionId);
+        return;
+      }
+
+      // STALE CHECK PASSED: Proceed with question end
       this.activeTimers.delete(sessionId);
       await this.redis.del(`game:timer_pause:${sessionId}`);
       await this.handleQuestionEnd(sessionId, onEnd);
@@ -620,22 +704,30 @@ export class GameSessionService {
     const timer: QuestionTimer = {
       sessionId,
       timeout,
-      questionIndex: (await this.getGameCache(sessionId))?.currentQuestionIndex || 0,
+      questionIndex: cached?.currentQuestionIndex || 0,
       scheduledAt,
       totalMs,
+      timerVersion,
     };
 
     this.activeTimers.set(sessionId, timer);
 
-    // Lưu metadata vào Redis để resumeAllTimers có thể lên lịch lại
+    // Update cache with new timerVersion - THIS IS THE AUTHORITATIVE SOURCE
+    await this.updateGameCache(sessionId, {
+      questionStartedAt: scheduledAt,
+      timerVersion,
+    });
+
+    // Save metadata to Redis for freeze/unfreeze recovery
     await this.redis.set(
       `game:timer_meta:${sessionId}`,
-      JSON.stringify({ totalMs, scheduledAt, onEndRef: 'pending' }),
+      JSON.stringify({ totalMs, scheduledAt, timerVersion }),
       'EX',
       7200,
     );
 
-    this.logger.log(`Timer scheduled for session ${sessionId}: ${timeLimit}s`);
+    this.logger.log(`Timer scheduled for session ${sessionId}: ${timeLimit}s (version=${timerVersion})`);
+    return timerVersion;
   }
 
   /**
@@ -810,91 +902,126 @@ export class GameSessionService {
     questionId: string,
     answerId: string,
     clientTimestamp: number,
-  ) {
+  ): Promise<{ success: boolean; isCorrect: boolean; scoreEarned: number; correctAnswerId?: string; leaderboard: any[] }> {
+    // CRITICAL: Check game cache state FIRST
     const cached = await this.getGameCache(sessionId);
     if (!cached) {
       throw new NotFoundException('Game not found');
     }
 
     if (cached.status !== GameState.QUESTION_ACTIVE) {
-      throw new BadRequestException('Cannot submit answer now');
+      throw new BadRequestException(`Cannot submit answer now - game status is ${cached.status}`);
     }
 
-    const playerSession = await this.prisma.playerSession.findFirst({
-      where: {
-        sessionId,
-        playerId,
-      },
-    });
+    // CRITICAL: Idempotency check using Redis distributed lock
+    // This prevents race condition when player spam-clicks submit
+    const idempotencyKey = `answer:lock:${sessionId}:${playerId}:${questionId}`;
+    const lockAcquired = await this.redis.set(idempotencyKey, '1', 'EX', 30, 'NX');
 
-    if (!playerSession) {
-      throw new NotFoundException('Player session not found');
+    if (!lockAcquired) {
+      // Player already submitted for this question - return idempotent response
+      this.logger.warn(`[submitAnswer:${sessionId}] Duplicate submission blocked for player ${playerId}, question ${questionId}`);
+      throw new ConflictException('Already submitted for this question');
     }
 
-    const existingAnswer = await this.prisma.playerAnswer.findFirst({
-      where: {
-        playerSessionId: playerSession.id,
-        questionId,
-      },
-    });
+    try {
+      // Verify answer not already in DB (defense in depth - handles edge cases)
+      const playerSession = await this.prisma.playerSession.findFirst({
+        where: { sessionId, playerId },
+      });
 
-    if (existingAnswer) {
-      throw new ConflictException('Already answered this question');
-    }
+      if (!playerSession) {
+        throw new NotFoundException('Player session not found');
+      }
 
-    const question = await this.prisma.question.findUnique({
-      where: { id: questionId },
-      include: { answers: true },
-    });
+      const existingAnswer = await this.prisma.playerAnswer.findFirst({
+        where: { playerSessionId: playerSession.id, questionId },
+      });
 
-    if (!question) {
-      throw new NotFoundException('Question not found');
-    }
+      if (existingAnswer) {
+        // This shouldn't happen due to Redis lock, but handle gracefully
+        this.logger.warn(`[submitAnswer:${sessionId}] Answer already exists in DB for player ${playerId}, question ${questionId}`);
+        const leaderboard = await this.getLeaderboard(sessionId);
+        const correctAnswer = await this.prisma.answer.findFirst({
+          where: { questionId, isCorrect: true },
+        });
+        return {
+          success: true,
+          isCorrect: existingAnswer.isCorrect,
+          scoreEarned: existingAnswer.scoreEarned,
+          correctAnswerId: correctAnswer?.id,
+          leaderboard,
+        };
+      }
 
-    const selectedAnswer = question.answers.find((a) => a.id === answerId);
-    const correctAnswer = question.answers.find((a) => a.isCorrect);
-    const isCorrect = selectedAnswer?.isCorrect || false;
+      // Fetch question with answers
+      const question = await this.prisma.question.findUnique({
+        where: { id: questionId },
+        include: { answers: true },
+      });
 
-    let scoreEarned = 0;
-    if (isCorrect && cached.questionStartedAt) {
-      const timeTaken = Date.now() - cached.questionStartedAt;
-      const maxTime = (question.timeLimit || 20) * 1000;
+      if (!question) {
+        throw new NotFoundException('Question not found');
+      }
 
-      const timeBonus = Math.max(0, Math.floor((maxTime - timeTaken) / 10));
-      scoreEarned = 1000 + timeBonus;
+      // Calculate score using server authoritative timestamp
+      // We use questionStartedAt from Redis cache (set by server)
+      const selectedAnswer = question.answers.find((a) => a.id === answerId);
+      const correctAnswer = question.answers.find((a) => a.isCorrect);
+      const isCorrect = selectedAnswer?.isCorrect || false;
 
-      await this.updateScore(sessionId, playerId, scoreEarned);
-    }
+      let scoreEarned = 0;
+      if (isCorrect && cached.questionStartedAt) {
+        const timeTaken = Date.now() - cached.questionStartedAt;
+        const maxTime = (question.timeLimit || 20) * 1000;
 
-    await this.prisma.playerAnswer.create({
-      data: {
-        playerSessionId: playerSession.id,
-        questionId,
-        answerId,
-        questionContent: question.content,
-        answerContent: selectedAnswer?.content || '',
+        // CRITICAL: Cap timeTaken to prevent negative bonus from network issues
+        // If player submits after timer expires (edge case), they get 0 bonus
+        const cappedTimeTaken = Math.min(timeTaken, maxTime);
+        const timeBonus = Math.max(0, Math.floor((maxTime - cappedTimeTaken) / 10));
+        scoreEarned = 1000 + timeBonus;
+
+        // Update Redis leaderboard (fast path)
+        await this.updateScore(sessionId, playerId, scoreEarned);
+      }
+
+      // Persist to DB (source of truth for answers)
+      await this.prisma.playerAnswer.create({
+        data: {
+          playerSessionId: playerSession.id,
+          questionId,
+          answerId,
+          questionContent: question.content,
+          answerContent: selectedAnswer?.content || '',
+          isCorrect,
+          scoreEarned,
+        },
+      });
+
+      // Update player session score in DB
+      await this.prisma.playerSession.update({
+        where: { id: playerSession.id },
+        data: { score: { increment: scoreEarned } },
+      });
+
+      // Get leaderboard AFTER all writes complete
+      const leaderboard = await this.getLeaderboard(sessionId);
+
+      this.logger.log(
+        `Player ${playerId} answered question ${questionId}: ${isCorrect ? 'correct' : 'wrong'}, earned ${scoreEarned} points`,
+      );
+
+      return {
+        success: true,
         isCorrect,
         scoreEarned,
-      },
-    });
-
-    await this.prisma.playerSession.update({
-      where: { id: playerSession.id },
-      data: { score: { increment: scoreEarned } },
-    });
-
-    const leaderboard = await this.getLeaderboard(sessionId);
-
-    this.logger.log(
-      `Player ${playerId} answered question ${questionId}: ${isCorrect ? 'correct' : 'wrong'}, earned ${scoreEarned} points`,
-    );
-
-    return {
-      success: true,
-      isCorrect,
-      scoreEarned,
-      correctAnswerId: correctAnswer?.id,
-      leaderboard,
-    };
+        correctAnswerId: correctAnswer?.id,
+        leaderboard,
+      };
+    } catch (error) {
+      // Release lock on error so player can retry
+      await this.redis.del(idempotencyKey);
+      throw error;
+    }
   }
 }

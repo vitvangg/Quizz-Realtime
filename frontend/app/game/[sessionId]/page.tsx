@@ -111,6 +111,9 @@ export default function GamePage() {
     reset,
   } = useGameStore();
 
+  // Derived: is this the last question?
+  const isLastQuestion = totalQuestions > 0 && questionIndex >= totalQuestions - 1;
+
   const [localTimeRemaining, setLocalTimeRemaining] = useState(0);
   const [isJoining, setIsJoining] = useState(true);
   const [authReady, setAuthReady] = useState(false);
@@ -1152,7 +1155,8 @@ export default function GamePage() {
             {isHost ? `` : `Diem cua ban: ${myScore} pts`}
           </div>
 
-          {isHost && (
+          {/* Chỉ hiện nút "Tiếp tục" khi KHÔNG phải câu hỏi cuối */}
+          {isHost && !isLastQuestion && (
             <Button
               onClick={handleNextQuestion}
               size="lg"

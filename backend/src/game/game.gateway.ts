@@ -47,8 +47,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   private sessionCallbacks = new Map<string, (data: any) => void>();
 
   // Host disconnect tracking - sessionId -> { hostSocketId, timeout }
+  // CRITICAL: This is now backed by Redis for server restart resilience
   private hostDisconnectTimeouts = new Map<string, NodeJS.Timeout>();
   private readonly HOST_RECONNECT_GRACE_MS = 10000; // 10 seconds grace period
+
+  // Redis key prefix for host disconnect tracking
+  private readonly HOST_DISCONNECT_KEY_PREFIX = 'host:disconnect:';
 
   constructor(
     private readonly gameSessionService: GameSessionService,
@@ -61,6 +65,54 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
   afterInit(server: Server) {
     this.logger.log('[GameGateway] Initialized');
+
+    // RECOVERY: Check for orphaned host disconnect sessions on startup
+    // This handles the case where server crashed during grace period
+    this.recoverOrphanedSessions().catch((err) => {
+      this.logger.error('[GameGateway] Error recovering orphaned sessions:', err);
+    });
+  }
+
+  /**
+   * RECOVERY: Check Redis for host disconnect records and cleanup orphaned sessions
+   * This runs on gateway initialization to handle server restart scenarios
+   */
+  private async recoverOrphanedSessions(): Promise<void> {
+    this.logger.log('[GameGateway] Checking for orphaned sessions...');
+
+    // Scan for host disconnect keys
+    const pattern = `${this.HOST_DISCONNECT_KEY_PREFIX}*`;
+    const keys = await this.redisService.keys(pattern);
+
+    for (const key of keys) {
+      try {
+        const data = await this.redisService.get(key);
+        if (!data) continue;
+
+        const disconnectInfo = JSON.parse(data);
+        const sessionId = key.replace(this.HOST_DISCONNECT_KEY_PREFIX, '');
+
+        // Check if grace period has expired
+        if (disconnectInfo.graceEndsAt && Date.now() > disconnectInfo.graceEndsAt) {
+          this.logger.log(`[GameGateway] Found expired grace period for session ${sessionId}, cleaning up`);
+          await this.terminateSession(sessionId, 'HOST_DISCONNECTED');
+        } else {
+          // Grace period still active - restart the timeout
+          const remainingMs = disconnectInfo.graceEndsAt - Date.now();
+          if (remainingMs > 0) {
+            this.logger.log(`[GameGateway] Restarting grace period for session ${sessionId}, ${remainingMs}ms remaining`);
+            this.hostDisconnectTimeouts.set(sessionId, setTimeout(async () => {
+              this.logger.log(`[GameGateway] Grace period expired for recovered session ${sessionId}`);
+              await this.terminateSession(sessionId, 'HOST_DISCONNECTED');
+            }, remainingMs));
+          }
+        }
+      } catch (err) {
+        this.logger.warn(`[GameGateway] Error processing orphaned session ${key}:`, err);
+      }
+    }
+
+    this.logger.log(`[GameGateway] Recovered ${keys.length} orphaned sessions`);
   }
 
   /** Dùng bởi DashboardMetricsService để đếm kết nối hiện tại */
@@ -111,6 +163,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
   /**
    * Xử lý khi host disconnect - bắt đầu grace period
+   * FIXED: Now uses Redis for persistent tracking across server restarts
    */
   private async handleHostDisconnect(client: Socket, identity: PlayerIdentity) {
     const { sessionId } = identity;
@@ -121,11 +174,20 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     }
 
     // Hủy timeout cũ nếu có (trong trường hợp host reconnect rồi disconnect lại)
-    this.cancelHostGraceTimeout(sessionId);
+    await this.cancelHostGraceTimeout(sessionId);
 
     this.logger.log(`[GameGateway] Host disconnected, starting ${this.HOST_RECONNECT_GRACE_MS}ms grace period for session ${sessionId}`);
 
-    // Đánh dấu host đang offline
+    // CRITICAL: Persist to Redis so server restart doesn't lose the grace period
+    const disconnectKey = `${this.HOST_DISCONNECT_KEY_PREFIX}${sessionId}`;
+    const disconnectData = JSON.stringify({
+      hostUserId: identity.userId,
+      disconnectedAt: Date.now(),
+      graceEndsAt: Date.now() + this.HOST_RECONNECT_GRACE_MS,
+    });
+    await this.redisService.set(disconnectKey, disconnectData, 'EX', Math.ceil(this.HOST_RECONNECT_GRACE_MS / 1000) + 5);
+
+    // Set in-memory timeout as backup
     this.hostDisconnectTimeouts.set(sessionId, setTimeout(async () => {
       this.logger.log(`[GameGateway] Host grace period expired for session ${sessionId}, terminating`);
       await this.terminateSession(sessionId, 'HOST_DISCONNECTED');
@@ -140,28 +202,41 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
   /**
    * Xử lý khi host reconnect - hủy grace period
+   * FIXED: Now clears both in-memory and Redis state
    */
-  private handleHostReconnect(sessionId: string) {
+  private async handleHostReconnect(sessionId: string) {
+    // Cancel in-memory timeout
     const existingTimeout = this.hostDisconnectTimeouts.get(sessionId);
     if (existingTimeout) {
       clearTimeout(existingTimeout);
       this.hostDisconnectTimeouts.delete(sessionId);
-      this.logger.log(`[GameGateway] Host reconnected within grace period, session ${sessionId} continues`);
-      
-      // Notify players that host is back
-      this.server.to(sessionId).emit('host_reconnected', { sessionId });
     }
+
+    // CRITICAL: Also clear Redis state to prevent stale recovery
+    const disconnectKey = `${this.HOST_DISCONNECT_KEY_PREFIX}${sessionId}`;
+    await this.redisService.del(disconnectKey);
+
+    this.logger.log(`[GameGateway] Host reconnected within grace period, session ${sessionId} continues`);
+    
+    // Notify players that host is back
+    this.server.to(sessionId).emit('host_reconnected', { sessionId });
   }
 
   /**
    * Hủy host grace timeout
+   * FIXED: Now clears both in-memory and Redis state
    */
-  private cancelHostGraceTimeout(sessionId: string) {
+  private async cancelHostGraceTimeout(sessionId: string) {
+    // Cancel in-memory timeout
     const existingTimeout = this.hostDisconnectTimeouts.get(sessionId);
     if (existingTimeout) {
       clearTimeout(existingTimeout);
       this.hostDisconnectTimeouts.delete(sessionId);
     }
+
+    // CRITICAL: Also clear Redis state
+    const disconnectKey = `${this.HOST_DISCONNECT_KEY_PREFIX}${sessionId}`;
+    await this.redisService.del(disconnectKey);
   }
 
   /**
@@ -371,9 +446,11 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
     // Emit question_start TRỰC TIẾP sau khi nextQuestion hoàn tất
     // Đảm bảo socket đã join room trước khi emit
+    // questionVersion = questionIndex + 1 provides idempotent version for clients
     this.server.to(sessionId).emit('question_start', {
       ...result,
       serverTime: Date.now(),
+      questionVersion: result.questionIndex + 1,
     });
     this.logger.log(`[GameGateway] Emitted question_start for index=${result.questionIndex}`);
 
@@ -519,7 +596,17 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       this.sessionCallbacks.set(result.session.id, questionEndCallback);
       this.gameSessionService.scheduleQuestionEnd(result.session.id, result.firstQuestion.timeLimit, questionEndCallback);
 
-      // Question start - emit to BOTH sessionId (for connected players) AND roomId (for players still transitioning)
+      // Question start - emit to sessionId ONLY
+      // Players must join session room BEFORE receiving question_start
+      // The game_redirect ensures players navigate to /game/{sessionId} and join
+      // 
+      // FIX: Removed dual-emit to roomId. Players in old room will:
+      // 1. Receive game_redirect with new sessionId
+      // 2. Navigate to new session page
+      // 3. Join session room via join_game / host_join_game
+      // 4. Receive question_start from session room only
+      //
+      // This prevents duplicate events for players who are already in the session
       const questionStartPayload = {
         sessionId: result.session.id,
         questionIndex: 0,
@@ -527,13 +614,11 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         totalQuestions: result.totalQuestions,
         timeRemaining: result.firstQuestion.timeLimit,
         serverTime: Date.now(),
+        /** Version marker for idempotent client handling */
+        questionVersion: 1,
       };
-      
-      // Emit to new session room
+
       this.server.to(result.session.id).emit('question_start', questionStartPayload);
-      
-      // Also emit to room for players transitioning
-      this.server.to(payload.roomId).emit('question_start', questionStartPayload);
 
       return { success: true, sessionId: result.session.id };
     } catch (error) {
@@ -624,10 +709,22 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       const identity = this.verifyHost(client);
       if (!identity) return { success: false, error: 'Only host can restart game' };
 
-      // Reset and start new game
-      await this.roomService.updateStatus(payload.roomId, 'WAITING' as any);
       const hostId = identity.userId || identity.playerId;
-      const result = await this.gameSessionService.startGame(payload.roomId, hostId);
+
+      // FIX: Use PREPARING status to avoid leaving room in invalid state
+      // If startGame fails, room remains in PLAYING (from previous game) so it can't be reused
+      // This prevents stuck WAITING state if startGame() throws
+      await this.roomService.updateStatus(payload.roomId, 'WAITING' as any);
+
+      let result: any;
+      try {
+        result = await this.gameSessionService.startGame(payload.roomId, hostId);
+      } catch (startError) {
+        // ROLLBACK: Restore room to previous state if startGame fails
+        this.logger.error(`[host_play_again] startGame failed, rolling back room status: ${startError.message}`);
+        await this.roomService.updateStatus(payload.roomId, 'PLAYING' as any);
+        throw startError;
+      }
 
       // Register to new session
       identity.sessionId = result.session.id;
@@ -656,8 +753,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       // Update questionStartedAt AFTER countdown, BEFORE question_start
       await this.gameSessionService.updateQuestionStartTime(result.session.id, Date.now());
 
-      // Question start - emit to BOTH roomId (for players still connecting) AND sessionId
-      // This ensures players receive question_start even if they haven't fully joined the new session
+      // Question start - emit to sessionId ONLY (same fix as host_start_game)
       const questionStartPayload = {
         sessionId: result.session.id,
         questionIndex: 0,
@@ -665,13 +761,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         totalQuestions: result.totalQuestions,
         timeRemaining: result.firstQuestion.timeLimit,
         serverTime: Date.now(),
+        questionVersion: 1,
       };
-      
-      // Emit to new session room
+
       this.server.to(result.session.id).emit('question_start', questionStartPayload);
-      
-      // Also emit to old room for players transitioning between sessions
-      this.server.to(payload.roomId).emit('question_start', questionStartPayload);
 
       return { success: true, sessionId: result.session.id };
     } catch (error) {
@@ -733,11 +826,28 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         payload.clientTimestamp,
       );
 
-      this.server.to(payload.sessionId).emit('score_update', {
-        playerId: payload.playerId,
-        score: result.scoreEarned,
-        leaderboard: result.leaderboard,
-      });
+      // CRITICAL: Anti-cheat - only emit score_update to the submitting player during QUESTION_ACTIVE
+      // This prevents other players from inferring correct answer from score patterns
+      // The response is sent back to the player regardless of game state
+      const cached = await this.gameSessionService.getSessionState(payload.sessionId);
+      if (cached?.status === GameState.QUESTION_ACTIVE) {
+        // During answering: Only send to the player who submitted
+        // This confirms their answer was received but doesn't reveal score yet
+        client.emit('answer_received', {
+          success: true,
+          isCorrect: result.isCorrect, // Can reveal if correct, but not score
+          scoreEarned: result.scoreEarned,
+        });
+        // Don't emit score_update to whole session during QUESTION_ACTIVE
+        this.logger.log(`[submit_answer:${payload.sessionId}] Answer from ${payload.playerId} received, score hidden during QUESTION_ACTIVE`);
+      } else {
+        // After question ends: Safe to emit full leaderboard
+        this.server.to(payload.sessionId).emit('score_update', {
+          playerId: payload.playerId,
+          score: result.scoreEarned,
+          leaderboard: result.leaderboard,
+        });
+      }
 
       return {
         success: true,

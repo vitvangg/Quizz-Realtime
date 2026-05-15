@@ -64,14 +64,7 @@ export default function HomePage() {
           </p>
           
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Button 
-              size="lg" 
-              className="text-lg px-8 py-6 shadow-lg shadow-primary/25"
-              onClick={handleJoinGame}
-            >
-              Tham gia ngay
-            </Button>
-            {user && (
+            {user ? (
               <Link href="/quiz">
                 <Button 
                   size="lg" 
@@ -81,6 +74,13 @@ export default function HomePage() {
                   Tạo Quiz mới
                 </Button>
               </Link>
+            ) :  (<Button 
+              size="lg" 
+              className="text-lg px-8 py-6 shadow-lg shadow-primary/25"
+              onClick={handleJoinGame}
+            >
+              Tham gia ngay
+            </Button>
             )}
           </div>
         </section>
