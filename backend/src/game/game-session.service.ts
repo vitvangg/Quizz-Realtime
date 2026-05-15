@@ -8,6 +8,8 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { RedisService } from 'src/redis/redis.service';
+import { PlayerCacheService } from './player-cache.service';
+import { AnswerQueueService, QueuedAnswer } from './answer-queue.service';
 
 export enum GameState {
   WAITING = 'WAITING',
@@ -64,6 +66,8 @@ export class GameSessionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
+    private readonly playerCache: PlayerCacheService,
+    private readonly answerQueue: AnswerQueueService,
   ) {}
 
   async startGame(roomId: string, hostId: string) {
@@ -154,6 +158,9 @@ export class GameSessionService {
 
     // Add regular players to leaderboard (their player.id values)
     await this.initLeaderboard(session.id, room.players.map((p) => p.id));
+
+    // Warm up player name cache for fast leaderboard lookups
+    await this.playerCache.warmupSessionCache(session.id);
 
     this.logger.log(
       `Game session ${session.id} started for room ${roomId} | ${room.players.length} players`,
@@ -830,6 +837,15 @@ export class GameSessionService {
     await this.redis.zincrby(key, scoreDelta, playerId);
   }
 
+  /**
+   * Remove player from leaderboard (when they disconnect)
+   */
+  async removePlayerFromLeaderboard(sessionId: string, playerId: string) {
+    const key = `leaderboard:${sessionId}`;
+    await this.redis.zrem(key, playerId);
+    this.logger.debug(`[removePlayerFromLeaderboard] Removed player ${playerId} from session ${sessionId}`);
+  }
+
   async getLeaderboard(sessionId: string, limit = 100) {
     const key = `leaderboard:${sessionId}`;
     const results = await this.redis.zrevrange(key, 0, limit - 1, 'WITHSCORES');
@@ -844,30 +860,13 @@ export class GameSessionService {
 
     const playerIds = leaderboard.map((l) => l.playerId);
 
-    // Separate player IDs (actual players) from host IDs (format: host_<userId>)
-    const actualPlayerIds = playerIds.filter((id) => !id.startsWith('host_'));
-    const hostUserIds = playerIds
-      .filter((id) => id.startsWith('host_'))
-      .map((id) => id.replace('host_', ''));
-
-    // Query players table for regular players
-    const players = await this.prisma.player.findMany({
-      where: { id: { in: actualPlayerIds } },
-      select: { id: true, nickname: true },
-    });
-    const playerMap = new Map(players.map((p) => [p.id, p.nickname]));
-
-    // Query users table for hosts
-    const hostUsers = await this.prisma.user.findMany({
-      where: { id: { in: hostUserIds } },
-      select: { id: true, fullName: true },
-    });
-    const hostMap = new Map(hostUsers.map((u) => [`host_${u.id}`, u.fullName || 'Host']));
+    // Use PlayerCacheService for efficient name lookups
+    const names = await this.playerCache.getPlayerNames(playerIds);
 
     return leaderboard.map((l, index) => ({
       rank: index + 1,
       playerId: l.playerId,
-      nickname: playerMap.get(l.playerId) || hostMap.get(l.playerId) || 'Unknown',
+      nickname: names.get(l.playerId) || 'Unknown',
       score: l.score,
     }));
   }
@@ -925,33 +924,13 @@ export class GameSessionService {
     }
 
     try {
-      // Verify answer not already in DB (defense in depth - handles edge cases)
+      // Verify player session exists
       const playerSession = await this.prisma.playerSession.findFirst({
         where: { sessionId, playerId },
       });
 
       if (!playerSession) {
         throw new NotFoundException('Player session not found');
-      }
-
-      const existingAnswer = await this.prisma.playerAnswer.findFirst({
-        where: { playerSessionId: playerSession.id, questionId },
-      });
-
-      if (existingAnswer) {
-        // This shouldn't happen due to Redis lock, but handle gracefully
-        this.logger.warn(`[submitAnswer:${sessionId}] Answer already exists in DB for player ${playerId}, question ${questionId}`);
-        const leaderboard = await this.getLeaderboard(sessionId);
-        const correctAnswer = await this.prisma.answer.findFirst({
-          where: { questionId, isCorrect: true },
-        });
-        return {
-          success: true,
-          isCorrect: existingAnswer.isCorrect,
-          scoreEarned: existingAnswer.scoreEarned,
-          correctAnswerId: correctAnswer?.id,
-          leaderboard,
-        };
       }
 
       // Fetch question with answers
@@ -965,50 +944,45 @@ export class GameSessionService {
       }
 
       // Calculate score using server authoritative timestamp
-      // We use questionStartedAt from Redis cache (set by server)
       const selectedAnswer = question.answers.find((a) => a.id === answerId);
       const correctAnswer = question.answers.find((a) => a.isCorrect);
       const isCorrect = selectedAnswer?.isCorrect || false;
 
       let scoreEarned = 0;
+      let timeTaken = 0;
       if (isCorrect && cached.questionStartedAt) {
-        const timeTaken = Date.now() - cached.questionStartedAt;
+        timeTaken = Date.now() - cached.questionStartedAt;
         const maxTime = (question.timeLimit || 20) * 1000;
 
         // CRITICAL: Cap timeTaken to prevent negative bonus from network issues
-        // If player submits after timer expires (edge case), they get 0 bonus
         const cappedTimeTaken = Math.min(timeTaken, maxTime);
         const timeBonus = Math.max(0, Math.floor((maxTime - cappedTimeTaken) / 10));
         scoreEarned = 1000 + timeBonus;
 
-        // Update Redis leaderboard (fast path)
+        // Update Redis leaderboard immediately (fast path)
         await this.updateScore(sessionId, playerId, scoreEarned);
       }
 
-      // Persist to DB (source of truth for answers)
-      await this.prisma.playerAnswer.create({
-        data: {
-          playerSessionId: playerSession.id,
-          questionId,
-          answerId,
-          questionContent: question.content,
-          answerContent: selectedAnswer?.content || '',
-          isCorrect,
-          scoreEarned,
-        },
-      });
-
-      // Update player session score in DB
-      await this.prisma.playerSession.update({
-        where: { id: playerSession.id },
-        data: { score: { increment: scoreEarned } },
-      });
+      // Queue answer for batch processing (FAST - no DB write)
+      // The batch processor will INSERT to DB and update playerSession score
+      const queuedAnswer: QueuedAnswer = {
+        playerSessionId: playerSession.id,
+        playerId,
+        questionId,
+        answerId,
+        isCorrect,
+        scoreEarned,
+        timeTaken,
+        submittedAt: Date.now(),
+        sessionId,
+      };
+      await this.answerQueue.queueAnswer(queuedAnswer);
 
       // Get leaderboard AFTER all writes complete
       const leaderboard = await this.getLeaderboard(sessionId);
 
       this.logger.log(
-        `Player ${playerId} answered question ${questionId}: ${isCorrect ? 'correct' : 'wrong'}, earned ${scoreEarned} points`,
+        `Player ${playerId} answered question ${questionId}: ${isCorrect ? 'correct' : 'wrong'}, earned ${scoreEarned} points (queued for batch)`,
       );
 
       return {

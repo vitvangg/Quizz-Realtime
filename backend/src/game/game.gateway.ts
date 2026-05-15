@@ -8,8 +8,8 @@ import {
   MessageBody,
   ConnectedSocket,
 } from '@nestjs/websockets';
+import { OnModuleDestroy, Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
-import { Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { OnEvent } from '@nestjs/event-emitter';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -17,6 +17,7 @@ import { GameSessionService, GameState } from './game-session.service';
 import { RoomService } from '../room/room.service';
 import { RoomGateway } from '../room/room.gateway';
 import { RedisService } from '../redis/redis.service';
+import { setupRedisAdapter, teardownRedisAdapter } from './redis-adapter.setup';
 
 interface PlayerIdentity {
   userId?: string;
@@ -34,7 +35,7 @@ interface PlayerIdentity {
   },
   namespace: '/game',
 })
-export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit {
+export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit, OnModuleDestroy {
   @WebSocketServer()
   server: Server;
 
@@ -66,11 +67,27 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   afterInit(server: Server) {
     this.logger.log('[GameGateway] Initialized');
 
+    // Setup Redis adapter for cross-instance communication
+    setupRedisAdapter(server, {
+      host: process.env.REDIS_HOST || 'localhost',
+      port: parseInt(process.env.REDIS_PORT || '6379'),
+      password: process.env.REDIS_PASSWORD,
+    }).catch((err) => {
+      this.logger.error('[GameGateway] Failed to setup Redis Adapter:', err);
+    });
+
     // RECOVERY: Check for orphaned host disconnect sessions on startup
     // This handles the case where server crashed during grace period
     this.recoverOrphanedSessions().catch((err) => {
       this.logger.error('[GameGateway] Error recovering orphaned sessions:', err);
     });
+  }
+
+  /**
+   * Cleanup Redis adapter connections on shutdown
+   */
+  async onModuleDestroy() {
+    await teardownRedisAdapter();
   }
 
   /**
@@ -150,12 +167,23 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
     if (!identity) return;
 
+    const { sessionId, playerId, nickname, isHost } = identity;
+
     // Nếu là host, bắt đầu grace period trước khi terminate session
-    if (identity.isHost && identity.sessionId) {
+    if (isHost && sessionId) {
       this.handleHostDisconnect(client, identity);
     } else {
-      // Non-host: simply remove from session
-      this.removeSocketFromSession(client, identity);
+      // Non-host: remove from session and leaderboard
+      await this.removeSocketFromSession(client, identity);
+
+      // Remove player from leaderboard immediately
+      if (sessionId && playerId) {
+        await this.gameSessionService.removePlayerFromLeaderboard(sessionId, playerId);
+
+        // Broadcast updated leaderboard to remaining players
+        const leaderboard = await this.gameSessionService.getLeaderboard(sessionId);
+        this.server.to(sessionId).emit('leaderboard_update', { leaderboard });
+      }
     }
 
     this.socketMap.delete(client.id);
@@ -242,16 +270,33 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   /**
    * Xóa socket khỏi session
    */
-  private removeSocketFromSession(client: Socket, identity: PlayerIdentity) {
-    if (identity.sessionId) {
-      const sockets = this.sessionSockets.get(identity.sessionId);
+  private async removeSocketFromSession(client: Socket, identity: PlayerIdentity) {
+    const { sessionId, playerId, nickname, roomId } = identity;
+
+    if (sessionId) {
+      const sockets = this.sessionSockets.get(sessionId);
       if (sockets) {
         sockets.delete(client.id);
         if (sockets.size === 0) {
-          this.sessionSockets.delete(identity.sessionId);
+          this.sessionSockets.delete(sessionId);
         }
       }
+
+      // Notify host and other players that this player left
+      this.notifyPlayerLeft(sessionId, playerId, nickname);
     }
+  }
+
+  /**
+   * Notify host and other players that a player left
+   */
+  private notifyPlayerLeft(sessionId: string, playerId: string, nickname: string) {
+    // Emit to all players in the session (including host)
+    this.server.to(sessionId).emit('player_left', {
+      playerId,
+      nickname,
+      timestamp: Date.now(),
+    });
   }
 
   /**
@@ -859,6 +904,40 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       this.logger.error(`[GameGateway] submit_answer error: ${error.message}`);
       return { success: false, message: error.message };
     }
+  }
+
+  // ============================================================================
+  // PLAYER LEAVE EVENT
+  // ============================================================================
+
+  @SubscribeMessage('player_leave_game')
+  async handlePlayerLeaveGame(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { sessionId: string; playerId: string; nickname: string },
+  ) {
+    this.logger.log(`[GameGateway] player_leave_game: ${payload.nickname} (${payload.playerId}) from session ${payload.sessionId}`);
+
+    // Remove player from leaderboard
+    await this.gameSessionService.removePlayerFromLeaderboard(payload.sessionId, payload.playerId);
+
+    // Remove from socket tracking
+    const sockets = this.sessionSockets.get(payload.sessionId);
+    if (sockets) {
+      sockets.delete(client.id);
+    }
+
+    // Notify all remaining players
+    this.server.to(payload.sessionId).emit('player_left', {
+      playerId: payload.playerId,
+      nickname: payload.nickname,
+      timestamp: Date.now(),
+    });
+
+    // Broadcast updated leaderboard
+    const leaderboard = await this.gameSessionService.getLeaderboard(payload.sessionId);
+    this.server.to(payload.sessionId).emit('leaderboard_update', { leaderboard });
+
+    return { success: true };
   }
 
   // ============================================================================
