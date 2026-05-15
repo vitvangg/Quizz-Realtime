@@ -336,6 +336,25 @@ export default function GamePage() {
       }
     };
 
+    const handlePlayerLeft = (data: { playerId: string; nickname: string; timestamp: number }) => {
+      console.log('[GamePage] player_left:', data);
+
+      // Remove player from leaderboard
+      const state = useGameStore.getState();
+      const newLeaderboard = state.leaderboard.filter(
+        (entry) => entry.playerId !== data.playerId
+      );
+
+      useGameStore.setState({ leaderboard: newLeaderboard });
+
+      // If it was me who left (disconnected)
+      if (data.playerId === state.myPlayerId) {
+        toast.error('Bạn đã bị ngắt kết nối');
+      } else {
+        toast.info(`${data.nickname} đã rời phòng`);
+      }
+    };
+
     const handleScoreUpdate = (data: any) => {
       const state = useGameStore.getState();
 
@@ -423,6 +442,7 @@ export default function GamePage() {
     socket.on('host_disconnected', handleHostDisconnected);
     socket.on('host_reconnected', handleHostReconnected);
     socket.on('session_closed', handleSessionClosed);
+    socket.on('player_left', handlePlayerLeft);
 
     return () => {
       socket.off('game_starting', handleGameStarting);
@@ -436,6 +456,7 @@ export default function GamePage() {
       socket.off('host_disconnected', handleHostDisconnected);
       socket.off('host_reconnected', handleHostReconnected);
       socket.off('session_closed', handleSessionClosed);
+      socket.off('player_left', handlePlayerLeft);
     };
   }, [sessionId, router]);
 
@@ -809,7 +830,18 @@ export default function GamePage() {
   };
 
   const handleLeaveRoom = () => {
-    useGameStore.getState().reset();
+    const gameStore = useGameStore.getState();
+
+    // Emit leave event to notify host before disconnecting
+    if (gameStore.socket && sessionId) {
+      gameStore.socket.emit('player_leave_game', {
+        sessionId,
+        playerId: gameStore.myPlayerId,
+        nickname: gameStore.myNickname,
+      });
+    }
+
+    gameStore.reset();
     useRoomStore.getState().reset();
     router.push('/');
   };
@@ -1252,13 +1284,6 @@ export default function GamePage() {
                 style={{ fontFamily: 'Delicious Handrawn, cursive' }}
               >
                 Roi phong
-              </Button>
-              <Button
-                onClick={() => router.push('/')}
-                className="flex-1 text-lg bg-[#1DAD97] hover:bg-[#1a9a87] text-white rounded-xl shadow-[3px_3px_0_#111827]/20 py-6 border-2 border-[#1DAD97]"
-                style={{ fontFamily: 'Delicious Handrawn, cursive' }}
-              >
-                Ve Trang chu
               </Button>
             </div>
           )}
