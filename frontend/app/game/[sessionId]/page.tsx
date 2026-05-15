@@ -11,8 +11,10 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { apiClient } from '@/lib/apiClient';
 import { getSocket, connectSocketWithAuth, registerStoreUpdater } from '@/lib/socket';
+import { Zap, Trophy, Crown, Clock, Target, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
+
 // ============================================================================
-// FREEZE OVERLAY COMPONENT
+// FREEZE OVERLAY COMPONENT - Neo-Brutalism Style
 // ============================================================================
 function FreezeOverlay({ message }: { message: string }) {
   const [elapsed, setElapsed] = useState(0);
@@ -27,42 +29,42 @@ function FreezeOverlay({ message }: { message: string }) {
   return (
     <div
       className="fixed inset-0 z-[9999] flex flex-col items-center justify-center"
-      style={{ background: 'rgba(15, 2, 2, 0.97)' }}
+      style={{ background: '#000000' }}
     >
-      {/* Pulsing Warning Icon */}
-      <div className="mb-6 relative">
-        <div className="absolute inset-0 rounded-full bg-red-600 animate-ping opacity-30" />
-        <div className="relative w-24 h-24 rounded-full bg-red-900 border-4 border-red-500 flex items-center justify-center">
-          <span className="text-5xl">🚨</span>
+      {/* Warning Icon */}
+      <div className="mb-8 relative">
+        <div className="bg-red-500 border-4 border-black shadow-brutal-xl w-32 h-32 flex items-center justify-center">
+          <AlertTriangle className="w-16 h-16 text-white" />
         </div>
       </div>
 
       {/* Title */}
-      <h1 className="text-3xl font-black text-red-500 tracking-widest uppercase mb-2 animate-pulse">
+      <h1 className="text-4xl font-black text-red-500 uppercase mb-4 tracking-wider">
         HỆ THỐNG TẠM DỪNG
       </h1>
 
       {/* Message */}
-      <p className="text-center text-red-200 max-w-lg px-6 text-sm leading-relaxed mb-6">
-        {message || 'Phát hiện truy cập bất thường. Đang truy vết kẻ tấn công. Vui lòng giữ nguyên màn hình và đợi thông báo từ ban tổ chức.'}
+      <p className="text-center text-white/80 max-w-lg px-6 text-base leading-relaxed mb-8 font-bold">
+        {message || 'Phát hiện truy cập bất thường. Đang truy vết kẻ tấn công. Vui lòng giữ nguyên màn hình.'}
       </p>
 
       {/* Timer */}
-      <div className="flex flex-col items-center gap-1 mb-8">
-        <span className="text-xs text-red-400 uppercase tracking-widest">Đã dừng</span>
-        <span className="text-4xl font-mono font-bold text-white">{fmt(elapsed)}</span>
+      <div className="bg-white border-4 border-black shadow-brutal p-6 text-center mb-8">
+        <p className="text-xs font-black uppercase text-black/50 mb-2 tracking-widest">Đã dừng</p>
+        <p className="text-5xl font-black text-red-500">{fmt(elapsed)}</p>
       </div>
 
       {/* Status bar */}
-      <div className="flex items-center gap-2 px-4 py-2 rounded-full border border-red-800 bg-red-950">
-        <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-        <span className="text-xs text-red-300 font-mono">SECURITY RESPONSE ACTIVE</span>
+      <div className="flex items-center gap-2 px-6 py-3 bg-red-500 border-4 border-black">
+        <div className="w-3 h-3 bg-white rounded-full" />
+        <span className="text-sm font-black text-white tracking-wider">SECURITY RESPONSE ACTIVE</span>
       </div>
     </div>
   );
 }
+
 // ============================================================================
-// MAINTENANCE OVERLAY
+// MAINTENANCE OVERLAY - Neo-Brutalism Style
 // ============================================================================
 function MaintenanceOverlay({ message }: { message: string }) {
   const [countdown, setCountdown] = useState(5);
@@ -72,18 +74,24 @@ function MaintenanceOverlay({ message }: { message: string }) {
     return () => clearTimeout(t);
   }, [countdown]);
   return (
-    <div className="fixed inset-0 z-[9998] flex flex-col items-center justify-center bg-gray-950/98">
-      <div className="mb-5 text-6xl">🔧</div>
-      <h1 className="text-2xl font-bold text-white mb-2">Hệ thống đang bảo trì</h1>
-      <p className="text-gray-400 text-sm max-w-md text-center px-6 mb-6">
+    <div className="fixed inset-0 z-[9998] flex flex-col items-center justify-center bg-black">
+      <div className="bg-neon-yellow border-4 border-black shadow-brutal p-8 mb-6">
+        <svg xmlns="http://www.w3.org/2000/svg" className="w-20 h-20 text-black" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+        </svg>
+      </div>
+      <h1 className="text-3xl font-black text-white mb-3 uppercase">Hệ thống bảo trì</h1>
+      <p className="text-white/60 text-base max-w-md text-center px-6 mb-6 font-medium">
         {message || 'Chúng tôi đang nâng cấp hệ thống. Vui lòng quay lại sau ít phút.'}
       </p>
       {countdown > 0 && (
-        <p className="text-gray-500 text-xs">Ngắt kết nối sau <span className="text-white font-bold">{countdown}s</span></p>
+        <p className="text-white/40 text-sm font-bold">Ngắt kết nối sau <span className="text-neon-yellow font-black">{countdown}s</span></p>
       )}
     </div>
   );
 }
+
 export default function GamePage() {
   const params = useParams();
   const router = useRouter();
@@ -111,26 +119,19 @@ export default function GamePage() {
     reset,
   } = useGameStore();
 
-  // Derived: is this the last question?
   const isLastQuestion = totalQuestions > 0 && questionIndex >= totalQuestions - 1;
 
   const [localTimeRemaining, setLocalTimeRemaining] = useState(0);
   const [isJoining, setIsJoining] = useState(true);
   const [authReady, setAuthReady] = useState(false);
-  // Track nếu đã recover state từ HTTP API (sau reload)
   const [hasRecoveredFromHttp, setHasRecoveredFromHttp] = useState(false);
 
-  // Track if recovery has been initiated to prevent double execution
-  // (effect may run twice due to React StrictMode or re-renders)
   const hasRecoveredRef = useRef(false);
 
-  // Reset recovery flag when sessionId changes (for play_again navigation)
   useEffect(() => {
     hasRecoveredRef.current = false;
   }, [sessionId]);
 
-  // ── Wait for auth hydration before any game logic ────────────────────────────
-  // This effect runs ONCE when auth hydrates, ensuring auth token is available
   useEffect(() => {
     const checkAuth = () => {
       const authStore = useAuthStore.getState();
@@ -140,10 +141,8 @@ export default function GamePage() {
       }
     };
 
-    // Check immediately
     checkAuth();
 
-    // Also subscribe to auth changes
     const unsubscribe = useAuthStore.subscribe((state) => {
       if (state.isHydrated) {
         setAuthReady(true);
@@ -153,15 +152,12 @@ export default function GamePage() {
     return unsubscribe;
   }, []);
 
-  // ── Setup socket + listeners ONCE (never cleanup on unmount) ─────────────────
-  // reset() is intentionally NOT called here — the socket must survive navigation
   useEffect(() => {
     if (!sessionId || sessionId === 'undefined') {
       router.push('/');
       return;
     }
 
-    // Register store updater
     registerStoreUpdater((updater) => {
       useGameStore.setState(updater);
     });
@@ -186,22 +182,16 @@ export default function GamePage() {
       console.log('[GamePage] question_start:', data);
       const state = useGameStore.getState();
 
-      // Skip if we're in the middle of HTTP state recovery
-      // The HTTP state is authoritative during recovery
       if (state._isRecovering) {
         console.log('[GamePage] Skipping question_start due to HTTP recovery in progress');
         return;
       }
 
-      // Check if this is a NEW question or the SAME question (after reload/reconnect)
-      // Only reset answer state for truly NEW questions
       const isNewQuestion = state.currentQuestion?.id !== data.question.id;
       const shouldResetAnswer = isNewQuestion || state.gameStatus !== GameState.QUESTION_ACTIVE;
 
-      console.log('[GamePage] question_start: isNewQuestion=', isNewQuestion, 'shouldResetAnswer=', shouldResetAnswer, 'prev gameStatus=', state.gameStatus);
+      console.log('[GamePage] question_start: isNewQuestion=', isNewQuestion, 'shouldResetAnswer=', shouldResetAnswer);
 
-      // For timing: only use server timeRemaining if it's provided and valid
-      // Otherwise use question.timeLimit as the full duration
       let newTimeRemaining = data.question.timeLimit;
       if (data.timeRemaining !== undefined && data.timeRemaining !== null) {
         if (shouldResetAnswer) {
@@ -215,17 +205,13 @@ export default function GamePage() {
         questionIndex: data.questionIndex,
         totalQuestions: data.totalQuestions,
         countdown: 0,
-        // Reset player's answer state if it's a genuinely NEW question
         hasAnswered: shouldResetAnswer ? false : state.hasAnswered,
         selectedAnswerId: shouldResetAnswer ? null : state.selectedAnswerId,
-        // IMPORTANT: Reset correctAnswerId for NEW questions to avoid stale data
-        // It will be set by question_result event
         correctAnswerId: shouldResetAnswer ? null : state.correctAnswerId,
       });
       
       useGameStore.setState({
         timeRemaining: newTimeRemaining,
-        // Use serverTime from backend to sync across all clients
         questionStartTime: data.serverTime || Date.now(),
       });
     };
@@ -234,37 +220,22 @@ export default function GamePage() {
       console.log('[GamePage] question_result:', data);
       const state = useGameStore.getState();
 
-      // Verify this result is for the CURRENT question
-      // If questionIndex doesn't match, this result is stale - skip it
       if (data.questionIndex !== state.questionIndex) {
-        console.warn('[GamePage] Stale question_result received, skipping:', {
-          receivedQuestionIndex: data.questionIndex,
-          currentQuestionIndex: state.questionIndex,
-        });
+        console.warn('[GamePage] Stale question_result received, skipping');
         return;
       }
 
-      // Update leaderboard and correct answer
       useGameStore.setState({
         gameStatus: GameState.QUESTION_RESULT,
         leaderboard: data.leaderboard || [],
         correctAnswerId: data.correctAnswer?.id || null,
       });
 
-      // Update my score from leaderboard - ONLY if player already answered this question
-      // If player hasn't answered yet (reloaded before submitting), don't show score
-      // This prevents "score jump" from previous questions
-      console.log('[GamePage] question_result: myPlayerId=', state.myPlayerId, 'hasAnswered=', state.hasAnswered);
-      console.log('[GamePage] question_result: leaderboard playerIds=', data.leaderboard?.map((e: any) => e.playerId));
       if (state.myPlayerId && data.leaderboard) {
         const myEntry = data.leaderboard.find((e: any) => e.playerId === state.myPlayerId);
-        console.log('[GamePage] question_result: myEntry=', myEntry);
         if (myEntry) {
-          // Only update score if player has answered this question
-          // If hasn't answered, keep the score from HTTP recovery (previous question's score)
           const newScore = state.hasAnswered ? myEntry.score : state.myScore;
           const newRank = state.hasAnswered ? myEntry.rank : state.myRank;
-          console.log('[GamePage] question_result: updating score from', state.myScore, 'to', newScore, 'hasAnswered=', state.hasAnswered);
           useGameStore.setState({
             myScore: newScore,
             myRank: newRank,
@@ -299,18 +270,15 @@ export default function GamePage() {
       const storedHostSessionId = sessionStorage.getItem('hostSessionId');
       const isHostSession = storedHostSessionId === data.sessionId;
 
-      // Clear session-related storage
       sessionStorage.removeItem('hostSessionId');
       sessionStorage.removeItem('hostUserId');
       sessionStorage.removeItem('playerId');
       sessionStorage.removeItem('playerNickname');
       sessionStorage.removeItem('currentRoomId');
 
-      // Reset stores
       useGameStore.getState().reset();
       useRoomStore.getState().reset();
 
-      // Redirect based on reason and role
       if (data.reason === 'GAME_FINISHED') {
         if (isHostSession) {
           toast.info('Game đã kết thúc!');
@@ -336,18 +304,48 @@ export default function GamePage() {
       }
     };
 
+    // Handle player reconnecting (entering grace period)
+    const handlePlayerReconnecting = (data: { playerId: string; nickname: string; gracePeriodMs: number }) => {
+      console.log('[GamePage] player_reconnecting:', data);
+      
+      // Add to reconnecting set so UI can show "reconnecting..." status
+      useGameStore.getState().setPlayerReconnecting(data.playerId, data.nickname, data.gracePeriodMs);
+      
+      // Show toast indicating player is reconnecting
+      toast.warning(`${data.nickname} đang kết nối lại...`, {
+        duration: Math.min(data.gracePeriodMs, 5000),
+      });
+    };
+
+    // Handle player reconnected (within grace period)
+    const handlePlayerReconnected = (data: { playerId: string; nickname: string; timestamp: number }) => {
+      console.log('[GamePage] player_reconnected:', data);
+      
+      // Clear from reconnecting set
+      useGameStore.getState().clearPlayerReconnecting(data.playerId);
+      
+      // Show toast indicating player reconnected
+      toast.success(`${data.nickname} đã quay lại!`);
+    };
+
     const handlePlayerLeft = (data: { playerId: string; nickname: string; timestamp: number }) => {
       console.log('[GamePage] player_left:', data);
 
-      // Remove player from leaderboard
       const state = useGameStore.getState();
+      
+      // Check if player was in reconnecting state - if so, ignore this event
+      // (player_left is only emitted AFTER grace period expires)
+      if (state.reconnectingPlayers.has(data.playerId)) {
+        console.log('[GamePage] Ignoring player_left for player in reconnecting state:', data.playerId);
+        return;
+      }
+
       const newLeaderboard = state.leaderboard.filter(
         (entry) => entry.playerId !== data.playerId
       );
 
       useGameStore.setState({ leaderboard: newLeaderboard });
 
-      // If it was me who left (disconnected)
       if (data.playerId === state.myPlayerId) {
         toast.error('Bạn đã bị ngắt kết nối');
       } else {
@@ -362,25 +360,18 @@ export default function GamePage() {
         myPlayerId: state.myPlayerId,
         gameStatus: state.gameStatus,
         hasAnswered: state.hasAnswered,
-        currentQuestionId: state.currentQuestion?.id,
       });
 
-      // Skip if we're in the middle of HTTP state recovery
       if (state._isRecovering) {
         console.log('[GamePage] Skipping score_update due to HTTP recovery in progress');
         return;
       }
 
-      // CRITICAL: Never update myScore during QUESTION_ACTIVE
-      // Players should NOT see score changes while answering - this is anti-cheating
-      // Only show score after question ends (QUESTION_RESULT) or game ends (FINISHED)
       if (state.gameStatus === GameState.QUESTION_ACTIVE) {
         console.log('[GamePage] Skipping score_update during QUESTION_ACTIVE to prevent cheating');
         return;
       }
 
-      // If player hasn't answered this question yet, don't show any score
-      // (this handles cases where leaderboard has scores from previous questions)
       if (!state.hasAnswered) {
         console.log('[GamePage] Skipping score_update: player has not answered this question');
         return;
@@ -395,24 +386,18 @@ export default function GamePage() {
           if (myEntry) {
             console.log('[GamePage] Updating myScore:', myEntry.score, 'rank:', myEntry.rank);
             useGameStore.setState({ myScore: myEntry.score, myRank: myEntry.rank });
-          } else {
-            console.log('[GamePage] myPlayerId not found in leaderboard');
           }
         }
       }
     };
 
-    // Safety: if server says this sessionId is wrong, redirect to the right one.
-    // For play_again, this redirects to the new session.
     const handleGameRedirect = (data: { url: string; sessionId: string }) => {
       console.log('[GamePage] game_redirect received:', data, 'current sessionId:', sessionId);
       if (data.sessionId !== sessionId) {
-        // Use _pendingRedirect so the effect handles navigation
         useGameStore.setState({ _pendingRedirect: data.url });
       }
     };
 
-    // Handle room closed by host - kick all players to home page, host goes to /quiz
     const handleRoomClosed = (data: { reason: string }) => {
       console.log('[GamePage] room_closed received:', data);
       const storedHostSessionId = sessionStorage.getItem('hostSessionId');
@@ -443,6 +428,8 @@ export default function GamePage() {
     socket.on('host_reconnected', handleHostReconnected);
     socket.on('session_closed', handleSessionClosed);
     socket.on('player_left', handlePlayerLeft);
+    socket.on('player_reconnecting', handlePlayerReconnecting);
+    socket.on('player_reconnected', handlePlayerReconnected);
 
     return () => {
       socket.off('game_starting', handleGameStarting);
@@ -457,11 +444,11 @@ export default function GamePage() {
       socket.off('host_reconnected', handleHostReconnected);
       socket.off('session_closed', handleSessionClosed);
       socket.off('player_left', handlePlayerLeft);
+      socket.off('player_reconnecting', handlePlayerReconnecting);
+      socket.off('player_reconnected', handlePlayerReconnected);
     };
   }, [sessionId, router]);
 
-  // ── SPA navigation: watch _pendingRedirect from game store ─────────────────────
-  // Must use reactive selector so effect re-runs when _pendingRedirect changes
   const pendingRedirect = useGameStore((s) => s._pendingRedirect);
 
   useEffect(() => {
@@ -472,45 +459,29 @@ export default function GamePage() {
     useGameStore.setState({ _pendingRedirect: null });
   }, [pendingRedirect, sessionId, router]);
 
-  // ── Authoritative state recovery via HTTP + socket join ───────────────────────
-  // CRITICAL: This effect waits for auth hydration before running.
-  // This prevents race conditions where game join happens before auth is ready.
-  // 
-  // Correct flow:
-  // 1. Auth hydrates (token available)
-  // 2. Connect socket with auth token
-  // 3. Wait for socket connection
-  // 4. Emit host_join_game or join_game
-  // 5. Server verifies JWT and sets identity
-  // 6. UI renders correctly
   useEffect(() => {
     if (!sessionId || sessionId === 'undefined') return;
 
-    // Wait for auth to hydrate
     if (!authReady) {
       console.log('[GamePage] Waiting for auth to hydrate...');
       return;
     }
 
-    // Prevent double execution
     if (hasRecoveredRef.current) {
       console.log('[GamePage] Skipping double recovery');
       return;
     }
     hasRecoveredRef.current = true;
 
-    // Get auth state
     const authStore = useAuthStore.getState();
     const accessToken = authStore.accessToken;
     console.log('[GamePage] Auth ready, token available:', !!accessToken);
 
-    // Session storage for host/player detection
     const storedHostSessionId = sessionStorage.getItem('hostSessionId');
     const storedPlayerId = sessionStorage.getItem('playerId');
     const storedNickname = sessionStorage.getItem('playerNickname');
     const storedRoomId = sessionStorage.getItem('currentRoomId');
     
-    // Determine role AFTER auth is ready
     const isHostFromStorage = storedHostSessionId === sessionId;
     const isPlayer = !isHostFromStorage && !!storedPlayerId && !!storedNickname;
     console.log('[GamePage] Role: isHostFromStorage=', isHostFromStorage, 'isPlayer=', isPlayer);
@@ -635,15 +606,12 @@ export default function GamePage() {
       }
 
       if (isHostFromStorage && accessToken) {
-        // HOST: Join with JWT - server will verify
         console.log('[GamePage] Joining as HOST with JWT');
         socket.emit('host_join_game', { sessionId, jwt: accessToken }, (response: any) => {
           if (response.success && response.state) {
             console.log('[GamePage] host_join_game success, isActualHost:', response.isActualHost);
             
-            // Trust server's verification
             const actualIsHost = response.isActualHost;
-            // Only set correctAnswerId if in QUESTION_RESULT state
             const correctAnswerId = response.state.status === 'QUESTION_RESULT' 
               ? (response.state.correctAnswerId || httpData?.correctAnswerId || null)
               : null;
@@ -662,7 +630,7 @@ export default function GamePage() {
               totalQuestions: response.state.totalQuestions ?? 0,
               leaderboard: response.state.leaderboard || httpData?.leaderboard || [],
               timeRemaining: response.state.remainingTime ?? response.state.currentQuestion?.timeLimit ?? 0,
-              correctAnswerId, // Set from server if in QUESTION_RESULT
+              correctAnswerId,
               _isRecovering: false,
             });
             if (!actualIsHost) {
@@ -670,7 +638,6 @@ export default function GamePage() {
             }
           } else {
             console.error('[GamePage] host_join_game failed:', response.error);
-            // Fallback to player mode
             const fallbackNickname = storedNickname || authStore.user?.email?.split('@')[0] || `Player_${Date.now() % 1000}`;
             socket.emit('join_game', { sessionId, playerId: storedPlayerId || null, nickname: fallbackNickname }, (playerResponse: any) => {
               if (playerResponse.success && playerResponse.state) {
@@ -695,14 +662,12 @@ export default function GamePage() {
           }
         });
       } else if (isPlayer && storedPlayerId && storedNickname) {
-        // PLAYER: Normal join
         console.log('[GamePage] Joining as PLAYER');
         socket.emit('join_game', { sessionId, playerId: storedPlayerId, nickname: storedNickname }, (response: any) => {
           if (response.success && response.state) {
             console.log('[GamePage] join_game success');
             const myEntry = response.state.leaderboard?.find((e: any) => e.playerId === storedPlayerId);
             const showLeaderboard = response.state.status !== GameState.QUESTION_ACTIVE;
-            // Only set correctAnswerId if in QUESTION_RESULT state
             const correctAnswerId = response.state.status === 'QUESTION_RESULT'
               ? (response.state.correctAnswerId || httpData?.correctAnswerId || null)
               : null;
@@ -719,7 +684,7 @@ export default function GamePage() {
               totalQuestions: response.state.totalQuestions ?? 0,
               leaderboard: showLeaderboard ? (response.state.leaderboard || httpData?.leaderboard || []) : useGameStore.getState().leaderboard,
               timeRemaining: response.state.remainingTime ?? response.state.currentQuestion?.timeLimit ?? 0,
-              correctAnswerId, // Set from server if in QUESTION_RESULT
+              correctAnswerId,
               myScore: myEntry?.score ?? useGameStore.getState().myScore ?? 0,
               myRank: myEntry?.rank ?? useGameStore.getState().myRank ?? null,
               _isRecovering: false,
@@ -729,17 +694,14 @@ export default function GamePage() {
           }
         });
       } else {
-        // No stored credentials - use HTTP state
         console.log('[GamePage] No stored credentials, using HTTP state only');
         useGameStore.setState({ _isRecovering: false });
       }
     };
 
-    // Main flow: connect socket with auth, then recover state, then join room
     const initGame = async () => {
       const socket = getSocket();
       
-      // Connect socket with auth token if not connected
       if (!socket.connected) {
         console.log('[GamePage] Connecting socket with auth token...');
         if (accessToken) {
@@ -748,7 +710,6 @@ export default function GamePage() {
           socket.connect();
         }
         
-        // Wait for connection
         await new Promise<void>((resolve) => {
           if (socket.connected) {
             resolve();
@@ -759,10 +720,7 @@ export default function GamePage() {
         console.log('[GamePage] Socket connected:', socket.id);
       }
 
-      // Recover HTTP state
       await recoverState();
-      
-      // Join socket room
       joinSocketRoom();
     };
 
@@ -774,9 +732,6 @@ export default function GamePage() {
 
   }, [sessionId, authReady]);
 
-  // ── Local countdown timer ────────────────────────────────────────────────────
-  // Uses timeRemaining from store if available (after reload recovery),
-  // otherwise starts from currentQuestion.timeLimit
   useEffect(() => {
     if (gameStatus === GameState.QUESTION_ACTIVE && currentQuestion) {
       const startTime = timeRemaining > 0 ? timeRemaining : currentQuestion.timeLimit;
@@ -792,7 +747,6 @@ export default function GamePage() {
     const gameStore = useGameStore.getState();
     if (!gameStore.socket || !sessionId) return;
     
-    // Double-check: only hosts can advance questions
     if (!gameStore.isHost) {
       console.warn('[GamePage] handleNextQuestion called by non-host, ignoring');
       return;
@@ -801,16 +755,13 @@ export default function GamePage() {
     gameStore.socket.emit('host_next_question', { sessionId }, (response: any) => {
       if (!response.success) {
         console.error('[GamePage] next_question error:', response.error);
-        // If game already ended, update status
         if (response.error === 'Game already finished') {
           useGameStore.setState({ gameStatus: GameState.FINISHED });
         }
-        // If not the host, hide the button by updating state
         if (response.error === 'Only host can advance question') {
           useGameStore.setState({ isHost: false });
         }
       }
-      // If game ended via this action, backend will emit game_ended event
     });
   };
 
@@ -820,7 +771,6 @@ export default function GamePage() {
     try {
       const newSessionId = await playAgain(sid, rid);
       if (newSessionId) {
-        // Update sessionStorage for the new session
         sessionStorage.setItem('hostSessionId', newSessionId);
         router.push(`/game/${newSessionId}`);
       }
@@ -832,7 +782,6 @@ export default function GamePage() {
   const handleLeaveRoom = () => {
     const gameStore = useGameStore.getState();
 
-    // Emit leave event to notify host before disconnecting
     if (gameStore.socket && sessionId) {
       gameStore.socket.emit('player_leave_game', {
         sessionId,
@@ -886,72 +835,53 @@ export default function GamePage() {
     });
   };
 
-  const getAnswerButtonColor = (answerId: string, index: number) => {
-    const colors = ['bg-blue-500', 'bg-green-500', 'bg-yellow-500', 'bg-purple-500'];
-    if (gameStatus === GameState.QUESTION_RESULT) {
-      if (answerId === correctAnswerId) return 'bg-green-600 ring-4 ring-green-300';
-      if (answerId === selectedAnswerId && answerId !== correctAnswerId) return 'bg-red-500';
-    }
-    if (selectedAnswerId === answerId) return colors[index % 4] + ' ring-4 ring-white/50';
-    return colors[index % 4];
-  };
-
-  // ── Render ──────────────────────────────────────────────────────────────────
+  // ============================================================================
+  // RENDER - Neo-Brutalism Game UI
+  // ============================================================================
   if (!sessionId || sessionId === 'undefined') {
     return (
-      <div className="min-h-screen bg-[#F4EDE0] flex items-center justify-center">
-        <Card className="w-full max-w-md bg-white rounded-2xl shadow-[6px_6px_0_#1DAD97] border-2 border-[#DC2626]/30">
-          <CardHeader className="text-center pb-2">
-            <CardTitle className="text-2xl text-[#111827]" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-              Session khong hop le
+      <div className="min-h-screen bg-neon-yellow flex items-center justify-center p-4">
+        <Card className="w-full max-w-md bg-white border-4 border-black shadow-brutal-xl">
+          <CardHeader className="bg-red-500 border-b-4 border-black text-center">
+            <CardTitle className="text-2xl font-black text-white uppercase">
+              Session không hợp lệ
             </CardTitle>
           </CardHeader>
-          <CardContent className="flex justify-center">
+          <CardContent className="pt-6 flex justify-center">
             <Button
               onClick={() => router.push('/')}
-              className="bg-[#1DAD97] hover:bg-[#1a9a87] text-white rounded-xl shadow-[3px_3px_0_#111827]/20 px-8 py-6 border-2 border-[#1DAD97]"
-              style={{ fontFamily: 'Delicious Handrawn, cursive' }}
+              className="bg-neon-green border-4 border-black shadow-brutal hover:shadow-none hover:translate-x-1 hover:translate-y-1 font-black text-lg px-8 py-6"
             >
-              Quay ve trang chu
+              QUAY VỀ TRANG CHỦ
             </Button>
           </CardContent>
         </Card>
-
-        <style jsx global>{`
-          @import url('https://fonts.googleapis.com/css2?family=Delicious+Handrawn&display=swap');
-        `}</style>
       </div>
     );
   }
-  // Maintenance Overlay
+
   if (isMaintenance) {
     return <MaintenanceOverlay message={maintenanceMessage} />;
   }
 
-  // Hard Freeze Overlay
   if (isFrozen) {
     return <FreezeOverlay message={freezeMessage} />;
   }
+
   if (isJoining) {
     return (
-      <div className="min-h-screen bg-[#F4EDE0] flex items-center justify-center p-4">
-        <Card className="w-full max-w-md bg-white rounded-2xl shadow-[6px_6px_0_#1DAD97] border-2 border-[#1DAD97]/30">
-          <CardHeader className="text-center pb-2">
-            <CardTitle className="text-2xl text-[#111827]" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-              Dang ket noi...
+      <div className="min-h-screen bg-neon-yellow flex items-center justify-center p-4">
+        <Card className="w-full max-w-md bg-white border-4 border-black shadow-brutal-xl">
+          <CardHeader className="bg-neon-blue border-b-4 border-black text-center">
+            <CardTitle className="text-2xl font-black uppercase">
+              Đang kết nối...
             </CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-col items-center gap-4 pt-2">
-            <div className="w-8 h-8 border-4 border-[#1DAD97] border-t-transparent rounded-full animate-spin" />
-            <p className="text-[#111827]/60 text-sm" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-              Dang tham gia game
-            </p>
+          <CardContent className="flex flex-col items-center gap-4 pt-6">
+            <div className="w-12 h-12 border-4 border-black border-t-transparent rounded-full animate-spin bg-neon-pink" />
+            <p className="text-lg font-bold text-black/60">Đang tham gia game</p>
           </CardContent>
         </Card>
-
-        <style jsx global>{`
-          @import url('https://fonts.googleapis.com/css2?family=Delicious+Handrawn&display=swap');
-        `}</style>
       </div>
     );
   }
@@ -959,29 +889,24 @@ export default function GamePage() {
   // Countdown overlay
   if (gameStatus === GameState.STARTING) {
     return (
-      <div className="min-h-screen bg-[#F4EDE0] flex items-center justify-center overflow-hidden">
+      <div className="min-h-screen bg-neon-yellow flex items-center justify-center overflow-hidden">
         <div className="text-center">
-          <p className="text-lg text-[#111827]/60 mb-8" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-            Game sap bat dau
+          <p className="text-lg font-bold text-black/60 mb-8 uppercase tracking-wide">
+            Game sắp bắt đầu
           </p>
 
           <div className="relative inline-block">
-            <span
-              className="text-[180px] md:text-[240px] text-[#1DAD97] leading-none"
-              style={{ fontFamily: 'Delicious Handrawn, cursive', fontWeight: 400 }}
-            >
-              {countdown}
-            </span>
+            <div className="bg-black border-4 border-black shadow-brutal-xl w-64 h-64 flex items-center justify-center">
+              <span className="text-8xl font-black text-neon-yellow">
+                {countdown}
+              </span>
+            </div>
           </div>
 
-          <p className="text-2xl text-[#111827]/70 mt-8" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-            Chuan bi cau hoi
+          <p className="text-2xl font-bold text-black/70 mt-8 uppercase tracking-wide">
+            Chuẩn bị câu hỏi
           </p>
         </div>
-
-        <style jsx global>{`
-          @import url('https://fonts.googleapis.com/css2?family=Delicious+Handrawn&display=swap');
-        `}</style>
       </div>
     );
   }
@@ -989,73 +914,88 @@ export default function GamePage() {
   // Waiting
   if (gameStatus === GameState.WAITING) {
     return (
-      <div className="min-h-screen bg-[#F4EDE0] flex items-center justify-center p-4">
-        <Card className="w-full max-w-md bg-white rounded-3xl shadow-[6px_6px_0_#1DAD97] border-2 border-[#1DAD97]/30">
-          <CardHeader className="text-center pb-2">
-            <CardTitle className="text-2xl text-[#111827]" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-              Dang cho game bat dau
+      <div className="min-h-screen bg-neon-blue flex items-center justify-center p-4">
+        <Card className="w-full max-w-md bg-white border-4 border-black shadow-brutal-xl">
+          <CardHeader className="bg-neon-pink border-b-4 border-black text-center">
+            <CardTitle className="text-2xl font-black uppercase text-white">
+              Đang chờ game bắt đầu
             </CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-col items-center gap-4 pt-2">
-            <div className="w-8 h-8 border-4 border-[#1DAD97] border-t-transparent rounded-full animate-spin" />
-            <p className="text-[#111827]/60 text-sm" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-              {isHost ? 'Doi nguoi choi tham gia' : 'Cho host bat dau game'}
+          <CardContent className="flex flex-col items-center gap-4 pt-6">
+            <div className="w-12 h-12 border-4 border-black border-t-transparent rounded-full animate-spin bg-neon-green" />
+            <p className="text-lg font-bold text-black/60">
+              {isHost ? 'Đợi người chơi tham gia' : 'Chờ host bắt đầu game'}
             </p>
           </CardContent>
         </Card>
-
-        <style jsx global>{`
-          @import url('https://fonts.googleapis.com/css2?family=Delicious+Handrawn&display=swap');
-        `}</style>
       </div>
     );
   }
 
   // Question active
   if (gameStatus === GameState.QUESTION_ACTIVE && currentQuestion) {
+    // Neo-Brutalism colors for answers
+    const answerColors = [
+      { bg: 'bg-neon-blue', border: 'border-blue-600', hover: 'hover:bg-blue-600' },
+      { bg: 'bg-neon-green', border: 'border-green-600', hover: 'hover:bg-green-600' },
+      { bg: 'bg-neon-yellow', border: 'border-yellow-500', hover: 'hover:bg-yellow-500' },
+      { bg: 'bg-neon-purple', border: 'border-purple-600', hover: 'hover:bg-purple-600' },
+    ];
+
     return (
-      <div className="min-h-screen bg-[#F4EDE0] p-4">
+      <div className="min-h-screen bg-neon-yellow p-4">
         <div className="max-w-4xl mx-auto">
           {/* Header */}
-          <div className="flex justify-between items-center mb-6 bg-white rounded-2xl p-4 shadow-[3px_3px_0_#1DAD97] border-2 border-[#1DAD97]/30">
-            <div className="text-[#111827] text-xl" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-              Cau {questionIndex + 1}/{totalQuestions}
+          <div className="flex justify-between items-center mb-6 bg-white rounded-2xl p-4 border-4 border-black shadow-brutal">
+            <div className="bg-black border-4 border-black shadow-brutal-sm px-4 py-2">
+              <span className="text-white font-black text-xl uppercase">
+                Câu {questionIndex + 1}/{totalQuestions}
+              </span>
             </div>
-            <div className={`px-4 py-2 rounded-full text-lg ${localTimeRemaining <= 5 ? 'bg-[#DC2626] text-white' : 'bg-[#1DAD97] text-white'}`} style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-              {localTimeRemaining}s
+            <div className={`px-6 py-3 border-4 border-black shadow-brutal ${localTimeRemaining <= 5 ? 'bg-red-500' : 'bg-neon-green'}`}>
+              <span className="text-white font-black text-2xl flex items-center gap-2">
+                <Clock className="w-6 h-6" />
+                {localTimeRemaining}s
+              </span>
             </div>
           </div>
 
           {/* Question card */}
-          <Card className="mb-6 bg-white rounded-2xl shadow-[4px_4px_0_#1DAD97] border-2 border-[#1DAD97]/30">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-2xl text-center text-[#111827] leading-relaxed" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-                {currentQuestion.content}
-              </CardTitle>
+          <Card className="mb-6 bg-white border-4 border-black shadow-brutal">
+            <CardHeader className="bg-neon-pink border-b-4 border-black pb-4">
+              <div className="flex items-center gap-3">
+                <Target className="w-8 h-8 text-white" />
+                <CardTitle className="text-2xl font-black text-white text-center leading-relaxed">
+                  {currentQuestion.content}
+                </CardTitle>
+              </div>
             </CardHeader>
           </Card>
 
-          {/* Answer buttons */}
+          {/* Answer buttons - Neo-Brutalism style */}
           <div className="grid grid-cols-2 gap-4 mb-6">
             {currentQuestion.answers.map((answer, index) => {
-              const colors = ['bg-[#1DAD97]', 'bg-[#F59E0B]', 'bg-[#8B5CF6]', 'bg-[#EC4899]'];
+              const color = answerColors[index % 4];
+              const isSelected = selectedAnswerId === answer.id;
               return (
                 <button
                   key={answer.id}
                   onClick={() => !isHost && handleSubmitAnswer(answer.id)}
                   disabled={hasAnswered || isHost}
                   className={`
-                    ${colors[index % 4]}
-                    text-white text-xl py-8 px-6 rounded-2xl
-                    transition-all duration-200 shadow-[3px_3px_0_#111827]/20
-                    ${!isHost && !hasAnswered ? 'hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[5px_5px_0_#111827]/20 cursor-pointer active:translate-x-[1px] active:translate-y-[1px] active:shadow-[1px_1px_0_#111827]/20' : ''}
-                    disabled:opacity-50 disabled:cursor-not-allowed
+                    ${color.bg} border-4 border-black
+                    text-white text-xl py-10 px-6
+                    font-black uppercase
+                    shadow-brutal
+                    transition-all duration-150
+                    ${!isHost && !hasAnswered ? `${color.hover} hover:-translate-y-1 hover:shadow-brutal-lg cursor-pointer` : ''}
+                    ${isSelected ? 'ring-4 ring-white scale-105' : ''}
+                    disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:translate-y-0
                   `}
-                  style={{ fontFamily: 'Delicious Handrawn, cursive' }}
                 >
-                  <span className="flex items-center gap-3">
-                    <span className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-lg">
-                      {index === 0 ? 'A' : index === 1 ? 'B' : index === 2 ? 'C' : 'D'}
+                  <span className="flex items-center justify-center gap-4">
+                    <span className="w-12 h-12 rounded-xl bg-black/20 flex items-center justify-center text-2xl font-black">
+                      {String.fromCharCode(65 + index)}
                     </span>
                     <span className="text-left flex-1">{answer.content}</span>
                   </span>
@@ -1064,77 +1004,110 @@ export default function GamePage() {
             })}
           </div>
 
-          {/* Status message */}
+          {/* Status message - Neo-Brutalism */}
           {isHost ? (
-            <div className="text-center text-[#111827]/60 text-lg bg-white rounded-xl p-4 shadow-[2px_2px_0_#1DAD97] border border-[#1DAD97]/30">
-              Host dang theo doi cau hoi
+            <div className="text-center bg-white border-4 border-black shadow-brutal p-4">
+              <p className="font-bold text-black/60 uppercase tracking-wide">
+                <span className="inline-block w-3 h-3 bg-neon-orange border-2 border-black mr-2"></span>
+                Host đang theo dõi câu hỏi
+              </p>
             </div>
           ) : hasAnswered ? (
-            <div className="text-center text-[#16A34A] text-lg bg-[#16A34A]/10 rounded-xl p-4 border-2 border-[#16A34A]/30" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-              Da gui dap an! Cho ket qua...
+            <div className="text-center bg-neon-green border-4 border-black shadow-brutal p-4">
+              <p className="font-black text-white uppercase tracking-wide flex items-center justify-center gap-2">
+                <CheckCircle className="w-6 h-6" />
+                Đã gửi đáp án! Chờ kết quả...
+              </p>
             </div>
           ) : (
-            <div className="text-center text-[#111827]/60 text-lg" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-              Chon dap an cua ban
+            <div className="text-center bg-white border-4 border-black shadow-brutal p-4">
+              <p className="font-bold text-black/60 uppercase tracking-wide">
+                Chọn đáp án của bạn
+              </p>
             </div>
           )}
 
-          {/* Score display - CHỈ hiển thị khi KHÔNG phải đang trả lời (QUESTION_ACTIVE) */}
+          {/* Score display - only when NOT answering */}
           {gameStatus !== GameState.QUESTION_ACTIVE && (
-            <div className="mt-6 text-center bg-white rounded-xl p-4 shadow-[2px_2px_0_#1DAD97] border border-[#1DAD97]/30" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-              <span className="text-[#111827]/60">Diem cua ban: </span>
-              <span className="text-[#1DAD97]">{myScore} pts</span>
-              <span className="text-[#111827]/40 mx-2">|</span>
-              <span className="text-[#111827]/60">Xep hang: </span>
-              <span>#{myRank || '-'}</span>
+            <div className="mt-6 text-center bg-white border-4 border-black shadow-brutal p-4">
+              <span className="font-bold text-black/60">Điểm của bạn: </span>
+              <span className="font-black text-neon-green">{myScore} pts</span>
+              <span className="font-bold text-black/40 mx-4">|</span>
+              <span className="font-bold text-black/60">Xếp hạng: </span>
+              <span className="font-black text-neon-pink">#{myRank || '-'}</span>
             </div>
           )}
         </div>
-
-        <style jsx global>{`
-          @import url('https://fonts.googleapis.com/css2?family=Delicious+Handrawn&display=swap');
-        `}</style>
       </div>
     );
   }
 
   // Question result
   if (gameStatus === GameState.QUESTION_RESULT) {
+    const isCorrect = selectedAnswerId === correctAnswerId;
+    const noAnswer = !selectedAnswerId;
+
     return (
-      <div className="min-h-screen bg-[#F4EDE0] p-4">
+      <div className="min-h-screen bg-neon-green p-4">
         <div className="max-w-4xl mx-auto">
           {/* Result header */}
           <div className="text-center mb-6">
-            <h2 className="text-3xl text-[#111827] mb-2" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Ket qua</h2>
-            {selectedAnswerId === correctAnswerId
-              ? <p className="text-[#16A34A] text-xl" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Chinh xac!</p>
-              : selectedAnswerId
-                ? <p className="text-[#DC2626] text-xl" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Chua dung!</p>
-                : <p className="text-[#D97706] text-xl" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Het gio!</p>}
+            {isCorrect ? (
+              <>
+                <div className="bg-neon-yellow border-4 border-black shadow-brutal-xl inline-block px-8 py-4 mb-3">
+                  <CheckCircle className="w-16 h-16 text-black mx-auto" />
+                </div>
+                <h2 className="text-4xl font-black text-white uppercase">Chính xác!</h2>
+              </>
+            ) : noAnswer ? (
+              <>
+                <div className="bg-neon-orange border-4 border-black shadow-brutal-xl inline-block px-8 py-4 mb-3">
+                  <Clock className="w-16 h-16 text-white mx-auto" />
+                </div>
+                <h2 className="text-4xl font-black text-white uppercase">Hết giờ!</h2>
+              </>
+            ) : (
+              <>
+                <div className="bg-red-500 border-4 border-black shadow-brutal-xl inline-block px-8 py-4 mb-3">
+                  <XCircle className="w-16 h-16 text-white mx-auto" />
+                </div>
+                <h2 className="text-4xl font-black text-white uppercase">Chưa đúng!</h2>
+              </>
+            )}
           </div>
 
           {/* Question card */}
-          <Card className="mb-6 bg-white rounded-2xl shadow-[4px_4px_0_#1DAD97] border-2 border-[#1DAD97]/30">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-center text-[#111827]" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>{currentQuestion?.content}</CardTitle>
+          <Card className="mb-6 bg-white border-4 border-black shadow-brutal">
+            <CardHeader className="bg-neon-blue border-b-4 border-black pb-4">
+              <CardTitle className="text-xl font-black text-white text-center leading-relaxed">
+                {currentQuestion?.content}
+              </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
                 {currentQuestion?.answers.map((answer, index) => {
-                  const isCorrect = answer.id === correctAnswerId;
-                  // Host không thấy đáp án player chọn - chỉ thấy đáp án đúng
-                  // Player thấy đáp án mình chọn (highlight đỏ nếu sai)
+                  const isAnswerCorrect = answer.id === correctAnswerId;
                   const isSelected = !isHost && answer.id === selectedAnswerId;
+                  
                   return (
                     <div key={answer.id} className={`
-                      p-4 rounded-xl flex items-center gap-3
-                      ${isCorrect ? 'bg-[#16A34A] text-white shadow-[2px_2px_0_#111827]/20' : isSelected ? 'bg-[#DC2626] text-white shadow-[2px_2px_0_#111827]/20' : 'bg-[#111827]/10 text-[#111827] border border-[#111827]/10'}
-                    `} style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-                      <span className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-sm">
-                        {index === 0 ? 'A' : index === 1 ? 'B' : index === 2 ? 'C' : 'D'}
+                      p-4 rounded-xl flex items-center gap-3 border-4 border-black
+                      ${isAnswerCorrect 
+                        ? 'bg-neon-green shadow-brutal' 
+                        : isSelected 
+                          ? 'bg-red-500 shadow-brutal' 
+                          : 'bg-white shadow-brutal-sm'
+                      }
+                    `}>
+                      <span className={`w-10 h-10 rounded-lg border-2 border-black flex items-center justify-center font-black text-lg ${
+                        isAnswerCorrect || isSelected ? 'bg-black text-white' : 'bg-black/10 text-black'
+                      }`}>
+                        {String.fromCharCode(65 + index)}
                       </span>
-                      <span className="flex-1">{answer.content}</span>
-                      {isCorrect && <span className="text-green-200">Correct</span>}
+                      <span className={`flex-1 font-bold text-lg ${isAnswerCorrect || isSelected ? 'text-white' : 'text-black'}`}>
+                        {answer.content}
+                      </span>
+                      {isAnswerCorrect && <CheckCircle className="w-6 h-6 text-white" />}
                     </div>
                   );
                 })}
@@ -1142,67 +1115,64 @@ export default function GamePage() {
             </CardContent>
           </Card>
 
-          {/* Player: chỉ thấy điểm cá nhân */}
+          {/* Player score card */}
           {!isHost && (
-            <Card className="mb-6 bg-white rounded-2xl shadow-[4px_4px_0_#1DAD97] border-2 border-[#1DAD97]/30">
+            <Card className="mb-6 bg-white border-4 border-black shadow-brutal">
               <CardContent className="pt-6 text-center">
-                <div className="text-[#111827]/60 text-sm mb-2" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Diem cua ban</div>
-                <div className="text-5xl text-[#1DAD97] mb-1" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>{myScore} pts</div>
-                <div className="text-[#111827]/70" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Xep hang: <span className="text-[#111827]">#{myRank || '-'}</span></div>
+                <p className="text-sm font-bold text-black/50 uppercase tracking-wider mb-2">Điểm của bạn</p>
+                <div className="text-5xl font-black text-neon-pink mb-2">{myScore} pts</div>
+                <div className="text-lg font-bold text-black/70">
+                  Xếp hạng: <span className="text-neon-blue font-black">#{myRank || '-'}</span>
+                </div>
               </CardContent>
             </Card>
           )}
 
-          {/* Host: thấy đầy đủ leaderboard */}
+          {/* Host leaderboard */}
           {isHost && (
-            <Card className="mb-6 bg-white rounded-2xl shadow-[4px_4px_0_#1DAD97] border-2 border-[#1DAD97]/30">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-center text-[#111827]" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Bang xep hang</CardTitle>
+            <Card className="mb-6 bg-white border-4 border-black shadow-brutal">
+              <CardHeader className="bg-neon-yellow border-b-4 border-black pb-4">
+                <CardTitle className="text-xl font-black uppercase flex items-center gap-2">
+                  <Trophy className="w-6 h-6 text-black" />
+                  Bảng xếp hạng
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
                   {leaderboard.slice(0, 5).map((entry, idx) => (
                     <div key={entry.playerId} className={`
-                      flex justify-between items-center p-4 rounded-xl
-                      ${entry.rank === 1 ? 'bg-[#F59E0B] text-white shadow-[2px_2px_0_#111827]/20' : 'bg-[#111827]/5 text-[#111827] border border-[#111827]/10'}
-                    `} style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
+                      flex justify-between items-center p-4 rounded-xl border-4 border-black
+                      ${entry.rank === 1 ? 'bg-neon-yellow shadow-brutal' : entry.rank === 2 ? 'bg-gray-300 shadow-brutal-sm' : entry.rank === 3 ? 'bg-orange-400 shadow-brutal-sm' : 'bg-white shadow-brutal-sm'}
+                    `}>
                       <div className="flex items-center gap-3">
-                        <span className="text-lg font-bold">
-                          {idx === 0 ? '1st' : idx === 1 ? '2nd' : idx === 2 ? '3rd' : `${entry.rank}th`}
+                        <span className={`w-10 h-10 rounded-lg border-4 border-black flex items-center justify-center font-black text-lg ${
+                          entry.rank === 1 ? 'bg-black text-neon-yellow' : 'bg-black/20 text-black'
+                        }`}>
+                          {entry.rank === 1 ? '👑' : entry.rank === 2 ? '🥈' : entry.rank === 3 ? '🥉' : entry.rank}
                         </span>
-                        <span>{entry.nickname}</span>
+                        <span className="font-bold text-lg text-black">{entry.nickname}</span>
                       </div>
-                      <span className="text-lg">{entry.score} pts</span>
+                      <span className="font-black text-xl text-black">{entry.score} pts</span>
                     </div>
                   ))}
                   {leaderboard.length === 0 && (
-                    <p className="text-center text-[#111827]/50">Chua co du lieu</p>
+                    <p className="text-center font-bold text-black/50 uppercase">Chưa có dữ liệu</p>
                   )}
                 </div>
               </CardContent>
             </Card>
           )}
 
-          <div className="text-center text-[#111827]/50 text-sm mb-4" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
-            {isHost ? `` : `Diem cua ban: ${myScore} pts`}
-          </div>
-
-          {/* Chỉ hiện nút "Tiếp tục" khi KHÔNG phải câu hỏi cuối */}
+          {/* Next question button */}
           {isHost && !isLastQuestion && (
             <Button
               onClick={handleNextQuestion}
-              size="lg"
-              className="w-full bg-[#1DAD97] hover:bg-[#1a9a87] text-white rounded-xl shadow-[3px_3px_0_#111827]/20 text-lg py-6 border-2 border-[#1DAD97]"
-              style={{ fontFamily: 'Delicious Handrawn, cursive' }}
+              className="w-full bg-neon-pink border-4 border-black shadow-brutal hover:shadow-none hover:translate-x-2 hover:translate-y-2 font-black text-xl py-8 uppercase"
             >
-              Tiep tuc
+              Tiếp tục →
             </Button>
           )}
         </div>
-
-        <style jsx global>{`
-          @import url('https://fonts.googleapis.com/css2?family=Delicious+Handrawn&display=swap');
-        `}</style>
       </div>
     );
   }
@@ -1210,45 +1180,62 @@ export default function GamePage() {
   // Game finished
   if (gameStatus === GameState.FINISHED) {
     return (
-      <div className="min-h-screen bg-[#F4EDE0] p-4">
+      <div className="min-h-screen bg-neon-pink p-4">
         <div className="max-w-4xl mx-auto">
           {/* Game Over header */}
           <div className="text-center mb-8">
-            <h1 className="text-5xl text-[#111827] mb-2" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Game Over!</h1>
-            <p className="text-xl text-[#111827]/70" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Ket qua cuoi cung</p>
+            <div className="bg-neon-yellow border-4 border-black shadow-brutal-xl inline-block px-8 py-4 mb-4">
+              <Trophy className="w-16 h-16 text-black mx-auto" />
+            </div>
+            <h1 className="text-5xl font-black text-white uppercase mb-2">Game Over!</h1>
+            <p className="text-xl font-bold text-white/70 uppercase tracking-wide">Kết quả cuối cùng</p>
           </div>
 
-          {/* Player: chỉ thấy điểm cá nhân */}
+          {/* Player result card */}
           {!isHost && (
-            <Card className="mb-6 bg-white rounded-2xl shadow-[4px_4px_0_#1DAD97] border-2 border-[#1DAD97]/30">
+            <Card className="mb-6 bg-white border-4 border-black shadow-brutal-xl">
+              <CardHeader className="bg-neon-blue border-b-4 border-black pb-4">
+                <CardTitle className="text-xl font-black uppercase text-white text-center">
+                  Kết quả của bạn
+                </CardTitle>
+              </CardHeader>
               <CardContent className="pt-6 text-center">
-                <div className="text-[#111827]/60 text-sm mb-2" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Ket qua cua ban</div>
-                <div className="text-5xl text-[#1DAD97] mb-1" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>{myScore} pts</div>
-                <div className="text-[#111827]/70" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Xep hang: <span className="text-[#111827]">#{myRank || '-'}</span></div>
+                <div className="bg-neon-yellow border-4 border-black shadow-brutal inline-block px-8 py-4 mb-3">
+                  <p className="text-6xl font-black text-black">{myScore}</p>
+                  <p className="text-sm font-bold text-black/60 uppercase">Điểm</p>
+                </div>
+                <div className="text-2xl font-bold text-black/70 mt-4">
+                  Xếp hạng: <span className="text-neon-pink font-black">#{myRank || '-'}</span>
+                </div>
               </CardContent>
             </Card>
           )}
 
-          {/* Host: thấy đầy đủ leaderboard */}
+          {/* Host leaderboard */}
           {isHost && (
-            <Card className="mb-6 bg-white rounded-2xl shadow-[4px_4px_0_#1DAD97] border-2 border-[#1DAD97]/30">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-center text-2xl text-[#111827]" style={{ fontFamily: 'Delicious Handrawn, cursive' }}>Bang xep hang</CardTitle>
+            <Card className="mb-6 bg-white border-4 border-black shadow-brutal-xl">
+              <CardHeader className="bg-neon-green border-b-4 border-black pb-4">
+                <CardTitle className="text-xl font-black uppercase flex items-center gap-2">
+                  <Crown className="w-6 h-6 text-black" />
+                  Bảng xếp hạng
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
                   {leaderboard.map((entry, idx) => (
                     <div key={entry.playerId} className={`
-                      flex justify-between items-center p-4 rounded-xl text-lg
-                      ${idx === 0 ? 'bg-[#F59E0B] text-white shadow-[3px_3px_0_#111827]/20' : idx === 1 ? 'bg-[#9CA3AF] text-white shadow-[2px_2px_0_#111827]/20' : idx === 2 ? 'bg-[#CD7F32] text-white shadow-[2px_2px_0_#111827]/20' : 'bg-[#111827]/5 text-[#111827] border border-[#111827]/10'}
-                    `} style={{ fontFamily: 'Delicious Handrawn, cursive' }}>
+                      flex justify-between items-center p-4 rounded-xl border-4 border-black
+                      ${idx === 0 ? 'bg-neon-yellow shadow-brutal' : idx === 1 ? 'bg-gray-300 shadow-brutal-sm' : idx === 2 ? 'bg-orange-400 shadow-brutal-sm' : 'bg-white shadow-brutal-sm'}
+                    `}>
                       <div className="flex items-center gap-3">
-                        <span className="text-lg">
-                          {idx === 0 ? '1st' : idx === 1 ? '2nd' : idx === 2 ? '3rd' : `${entry.rank}th`}
+                        <span className={`w-12 h-12 rounded-xl border-4 border-black flex items-center justify-center text-2xl ${
+                          idx === 0 ? 'bg-black text-neon-yellow' : idx === 1 ? 'bg-black text-gray-300' : idx === 2 ? 'bg-black text-orange-400' : 'bg-black/20 text-black'
+                        }`}>
+                          {idx === 0 ? '👑' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : entry.rank}
                         </span>
-                        <span>{entry.nickname}</span>
+                        <span className="font-black text-xl text-black">{entry.nickname}</span>
                       </div>
-                      <span className="text-lg">{entry.score} pts</span>
+                      <span className="font-black text-2xl text-black">{entry.score} pts</span>
                     </div>
                   ))}
                 </div>
@@ -1258,47 +1245,42 @@ export default function GamePage() {
 
           {/* Action buttons */}
           {isHost ? (
-            <div className="flex gap-4">
+            <div className="grid grid-cols-2 gap-4">
               <Button
                 onClick={handlePlayAgain}
-                className="flex-1 text-lg bg-[#1DAD97] hover:bg-[#1a9a87] text-white rounded-xl shadow-[3px_3px_0_#111827]/20 py-6 border-2 border-[#1DAD97]"
-                style={{ fontFamily: 'Delicious Handrawn, cursive' }}
+                className="bg-neon-green border-4 border-black shadow-brutal hover:shadow-none hover:translate-x-2 hover:translate-y-2 font-black text-xl py-8 uppercase"
               >
-                Choi lai
+                <Zap className="w-6 h-6 mr-2" />
+                Chơi lại
               </Button>
               <Button
                 onClick={handleCloseRoom}
                 variant="outline"
-                className="flex-1 text-lg bg-white rounded-xl shadow-[3px_3px_0_#1DAD97] py-6 border-2 border-[#1DAD97]/50 text-[#111827]"
-                style={{ fontFamily: 'Delicious Handrawn, cursive' }}
+                className="bg-white border-4 border-black shadow-brutal hover:shadow-none hover:translate-x-2 hover:translate-y-2 font-black text-xl py-8 uppercase"
               >
-                Ve Quiz
+                Về Quiz
               </Button>
             </div>
           ) : (
-            <div className="flex gap-4">
-              <Button
-                onClick={handleLeaveRoom}
-                variant="outline"
-                className="flex-1 text-lg bg-white rounded-xl shadow-[3px_3px_0_#1DAD97] py-6 border-2 border-[#1DAD97]/50 text-[#111827]"
-                style={{ fontFamily: 'Delicious Handrawn, cursive' }}
-              >
-                Roi phong
-              </Button>
-            </div>
+            <Button
+              onClick={handleLeaveRoom}
+              variant="outline"
+              className="w-full bg-white border-4 border-black shadow-brutal hover:shadow-none hover:translate-x-2 hover:translate-y-2 font-black text-xl py-8 uppercase"
+            >
+              Rời phòng
+            </Button>
           )}
         </div>
-
-        <style jsx global>{`
-          @import url('https://fonts.googleapis.com/css2?family=Delicious+Handrawn&display=swap');
-        `}</style>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#F4EDE0] flex items-center justify-center">
-      <div className="text-[#111827]/50">Đang tải...</div>
+    <div className="min-h-screen bg-neon-yellow flex items-center justify-center">
+      <div className="text-center">
+        <div className="w-16 h-16 border-4 border-black border-t-transparent rounded-full animate-spin bg-neon-blue mx-auto mb-4" />
+        <p className="font-black text-xl text-black/60 uppercase tracking-wide">Đang tải...</p>
+      </div>
     </div>
   );
 }

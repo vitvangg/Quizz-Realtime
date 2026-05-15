@@ -12,6 +12,9 @@ interface GameStore {
   // Flag to indicate HTTP state recovery is in progress
   _isRecovering: boolean;
 
+  // Track players in reconnecting state (grace period)
+  reconnectingPlayers: Set<string>;
+
   sessionId: string | null;
   roomId: string | null;
   gameStatus: GameState;
@@ -47,6 +50,11 @@ interface GameStore {
   connectSocket: () => void;
   disconnectSocket: () => void;
 
+  // Player reconnect tracking
+  setPlayerReconnecting: (playerId: string, nickname: string, gracePeriodMs: number) => void;
+  clearPlayerReconnecting: (playerId: string) => void;
+  clearAllReconnectingPlayers: () => void;
+
   joinGame: (sessionId: string, roomId: string, playerId: string, nickname: string, isHost: boolean) => void;
 
   startGame: (roomId: string) => Promise<string | null>;
@@ -65,6 +73,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
   isConnected: false,
   _pendingRedirect: null,
   _isRecovering: false,
+
+  // Track players in reconnecting state
+  reconnectingPlayers: new Set<string>(),
 
   sessionId: null,
   roomId: null,
@@ -95,6 +106,34 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   countdown: 0,
   correctAnswerId: null,
+
+  // Player reconnect tracking methods
+  setPlayerReconnecting: (playerId: string, nickname: string, gracePeriodMs: number) => {
+    const newSet = new Set(get().reconnectingPlayers);
+    newSet.add(playerId);
+    set({ reconnectingPlayers: newSet });
+    
+    // Auto-clear after grace period expires
+    setTimeout(() => {
+      const current = get().reconnectingPlayers;
+      if (current.has(playerId)) {
+        const updated = new Set(current);
+        updated.delete(playerId);
+        set({ reconnectingPlayers: updated });
+      }
+    }, gracePeriodMs + 500); // Add 500ms buffer
+  },
+
+  clearPlayerReconnecting: (playerId: string) => {
+    const newSet = new Set(get().reconnectingPlayers);
+    newSet.delete(playerId);
+    set({ reconnectingPlayers: newSet });
+  },
+
+  clearAllReconnectingPlayers: () => {
+    set({ reconnectingPlayers: new Set() });
+  },
+
   connectSocket: () => {
     const { socket } = get();
     if (socket) return; // already initialized with shared socket
@@ -278,6 +317,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       myNickname: null, myScore: 0, myRank: null, countdown: 0,
       correctAnswerId: null, _pendingRedirect: null,
       _isRecovering: false,
+      reconnectingPlayers: new Set(),
     });
   },
 }));

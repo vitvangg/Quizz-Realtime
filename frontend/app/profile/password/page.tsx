@@ -66,115 +66,128 @@ export default function ChangePasswordPage() {
   };
 
   return (
-    <Card className="border-2 border-primary/10 shadow-sm overflow-hidden rounded-3xl">
-      <CardHeader className="bg-muted/30 border-b pb-6">
-        <div className="flex items-center gap-3">
-          <div className="bg-primary/10 p-2.5 rounded-xl">
-            <Lock className="h-6 w-6 text-primary" />
-          </div>
-          <div>
-            <CardTitle className="text-xl font-black uppercase tracking-tight">Đổi mật khẩu</CardTitle>
-            <p className="text-xs text-muted-foreground font-medium">Bảo vệ tài khoản của bạn bằng mật khẩu mạnh</p>
-          </div>
+    <div className="min-h-screen bg-white">
+      {/* Header Banner */}
+      <div className="bg-neon-green border-b-4 border-black">
+        <div className="container mx-auto px-4 py-8">
+          <h1 className="text-3xl font-black uppercase tracking-tight">ĐỔI MẬT KHẨU</h1>
         </div>
-      </CardHeader>
-      <CardContent className="pt-8">
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="space-y-3">
-            <Label htmlFor="oldPassword" className="font-bold uppercase tracking-widest text-xs px-1 text-muted-foreground">
-              Mật khẩu hiện tại
-            </Label>
-            <div className="relative">
-              <KeyRound className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-              <Input
-                id="oldPassword"
-                type={showOldPass ? "text" : "password"}
-                placeholder="••••••••"
-                className="pl-12 pr-12 h-14 rounded-2xl border-2 font-bold text-lg focus-visible:ring-primary"
-                value={passwords.oldPassword}
-                onChange={handleChange}
-                required
-              />
-              <button
-                type="button"
-                onClick={() => setShowOldPass(!showOldPass)}
-                className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-primary transition-colors"
-              >
-                {showOldPass ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-              </button>
-            </div>
-          </div>
+      </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-3">
-              <Label htmlFor="newPassword" className="font-bold uppercase tracking-widest text-xs px-1 text-muted-foreground">
-                Mật khẩu mới
-              </Label>
-              <div className="relative">
-                <KeyRound className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-                <Input
-                  id="newPassword"
-                  type={showNewPass ? "text" : "password"}
-                  placeholder="••••••••"
-                  className="pl-12 pr-12 h-14 rounded-2xl border-2 font-bold text-lg focus-visible:ring-primary"
-                  value={passwords.newPassword}
-                  onChange={handleChange}
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowNewPass(!showNewPass)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-primary transition-colors"
-                >
-                  {showNewPass ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-                </button>
+      {/* Main Content */}
+      <div className="container mx-auto px-4 py-8 max-w-2xl">
+        <Card className="border-4 border-black shadow-brutal overflow-hidden">
+          <CardHeader className="bg-neon-pink border-b-4 border-black">
+            <div className="flex items-center gap-4">
+              <div className="bg-black border-4 border-black shadow-brutal-sm p-3">
+                <Lock className="h-7 w-7 text-white" />
+              </div>
+              <div>
+                <CardTitle className="text-xl font-black uppercase">Bảo vệ tài khoản</CardTitle>
+                <p className="text-xs font-medium text-black/60">Đổi mật khẩu để bảo vệ tài khoản</p>
               </div>
             </div>
-
-            <div className="space-y-3">
-              <Label htmlFor="confirmPassword" className="font-bold uppercase tracking-widest text-xs px-1 text-muted-foreground">
-                Xác nhận mật khẩu
-              </Label>
-              <div className="relative">
-                <KeyRound className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-                <Input
-                  id="confirmPassword"
-                  type={showConfirmPass ? "text" : "password"}
-                  placeholder="••••••••"
-                  className="pl-12 pr-12 h-14 rounded-2xl border-2 font-bold text-lg focus-visible:ring-primary"
-                  value={passwords.confirmPassword}
-                  onChange={handleChange}
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowConfirmPass(!showConfirmPass)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-primary transition-colors"
-                >
-                  {showConfirmPass ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div className="pt-4">
-            <Button
-              type="submit"
-              className="w-full h-14 rounded-2xl font-black text-lg shadow-xl shadow-primary/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
-              disabled={loading}
-            >
-              {loading ? (
-                <div className="flex items-center gap-2">
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                  ĐANG XỬ LÝ...
+          </CardHeader>
+          <CardContent className="pt-6">
+            <form onSubmit={handleSubmit} className="space-y-6">
+              {/* Old Password */}
+              <div className="space-y-3">
+                <Label htmlFor="oldPassword" className="font-black uppercase tracking-wider text-xs">
+                  Mật khẩu hiện tại
+                </Label>
+                <div className="relative">
+                  <KeyRound className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-black/50" />
+                  <Input
+                    id="oldPassword"
+                    type={showOldPass ? "text" : "password"}
+                    placeholder="••••••••"
+                    className="pl-12 pr-12 h-14 rounded-xl border-4 border-black font-bold text-lg focus:border-neon-pink"
+                    value={passwords.oldPassword}
+                    onChange={handleChange}
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowOldPass(!showOldPass)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-black/50 hover:text-black transition-colors"
+                  >
+                    {showOldPass ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
                 </div>
-              ) : (
-                "CẬP NHẬT MẬT KHẨU"
-              )}
-            </Button>
-          </div>
-        </form>
-      </CardContent>
-    </Card>
+              </div>
+
+              {/* New Passwords Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-3">
+                  <Label htmlFor="newPassword" className="font-black uppercase tracking-wider text-xs">
+                    Mật khẩu mới
+                  </Label>
+                  <div className="relative">
+                    <KeyRound className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-black/50" />
+                    <Input
+                      id="newPassword"
+                      type={showNewPass ? "text" : "password"}
+                      placeholder="••••••••"
+                      className="pl-12 pr-12 h-14 rounded-xl border-4 border-black font-bold text-lg focus:border-neon-pink"
+                      value={passwords.newPassword}
+                      onChange={handleChange}
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPass(!showNewPass)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-black/50 hover:text-black transition-colors"
+                    >
+                      {showNewPass ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <Label htmlFor="confirmPassword" className="font-black uppercase tracking-wider text-xs">
+                    Xác nhận mật khẩu
+                  </Label>
+                  <div className="relative">
+                    <KeyRound className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-black/50" />
+                    <Input
+                      id="confirmPassword"
+                      type={showConfirmPass ? "text" : "password"}
+                      placeholder="••••••••"
+                      className="pl-12 pr-12 h-14 rounded-xl border-4 border-black font-bold text-lg focus:border-neon-pink"
+                      value={passwords.confirmPassword}
+                      onChange={handleChange}
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPass(!showConfirmPass)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-black/50 hover:text-black transition-colors"
+                    >
+                      {showConfirmPass ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Submit Button */}
+              <Button
+                type="submit"
+                className="w-full h-14 rounded-xl font-black text-lg bg-black border-4 border-black shadow-brutal hover:shadow-none hover:translate-x-1 hover:translate-y-1 transition-all"
+                disabled={loading}
+              >
+                {loading ? (
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    ĐANG XỬ LÝ...
+                  </div>
+                ) : (
+                  "CẬP NHẬT MẬT KHẨU"
+                )}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
   );
 }
