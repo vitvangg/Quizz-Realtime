@@ -245,6 +245,11 @@ export class GameSessionService {
       leaderboard: leaderboard.slice(0, 10),
       isLastQuestion:
         cached.currentQuestionIndex >= cached.totalQuestions - 1,
+      // Include question data so frontend can verify question match
+      question: {
+        id: currentQuestion.id,
+        content: currentQuestion.content,
+      },
     };
 
     await this.updateGameCache(sessionId, {
@@ -426,16 +431,16 @@ export class GameSessionService {
       await tx.gameSession.update({
         where: { id: sessionId },
         data: {
-          status: 'CLOSED' as any,
+          status: 'FINISHED',
           endedAt: new Date(),
         },
       });
 
-      // Update room status
+      // Update room status to FINISHED
       if (session?.roomId) {
         await tx.room.update({
           where: { id: session.roomId },
-          data: { status: 'CLOSED' as any },
+          data: { status: 'FINISHED' },
         });
       }
     });

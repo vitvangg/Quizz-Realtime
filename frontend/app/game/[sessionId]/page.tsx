@@ -121,6 +121,11 @@ export default function GamePage() {
   // (effect may run twice due to React StrictMode or re-renders)
   const hasRecoveredRef = useRef(false);
 
+  // Reset recovery flag when sessionId changes (for play_again navigation)
+  useEffect(() => {
+    hasRecoveredRef.current = false;
+  }, [sessionId]);
+
   // ── Wait for auth hydration before any game logic ────────────────────────────
   // This effect runs ONCE when auth hydrates, ensuring auth token is available
   useEffect(() => {
@@ -186,9 +191,7 @@ export default function GamePage() {
       }
 
       // Check if this is a NEW question or the SAME question (after reload/reconnect)
-      // Only reset hasAnswered/selectedAnswerId for truly NEW questions
-      // correctAnswerId is SERVER DATA and should NEVER be reset here
-      // It will be set by question_result event
+      // Only reset answer state for truly NEW questions
       const isNewQuestion = state.currentQuestion?.id !== data.question.id;
       const shouldResetAnswer = isNewQuestion || state.gameStatus !== GameState.QUESTION_ACTIVE;
 
@@ -196,15 +199,11 @@ export default function GamePage() {
 
       // For timing: only use server timeRemaining if it's provided and valid
       // Otherwise use question.timeLimit as the full duration
-      // NEVER use server's remainingTime as-is because it doesn't account for
-      // how long the player has been on the page after reload
       let newTimeRemaining = data.question.timeLimit;
       if (data.timeRemaining !== undefined && data.timeRemaining !== null) {
-        // Only use server's remainingTime for truly NEW questions (not after reload)
         if (shouldResetAnswer) {
           newTimeRemaining = data.timeRemaining;
         }
-        // If same question (reload), keep the timeRemaining from HTTP recovery
       }
 
       useGameStore.setState({
@@ -213,19 +212,18 @@ export default function GamePage() {
         questionIndex: data.questionIndex,
         totalQuestions: data.totalQuestions,
         countdown: 0,
-        // Only reset player's answer state if it's a genuinely NEW question
-        // If recovering state after reload, preserve hasAnswered and selectedAnswerId
+        // Reset player's answer state if it's a genuinely NEW question
         hasAnswered: shouldResetAnswer ? false : state.hasAnswered,
         selectedAnswerId: shouldResetAnswer ? null : state.selectedAnswerId,
-        // CORRECT: correctAnswerId is NEVER reset here - question_result sets it
-        // This fixes the bug where correct answer would flash and disappear
-        // timeRemaining will be updated below
+        // IMPORTANT: Reset correctAnswerId for NEW questions to avoid stale data
+        // It will be set by question_result event
+        correctAnswerId: shouldResetAnswer ? null : state.correctAnswerId,
       });
       
-      // Update timer separately to preserve correctAnswerId
       useGameStore.setState({
         timeRemaining: newTimeRemaining,
-        questionStartTime: Date.now(),
+        // Use serverTime from backend to sync across all clients
+        questionStartTime: data.serverTime || Date.now(),
       });
     };
 
@@ -233,8 +231,15 @@ export default function GamePage() {
       console.log('[GamePage] question_result:', data);
       const state = useGameStore.getState();
 
-      // question_result should ALWAYS be processed - it updates game status from QUESTION_ACTIVE to QUESTION_RESULT
-      // This is critical for the game flow to progress correctly
+      // Verify this result is for the CURRENT question
+      // If questionIndex doesn't match, this result is stale - skip it
+      if (data.questionIndex !== state.questionIndex) {
+        console.warn('[GamePage] Stale question_result received, skipping:', {
+          receivedQuestionIndex: data.questionIndex,
+          currentQuestionIndex: state.questionIndex,
+        });
+        return;
+      }
 
       // Update leaderboard and correct answer
       useGameStore.setState({

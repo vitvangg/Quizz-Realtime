@@ -204,14 +204,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     await this.gameSessionService.closeSession(sessionId);
 
     // 6. Remove all sockets from session room
-    const sockets = this.sessionSockets.get(sessionId);
-    if (sockets) {
-      for (const socketId of sockets) {
-        const socket = this.server.sockets.sockets.get(socketId);
-        if (socket) {
-          socket.leave(sessionId);
-        }
-      }
+    // Use in().socketsLeave() instead of accessing internal sockets map (Socket.io v4 API)
+    if (this.sessionSockets.has(sessionId)) {
+      await this.server.in(sessionId).socketsLeave(sessionId);
       this.sessionSockets.delete(sessionId);
     }
 
@@ -502,7 +497,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       };
       this.registerSocketToSession(client, result.session.id, identity);
 
-      // Countdown
+      // Countdown (non-blocking - questions start after countdown)
       this.server.to(result.session.id).emit('game_starting', {
         sessionId: result.session.id,
         countdown: 5,
@@ -512,26 +507,33 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         this.server.to(result.session.id).emit('countdown_tick', { remaining: i - 1 });
       }
 
-      // Update timer
+      // Update timer (AFTER countdown)
       await this.gameSessionService.updateQuestionStartTime(result.session.id, Date.now());
 
       // Redirect to game page
       this.server.to(payload.roomId).emit('game_redirect', { url: `/game/${result.session.id}`, sessionId: result.session.id });
       this.roomGateway.server.to(payload.roomId).emit('game_redirect', { url: `/game/${result.session.id}`, sessionId: result.session.id });
 
-      // Question start
-      this.server.to(payload.roomId).emit('question_start', {
-        sessionId: result.session.id,
-        questionIndex: 0,
-        question: result.firstQuestion,
-        totalQuestions: result.totalQuestions,
-        serverTime: Date.now(),
-      });
-
       // Schedule timer
       const questionEndCallback = (data: any) => this.handleQuestionEnd(result.session.id, data);
       this.sessionCallbacks.set(result.session.id, questionEndCallback);
       this.gameSessionService.scheduleQuestionEnd(result.session.id, result.firstQuestion.timeLimit, questionEndCallback);
+
+      // Question start - emit to BOTH sessionId (for connected players) AND roomId (for players still transitioning)
+      const questionStartPayload = {
+        sessionId: result.session.id,
+        questionIndex: 0,
+        question: result.firstQuestion,
+        totalQuestions: result.totalQuestions,
+        timeRemaining: result.firstQuestion.timeLimit,
+        serverTime: Date.now(),
+      };
+      
+      // Emit to new session room
+      this.server.to(result.session.id).emit('question_start', questionStartPayload);
+      
+      // Also emit to room for players transitioning
+      this.server.to(payload.roomId).emit('question_start', questionStartPayload);
 
       return { success: true, sessionId: result.session.id };
     } catch (error) {
@@ -632,7 +634,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       client.join(result.session.id);
       this.registerSocketToSession(client, result.session.id, identity);
 
-      // Countdown
+      // Countdown (non-blocking - questions start after countdown)
       this.server.to(payload.roomId).emit('game_starting', { sessionId: result.session.id, countdown: 5 });
       for (let i = 5; i > 0; i--) {
         await this.delay(1000);
@@ -641,20 +643,35 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
       // Redirect
       this.server.to(payload.roomId).emit('game_redirect', { url: `/game/${result.session.id}`, sessionId: result.session.id });
-      this.server.to(result.session.id).emit('question_start', {
+      
+      // Schedule timer - question timer starts AFTER countdown
+      const questionEndCallback = (data: any) => this.handleQuestionEnd(result.session.id, data);
+      this.sessionCallbacks.set(result.session.id, questionEndCallback);
+      this.gameSessionService.scheduleQuestionEnd(
+        result.session.id,
+        result.firstQuestion.timeLimit,
+        questionEndCallback,
+      );
+
+      // Update questionStartedAt AFTER countdown, BEFORE question_start
+      await this.gameSessionService.updateQuestionStartTime(result.session.id, Date.now());
+
+      // Question start - emit to BOTH roomId (for players still connecting) AND sessionId
+      // This ensures players receive question_start even if they haven't fully joined the new session
+      const questionStartPayload = {
         sessionId: result.session.id,
         questionIndex: 0,
         question: result.firstQuestion,
         totalQuestions: result.totalQuestions,
+        timeRemaining: result.firstQuestion.timeLimit,
         serverTime: Date.now(),
-      });
-
-      // Timer
-      this.gameSessionService.scheduleQuestionEnd(
-        result.session.id,
-        result.firstQuestion.timeLimit,
-        (data) => this.handleQuestionEnd(result.session.id, data),
-      );
+      };
+      
+      // Emit to new session room
+      this.server.to(result.session.id).emit('question_start', questionStartPayload);
+      
+      // Also emit to old room for players transitioning between sessions
+      this.server.to(payload.roomId).emit('question_start', questionStartPayload);
 
       return { success: true, sessionId: result.session.id };
     } catch (error) {
