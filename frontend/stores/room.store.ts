@@ -63,7 +63,6 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     newSocket.on('disconnect', (reason) => {
       console.log('[Socket] Disconnected:', reason);
       set({ isConnected: false });
-      // Don't clear other state - we might reconnect
     });
 
     newSocket.on('reconnect', (attemptNumber) => {
@@ -75,6 +74,12 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       console.error('[Socket] Connection error:', error);
       set({ error: 'Không thể kết nối server', isConnected: false });
     });
+
+    // CRITICAL: Actually connect the socket (autoConnect: false in socket.ts)
+    if (!newSocket.connected) {
+      console.log('[RoomStore] Connecting socket...');
+      newSocket.connect();
+    }
 
     newSocket.on('room_joined', (data: RoomJoinedPayload) => {
       console.log('[Socket] Room joined:', data);

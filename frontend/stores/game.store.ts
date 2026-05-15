@@ -9,6 +9,8 @@ interface GameStore {
   socket: Socket | null;
   isConnected: boolean;
   _pendingRedirect: string | null;
+  // Flag to indicate HTTP state recovery is in progress
+  _isRecovering: boolean;
 
   sessionId: string | null;
   roomId: string | null;
@@ -62,6 +64,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   socket: null,
   isConnected: false,
   _pendingRedirect: null,
+  _isRecovering: false,
 
   sessionId: null,
   roomId: null,
@@ -94,7 +97,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   correctAnswerId: null,
   connectSocket: () => {
     const { socket } = get();
-    if (socket) return; // already initialized
+    if (socket) return; // already initialized with shared socket
 
     // Register this store as the handler for socket events.
     // Listeners are managed at the module level in lib/socket.ts.
@@ -103,6 +106,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
     });
 
     const newSocket = getSocket();
+    
+    // CRITICAL: Actually connect the socket (autoConnect: false in socket.ts)
+    if (!newSocket.connected) {
+      console.log('[GameStore] Connecting socket...');
+      newSocket.connect();
+    }
+    
     set({ socket: newSocket });
   },
   disconnectSocket: () => {
@@ -267,6 +277,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       selectedAnswerId: null, leaderboard: [], myPlayerId: null,
       myNickname: null, myScore: 0, myRank: null, countdown: 0,
       correctAnswerId: null, _pendingRedirect: null,
+      _isRecovering: false,
     });
   },
 }));
