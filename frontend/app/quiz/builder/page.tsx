@@ -40,6 +40,10 @@ interface Question {
   id: string;
   content: string;
   timeLimit: number;
+  imageUrl?: string;
+  imageId?: string;
+  pendingFile?: File;
+  previewUrl?: string;
   answers: Answer[];
 }
 
@@ -255,8 +259,8 @@ export default function QuizBuilderPage() {
     // 🔥 Nếu sửa timeLimit của câu đầu tiên
     // thì apply cho toàn bộ câu hỏi
     if (field === "timeLimit" && questions[0]?.id === id) {
-      setQuestions(
-        questions.map((q) => ({
+      setQuestions((prev) =>
+        prev.map((q) => ({
           ...q,
           timeLimit: value,
         }))
@@ -266,8 +270,8 @@ export default function QuizBuilderPage() {
     }
 
     // 🔥 Các trường hợp khác → update riêng
-    setQuestions(
-      questions.map((q) =>
+    setQuestions((prev) =>
+      prev.map((q) =>
         q.id === id ? { ...q, [field]: value } : q
       )
     );
@@ -278,8 +282,8 @@ export default function QuizBuilderPage() {
   // =========================
 
   const addAnswer = (questionId: string) => {
-    setQuestions(
-      questions.map((q) => {
+    setQuestions((prev) =>
+      prev.map((q) => {
         if (q.id === questionId && q.answers.length < 4) {
           return {
             ...q,
@@ -302,8 +306,8 @@ export default function QuizBuilderPage() {
     questionId: string,
     answerId: string
   ) => {
-    setQuestions(
-      questions.map((q) => {
+    setQuestions((prev) =>
+      prev.map((q) => {
         if (q.id === questionId && q.answers.length > 2) {
           const newAnswers = q.answers.filter(
             (a) => a.id !== answerId
@@ -331,8 +335,8 @@ export default function QuizBuilderPage() {
     field: keyof Answer,
     value: any
   ) => {
-    setQuestions(
-      questions.map((q) => {
+    setQuestions((prev) =>
+      prev.map((q) => {
         if (q.id === questionId) {
           return {
             ...q,
@@ -389,7 +393,6 @@ export default function QuizBuilderPage() {
     try {
       const newQuiz = await quizStore.create({ title, category });
       const quizId = newQuiz.id;
-
       for (let i = 0; i < questions.length; i++) {
         const q = questions[i];
         const newQuestion = await questionStore.create({
@@ -399,6 +402,12 @@ export default function QuizBuilderPage() {
           orderIndex: i,
         });
         const questionId = newQuestion.id;
+
+        if (q.pendingFile) {
+
+          await questionStore.uploadImage(questionId, q.pendingFile);
+        }
+
         for (const a of q.answers) {
           await answerStore.create({
             questionId,

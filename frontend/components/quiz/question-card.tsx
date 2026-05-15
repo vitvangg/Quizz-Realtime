@@ -94,8 +94,10 @@ export function QuestionCard({
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    console.log("File đã chọn:", file);
     if (file && onUpdate) {
       const previewUrl = URL.createObjectURL(file);
+      console.log("Preview URL:", previewUrl);
       onUpdate(question.id, "pendingFile" as any, file);
       onUpdate(question.id, "previewUrl" as any, previewUrl);
     }
@@ -222,7 +224,7 @@ export function QuestionCard({
               <Label className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
                 Hình ảnh
               </Label>
-              <div 
+              <div
                 className={`
                   relative 
                   aspect-square 
@@ -240,10 +242,10 @@ export function QuestionCard({
               >
                 {displayImage ? (
                   <>
-                    <Image 
-                      src={displayImage} 
-                      alt="Question" 
-                      fill 
+                    <Image
+                      src={displayImage}
+                      alt="Question"
+                      fill
                       className="object-cover"
                       unoptimized={!!question.previewUrl} // Quan trọng để hiển thị Blob URL
                     />
@@ -280,11 +282,11 @@ export function QuestionCard({
                     </button>
                   )
                 )}
-                
-                <input 
-                  type="file" 
-                  ref={fileInputRef} 
-                  className="hidden" 
+
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  className="hidden"
                   accept="image/*"
                   onChange={handleFileChange}
                 />
