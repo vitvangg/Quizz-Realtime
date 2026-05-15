@@ -27,8 +27,10 @@ export const questionService = {
 
   async uploadImage(id: string, file: File) {
     const formData = new FormData();
+    console.log(id);
+
     formData.append("file", file);
-    const res = await api.patch(`/questions/${id}/upload-image`, formData, {
+    const res = await api.post(`/questions/${id}/upload-image`, formData, {
       headers: {
         "Content-Type": "multipart/form-data",
       },
