@@ -52,6 +52,15 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   private hostDisconnectTimeouts = new Map<string, NodeJS.Timeout>();
   private readonly HOST_RECONNECT_GRACE_MS = 10000; // 10 seconds grace period
 
+  // Player disconnect tracking - playerId -> { sessionId, timeout, identity }
+  // Used for delayed player removal (grace period for reconnect)
+  private playerDisconnectTimeouts = new Map<string, NodeJS.Timeout>();
+  private readonly PLAYER_RECONNECT_GRACE_MS = 5000; // 5 seconds grace period for players
+
+  // Track players who are in "disconnecting" state (grace period)
+  // This prevents emitting player_left until grace period expires
+  private playersPendingDisconnect = new Set<string>();
+
   // Redis key prefix for host disconnect tracking
   private readonly HOST_DISCONNECT_KEY_PREFIX = 'host:disconnect:';
 
@@ -173,20 +182,111 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     if (isHost && sessionId) {
       this.handleHostDisconnect(client, identity);
     } else {
-      // Non-host: remove from session and leaderboard
-      await this.removeSocketFromSession(client, identity);
-
-      // Remove player from leaderboard immediately
-      if (sessionId && playerId) {
-        await this.gameSessionService.removePlayerFromLeaderboard(sessionId, playerId);
-
-        // Broadcast updated leaderboard to remaining players
-        const leaderboard = await this.gameSessionService.getLeaderboard(sessionId);
-        this.server.to(sessionId).emit('leaderboard_update', { leaderboard });
-      }
+      // Non-host: Start delayed disconnect process
+      // This gives player time to reconnect without being removed from leaderboard
+      this.startPlayerDisconnectGracePeriod(client, identity);
     }
 
     this.socketMap.delete(client.id);
+  }
+
+  /**
+   * Start a grace period for player disconnect - delays removal from leaderboard
+   * If player reconnects within grace period, cancellation prevents removal
+   */
+  private startPlayerDisconnectGracePeriod(client: Socket, identity: PlayerIdentity) {
+    const { sessionId, playerId, nickname } = identity;
+
+    if (!sessionId || !playerId) {
+      // No session or playerId, just remove from session
+      this.removeSocketFromSession(client, identity);
+      return;
+    }
+
+    // Check if there's already a pending disconnect for this player
+    // If so, cancel it (this is a re-disconnect after grace period expired)
+    const existingTimeout = this.playerDisconnectTimeouts.get(playerId);
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+      this.playerDisconnectTimeouts.delete(playerId);
+      this.playersPendingDisconnect.delete(playerId);
+    }
+
+    this.logger.log(`[GameGateway] Player ${nickname} disconnected, starting ${this.PLAYER_RECONNECT_GRACE_MS}ms grace period`);
+
+    // Add to pending disconnect set
+    this.playersPendingDisconnect.add(playerId);
+
+    // Remove socket from sessionSockets immediately (so new socket can rejoin)
+    const sockets = this.sessionSockets.get(sessionId);
+    if (sockets) {
+      sockets.delete(client.id);
+      // Don't delete sessionId from sessionSockets if empty - wait for grace period
+    }
+
+    // Emit "reconnecting" status to host (optional - for UI indicator)
+    this.server.to(sessionId).emit('player_reconnecting', {
+      playerId,
+      nickname,
+      gracePeriodMs: this.PLAYER_RECONNECT_GRACE_MS,
+    });
+
+    // Set timeout to actually remove player from leaderboard
+    const timeout = setTimeout(async () => {
+      this.logger.log(`[GameGateway] Player ${nickname} grace period expired, removing from leaderboard`);
+      
+      // Remove from pending set
+      this.playersPendingDisconnect.delete(playerId);
+      this.playerDisconnectTimeouts.delete(playerId);
+
+      // Actually remove from leaderboard and notify
+      await this.removePlayerFromLeaderboard(sessionId, playerId, nickname);
+    }, this.PLAYER_RECONNECT_GRACE_MS);
+
+    this.playerDisconnectTimeouts.set(playerId, timeout);
+  }
+
+  /**
+   * Cancel pending disconnect for a player (called when player reconnects)
+   */
+  private cancelPlayerDisconnectGracePeriod(playerId: string, sessionId: string, nickname: string) {
+    const existingTimeout = this.playerDisconnectTimeouts.get(playerId);
+    
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+      this.playerDisconnectTimeouts.delete(playerId);
+      this.playersPendingDisconnect.delete(playerId);
+      
+      this.logger.log(`[GameGateway] Cancelled pending disconnect for player ${nickname}`);
+      
+      // Notify that player reconnected
+      this.server.to(sessionId).emit('player_reconnected', {
+        playerId,
+        nickname,
+        timestamp: Date.now(),
+      });
+      
+      return true; // Was pending, now cancelled
+    }
+    
+    return false; // No pending disconnect
+  }
+
+  /**
+   * Actually remove player from leaderboard and notify
+   */
+  private async removePlayerFromLeaderboard(sessionId: string, playerId: string, nickname: string) {
+    // Remove from game session leaderboard
+    if (sessionId && playerId) {
+      await this.gameSessionService.removePlayerFromLeaderboard(sessionId, playerId);
+
+      // Broadcast updated leaderboard
+      const leaderboard = await this.gameSessionService.getLeaderboard(sessionId);
+      this.server.to(sessionId).emit('leaderboard_update', { leaderboard });
+
+      // Notify that player actually left
+      this.notifyPlayerLeft(sessionId, playerId, nickname);
+    }
   }
 
   /**
@@ -830,6 +930,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     try {
       const fullState = await this.gameSessionService.getFullSessionState(payload.sessionId);
 
+      // Check if this is a reconnection within grace period
+      const isReconnect = this.playersPendingDisconnect.has(payload.playerId);
+      
+      // If player was in grace period, cancel the pending disconnect
+      if (isReconnect) {
+        this.cancelPlayerDisconnectGracePeriod(payload.playerId, payload.sessionId, payload.nickname);
+      }
+
       const identity: PlayerIdentity = {
         playerId: payload.playerId,
         roomId: fullState?.roomId,
@@ -841,8 +949,18 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       client.join(payload.sessionId);
       this.registerSocketToSession(client, payload.sessionId, identity);
 
+      // If this is a fresh join (not reconnect), emit player_joined
+      if (!isReconnect) {
+        this.server.to(payload.sessionId).emit('player_joined', {
+          playerId: payload.playerId,
+          nickname: payload.nickname,
+          timestamp: Date.now(),
+        });
+      }
+
       return {
         success: true,
+        isReconnect,
         state: this.buildReloadResponse(fullState),
       };
     } catch (error) {

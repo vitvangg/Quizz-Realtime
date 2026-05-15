@@ -8,18 +8,22 @@ export function AdminHeader() {
   const { user } = useAuthStore();
 
   return (
-    <header className="flex h-16 shrink-0 items-center gap-2 border-b bg-background px-6">
+    <header className="flex h-16 shrink-0 items-center gap-2 border-b-4 border-black bg-white px-6">
       <div className="flex flex-1 items-center justify-end gap-4">
-        <Button variant="ghost" size="icon">
-          <Bell className="h-5 w-5 text-muted-foreground" />
+        <Button 
+          variant="ghost" 
+          size="icon"
+          className="border-4 border-black shadow-brutal-sm hover:shadow-none hover:translate-x-0.5 hover:translate-y-0.5 bg-neon-yellow"
+        >
+          <Bell className="h-5 w-5 text-black" />
         </Button>
-        <div className="flex items-center gap-2 border-l pl-4">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10">
-            <User className="h-4 w-4 text-primary" />
+        <div className="flex items-center gap-3 border-l-4 border-black pl-4">
+          <div className="bg-black border-4 border-black shadow-brutal-sm p-2">
+            <User className="h-5 w-5 text-neon-yellow" />
           </div>
           <div className="flex flex-col">
-            <span className="text-sm font-medium">{user?.username || "Admin User"}</span>
-            <span className="text-xs text-muted-foreground">{user?.email || "admin@quizz.com"}</span>
+            <span className="text-sm font-black">{user?.username || "Admin User"}</span>
+            <span className="text-xs font-medium text-black/50">{user?.email || "admin@quizz.com"}</span>
           </div>
         </div>
       </div>

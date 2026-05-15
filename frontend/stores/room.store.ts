@@ -111,6 +111,21 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       toast.info(`${data.nickname} đã rời phòng`);
     });
 
+    // Player reconnecting (entering grace period) - for waiting room
+    newSocket.on('player_reconnecting', (data: { playerId: string; nickname: string; gracePeriodMs: number }) => {
+      console.log('[Socket] Player reconnecting:', data);
+      // Show toast indicating player is reconnecting
+      toast.warning(`${data.nickname} đang kết nối lại...`, {
+        duration: Math.min(data.gracePeriodMs, 5000),
+      });
+    });
+
+    // Player reconnected (within grace period) - for waiting room
+    newSocket.on('player_reconnected', (data: { playerId: string; nickname: string; timestamp: number }) => {
+      console.log('[Socket] Player reconnected:', data);
+      toast.success(`${data.nickname} đã quay lại!`);
+    });
+
     newSocket.on('host_left', (data: { roomId: string }) => {
       console.log('[Socket] Host left:', data);
       // This will be handled by the WaitingScreen component for redirect
