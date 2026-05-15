@@ -63,7 +63,7 @@ export default function ProfileInfoPage() {
               ĐỔI MẬT KHẨU
             </Button>
           </Link>
-          <Button 
+          <Button
             onClick={handleLogout}
             className="w-full h-14 text-base font-bold bg-red-500 border-4 border-black shadow-brutal hover:shadow-none hover:translate-x-1 hover:translate-y-1 transition-all rounded-xl"
           >

@@ -36,6 +36,7 @@ model User {
   status       String   @default("ACTIVE") // ACTIVE, BANNED
   fullName     String?   @map("full_name")
   avatar       String?
+  avatarId     String?  @map("avatar_id")
   phoneNumber  String?  @map("phone_number")
   bio          String?
   createdAt    DateTime @default(now()) @map("created_at")
@@ -122,6 +123,8 @@ model Question {
   id         String @id @default(uuid())
   quizId     String @map("quiz_id")
   content    String
+  imageUrl   String? @map("image_url")
+  imageId    String? @map("image_id")
   timeLimit  Int    @map("time_limit")
   orderIndex Int    @map("order_index")
 

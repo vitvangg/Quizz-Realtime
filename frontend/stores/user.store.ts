@@ -12,6 +12,7 @@ interface UserState {
         phoneNumber?: string;
         bio?: string;
     }) => Promise<void>;
+    uploadAvatar: (file: File) => Promise<void>;
 }
 
 const getErrorMessage = (error: unknown, fallback: string) => {
@@ -36,6 +37,25 @@ export const useUserStore = create<UserState>((set) => ({
         } catch (error) {
             console.error("Update profile error:", error);
             const message = getErrorMessage(error, "Cập nhật thất bại");
+            toast.error(message);
+            throw error;
+        } finally {
+            set({ loading: false });
+        }
+    },
+
+    uploadAvatar: async (file: File) => {
+        try {
+            set({ loading: true });
+            const updatedUser = await userService.uploadAvatar(file);
+            
+            // Cập nhật user trong authStore
+            useAuthStore.setState({ user: updatedUser });
+            
+            toast.success("Cập nhật ảnh đại diện thành công!");
+        } catch (error) {
+            console.error("Upload avatar error:", error);
+            const message = getErrorMessage(error, "Upload thất bại");
             toast.error(message);
             throw error;
         } finally {

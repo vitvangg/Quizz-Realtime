@@ -24,4 +24,15 @@ export const questionService = {
     const res = await api.delete(`/questions/${id}`);
     return res.data;
   },
+
+  async uploadImage(id: string, file: File) {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await api.patch(`/questions/${id}/upload-image`, formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    });
+    return res.data;
+  },
 };

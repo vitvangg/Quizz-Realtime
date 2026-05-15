@@ -35,6 +35,10 @@ interface Question {
   id: string;
   content: string;
   timeLimit: number;
+  imageUrl?: string;
+  imageId?: string;
+  pendingFile?: File;
+  previewUrl?: string;
   answers: Answer[];
 }
 
@@ -66,6 +70,8 @@ export default function EditQuizPage() {
           id: q.id,
           content: q.content,
           timeLimit: q.timeLimit,
+          imageUrl: q.imageUrl,
+          imageId: q.imageId,
           answers: q.answers.map((a: any) => ({
             id: a.id,
             content: a.content,
@@ -241,6 +247,7 @@ export default function EditQuizPage() {
       const currentQuizData = await quizService.getById(quizId);
 
       if (currentQuizData.questions && currentQuizData.questions.length > 0) {
+        // Trước khi xóa, có thể cần xóa ảnh trên Cloudinary nếu muốn (backend remove đã handle một phần)
         await Promise.all(
           currentQuizData.questions.map((q: any) => questionStore.delete(q.id))
         );
@@ -248,14 +255,24 @@ export default function EditQuizPage() {
 
       for (let i = 0; i < questions.length; i++) {
         const q = questions[i];
+        
+        // Tạo câu hỏi với imageUrl và imageId hiện có (nếu không có pendingFile)
         const newQuestion = await questionStore.create({
           quizId,
           content: q.content,
           timeLimit: q.timeLimit,
-          orderIndex: i
+          orderIndex: i,
+          imageUrl: q.imageUrl,
+          imageId: q.imageId
         });
 
         const questionId = newQuestion.id;
+
+        // 🔥 Nếu có file mới đang chờ -> upload ngay sau khi có ID câu hỏi
+        if (q.pendingFile) {
+          await questionStore.uploadImage(questionId, q.pendingFile);
+        }
+
         for (const a of q.answers) {
           await answerStore.create({
             questionId,
@@ -269,6 +286,7 @@ export default function EditQuizPage() {
       router.push("/quiz");
     } catch (error) {
       toast.error("Có lỗi xảy ra khi lưu thay đổi");
+      console.error(error);
     } finally {
       setSaving(false);
     }
