@@ -35,20 +35,14 @@ export function WaitingScreen({ roomId }: WaitingScreenProps) {
     (currentPlayer?.id?.startsWith('host_') && currentRoom?.hostId)
   );
 
-  // Read countdown state from the game store — updated by socket events in the store.
-  // This replaces the local gameStarting/countdown state that caused stale-closure bugs.
   const gameStore = useGameStore();
 
-  // ── Ensure game store registers its socket updater ─────────────────────────────
-  // connectSocket registers store updater so socket events (game_redirect etc.)
-  // flow into Zustand. It no-ops if already registered.
   useEffect(() => {
     gameStore.connectSocket();
   }, []);
   const isGameStarting = gameStore.gameStatus === GameState.STARTING;
   const storeCountdown = gameStore.countdown;
 
-  // ── Room events ───────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!roomSocket) return;
 
@@ -85,18 +79,12 @@ export function WaitingScreen({ roomId }: WaitingScreenProps) {
     };
   }, [roomSocket, router, resetRoomStore]);
 
-  // ── SPA Navigation for game_redirect ───────────────────────────────────────────
-  // _pendingRedirect is set in lib/socket.ts when game_redirect is received.
-  // We use a separate useEffect on this specific field to avoid stale-closure issues.
-  // IMPORTANT: Only set hostSessionId for the actual host, not for players.
   const pendingRedirect = useGameStore((s) => s._pendingRedirect);
 
   useEffect(() => {
     if (!pendingRedirect) return;
     console.log('[WaitingScreen] SPA redirect to:', pendingRedirect);
     
-    // Only set hostSessionId if this user is actually the host
-    // (has matching userId in room's hostId, or isHost flag is set)
     const isActualHost = !!(
       currentPlayer?.isHost ||
       currentPlayer?.id === currentRoom?.hostId ||
@@ -156,7 +144,6 @@ export function WaitingScreen({ roomId }: WaitingScreenProps) {
       const sessionId = await gameStore.startGame(currentRoom.id);
 
       if (sessionId) {
-        // Save both hostSessionId and hostUserId for re-authentication after reload
         const authStore = useAuthStore.getState();
         sessionStorage.setItem('hostSessionId', sessionId);
         if (authStore.user?.id) {
@@ -173,101 +160,118 @@ export function WaitingScreen({ roomId }: WaitingScreenProps) {
 
   if (loading || !currentRoom) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
+      <div className="min-h-screen bg-white flex items-center justify-center">
         <div className="text-center">
-          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Đang tải phòng...</p>
+          <div className="w-16 h-16 border-4 border-black border-t-transparent rounded-full animate-spin mx-auto mb-4 bg-neon-pink"></div>
+          <p className="font-black uppercase tracking-widest">Đang tải phòng...</p>
         </div>
       </div>
     );
   }
 
-  // Host countdown overlay — reads from game store (set by socket events in the store).
+  // Host countdown overlay
   if (isGameStarting && storeCountdown !== null) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900 flex items-center justify-center">
+      <div className="min-h-screen bg-neon-yellow flex items-center justify-center border-4 border-black">
         <div className="text-center">
-          <p className="text-2xl text-white/80 mb-4">Game bắt đầu!</p>
-          <div className="text-9xl font-bold text-white animate-pulse">
-            {storeCountdown}
+          <p className="text-2xl text-black font-bold mb-4 uppercase">Game bắt đầu!</p>
+          <div className="bg-black text-neon-yellow border-4 border-black shadow-brutal-xl w-48 h-48 flex items-center justify-center mx-auto mb-4">
+            <span className="text-8xl font-black">{storeCountdown}</span>
           </div>
-          <p className="text-xl text-white/60 mt-4">Chuẩn bị câu hỏi...</p>
+          <p className="text-xl text-black/70 font-bold uppercase">Chuẩn bị câu hỏi...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="container mx-auto py-8 px-4 max-w-4xl">
-      <div className="flex items-center gap-4 mb-8">
-        <Button variant="ghost" size="icon" onClick={handleLeave}>
-          <ArrowLeft className="w-5 h-5" />
-        </Button>
-        <div>
-          <h1 className="text-2xl font-bold">Phòng chờ</h1>
-          <p className="text-muted-foreground">
-            {currentRoom.quiz?.title || 'Quiz'}
-          </p>
+    <div className="min-h-screen bg-white">
+      {/* Header Banner */}
+      <div className="bg-neon-blue border-b-4 border-black">
+        <div className="container mx-auto px-4 py-6">
+          <div className="flex items-center gap-4">
+            <Button 
+              variant="outline" 
+              size="icon" 
+              onClick={handleLeave}
+              className="border-4 border-black shadow-brutal-sm hover:shadow-none hover:translate-x-0.5 hover:translate-y-0.5 bg-white"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </Button>
+            <div>
+              <h1 className="text-2xl font-black uppercase">PHÒNG CHỜ</h1>
+              <p className="font-bold text-black/70">{currentRoom.quiz?.title || 'Quiz'}</p>
+            </div>
+            {isHost && (
+              <span className="ml-auto px-4 py-2 bg-neon-orange border-4 border-black shadow-brutal-sm font-black uppercase text-sm">
+                BẠN LÀ HOST
+              </span>
+            )}
+          </div>
         </div>
-        {isHost && (
-          <span className="ml-auto px-3 py-1 bg-primary/10 text-primary rounded-full text-sm font-medium">
-            Bạn là Host
-          </span>
-        )}
       </div>
 
-      <div className="grid md:grid-cols-2 gap-8">
-        <div className="space-y-6">
-          <Card className="border-2">
-            <CardContent className="pt-6">
-              <div className="text-center">
-                <p className="text-sm text-muted-foreground mb-2">
-                  Mã phòng
-                </p>
-                <div className="flex items-center justify-center gap-4 mb-4">
-                  <span className="text-5xl font-bold tracking-wider text-primary">
-                    {currentRoom.pin}
-                  </span>
-                  <Button variant="outline" size="icon" onClick={handleCopyPin}>
-                    <Copy className="w-4 h-4" />
+      {/* Main Content */}
+      <div className="container mx-auto px-4 py-8 max-w-4xl">
+        <div className="grid md:grid-cols-2 gap-8">
+          {/* Left Column - PIN Card */}
+          <div className="space-y-6">
+            <Card className="border-4 border-black shadow-brutal">
+              <CardHeader className="bg-neon-green border-b-4 border-black">
+                <CardTitle className="text-center font-black uppercase">Mã phòng</CardTitle>
+              </CardHeader>
+              <CardContent className="pt-6">
+                <div className="text-center">
+                  <div className="bg-black text-white border-4 border-black shadow-brutal inline-block px-8 py-4 mb-4">
+                    <span className="text-5xl font-black tracking-widest">{currentRoom.pin}</span>
+                  </div>
+                  <Button 
+                    variant="outline" 
+                    size="icon" 
+                    onClick={handleCopyPin}
+                    className="border-4 border-black shadow-brutal-sm hover:shadow-none hover:translate-x-0.5 hover:translate-y-0.5 ml-2"
+                  >
+                    <Copy className={`w-5 h-5 ${copied ? 'text-neon-green' : ''}`} />
                   </Button>
+                  <p className="text-sm font-medium text-black/50 mt-4 uppercase">
+                    Chia sẻ mã này để bạn bè tham gia
+                  </p>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Chia sẻ mã này để bạn bè tham gia
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-
-          {isHost ? (
-            <Button
-              size="lg"
-              className="w-full gap-2 text-lg"
-              onClick={handleStartGame}
-            >
-              <Play className="w-5 h-5" />
-              Bắt đầu Game
-            </Button>
-          ) : (
-            <Card className="bg-muted/50">
-              <CardContent className="pt-6 text-center">
-                <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
-                <p className="font-medium">Đang chờ Host bắt đầu...</p>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Vui lòng chờ trong khi host chuẩn bị
-                </p>
               </CardContent>
             </Card>
-          )}
-        </div>
 
-        <div>
-          <PlayerList
-            players={players}
-            isHost={isHost}
-            currentPlayerId={currentPlayer?.id}
-            hostId={currentRoom.hostId}
-          />
+            {/* Start Game / Waiting */}
+            {isHost ? (
+              <Button
+                size="lg"
+                className="w-full h-16 text-xl font-black bg-neon-pink border-4 border-black shadow-brutal hover:shadow-none hover:translate-x-2 hover:translate-y-2 transition-all"
+                onClick={handleStartGame}
+              >
+                <Play className="w-6 h-6 mr-2" />
+                BẮT ĐẦU GAME
+              </Button>
+            ) : (
+              <Card className="border-4 border-black shadow-brutal bg-neon-yellow">
+                <CardContent className="pt-6 text-center">
+                  <div className="w-12 h-12 border-4 border-black border-t-transparent rounded-full animate-spin mx-auto mb-4 bg-black"></div>
+                  <p className="font-black uppercase text-lg">Đang chờ Host bắt đầu...</p>
+                  <p className="text-sm font-medium text-black/50 mt-2">
+                    Vui lòng chờ trong khi host chuẩn bị
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+
+          {/* Right Column - Player List */}
+          <div>
+            <PlayerList
+              players={players}
+              isHost={isHost}
+              currentPlayerId={currentPlayer?.id}
+              hostId={currentRoom.hostId}
+            />
+          </div>
         </div>
       </div>
     </div>
