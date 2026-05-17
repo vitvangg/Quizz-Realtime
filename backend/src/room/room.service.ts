@@ -310,6 +310,39 @@ export class RoomService {
     });
   }
 
+  /**
+   * Update currentSessionId - CRITICAL for replay redirect
+   * When host creates new session, this tracks it so reconnecting players
+   * can be redirected to the latest session instead of stuck in old one
+   */
+  async updateCurrentSessionId(roomId: string, sessionId: string) {
+    const room = await this.prisma.room.findUnique({
+      where: { id: roomId },
+    });
+
+    if (!room) {
+      throw new NotFoundException('Room not found');
+    }
+
+    return this.prisma.room.update({
+      where: { id: roomId },
+      data: { currentSessionId: sessionId },
+    });
+  }
+
+  /**
+   * Get current active session ID for a room
+   * Used by reconnect logic to determine if player should redirect
+   */
+  async getCurrentSessionId(roomId: string): Promise<string | null> {
+    const room = await this.prisma.room.findUnique({
+      where: { id: roomId },
+      select: { currentSessionId: true },
+    });
+
+    return room?.currentSessionId || null;
+  }
+
   async getPlayers(roomId: string) {
     return this.prisma.player.findMany({
       where: { roomId },

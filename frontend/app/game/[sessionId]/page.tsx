@@ -182,6 +182,20 @@ export default function GamePage() {
       console.log('[GamePage] question_start:', data);
       const state = useGameStore.getState();
 
+      // DEBUG: Validate payload
+      if (!data) {
+        console.error('[GamePage] question_start: Invalid payload');
+        return;
+      }
+      if (!data.question) {
+        console.error('[GamePage] question_start: Missing question data');
+        return;
+      }
+      if (data.question && !data.question.id) {
+        console.error('[GamePage] question_start: Missing question.id');
+        return;
+      }
+
       if (state._isRecovering) {
         console.log('[GamePage] Skipping question_start due to HTTP recovery in progress');
         return;
@@ -192,7 +206,7 @@ export default function GamePage() {
 
       console.log('[GamePage] question_start: isNewQuestion=', isNewQuestion, 'shouldResetAnswer=', shouldResetAnswer);
 
-      let newTimeRemaining = data.question.timeLimit;
+      let newTimeRemaining = data.question.timeLimit || 20;
       if (data.timeRemaining !== undefined && data.timeRemaining !== null) {
         if (shouldResetAnswer) {
           newTimeRemaining = data.timeRemaining;
@@ -202,8 +216,8 @@ export default function GamePage() {
       useGameStore.setState({
         gameStatus: GameState.QUESTION_ACTIVE,
         currentQuestion: data.question,
-        questionIndex: data.questionIndex,
-        totalQuestions: data.totalQuestions,
+        questionIndex: data.questionIndex ?? 0,
+        totalQuestions: data.totalQuestions ?? 0,
         countdown: 0,
         hasAnswered: shouldResetAnswer ? false : state.hasAnswered,
         selectedAnswerId: shouldResetAnswer ? null : state.selectedAnswerId,
@@ -220,19 +234,28 @@ export default function GamePage() {
       console.log('[GamePage] question_result:', data);
       const state = useGameStore.getState();
 
+      // DEBUG: Validate payload
+      if (!data) {
+        console.error('[GamePage] question_result: Invalid payload');
+        return;
+      }
+
       if (data.questionIndex !== state.questionIndex) {
         console.warn('[GamePage] Stale question_result received, skipping');
         return;
       }
 
+      // Defensive: ensure leaderboard is an array
+      const safeLeaderboard = Array.isArray(data.leaderboard) ? data.leaderboard : [];
+
       useGameStore.setState({
         gameStatus: GameState.QUESTION_RESULT,
-        leaderboard: data.leaderboard || [],
+        leaderboard: safeLeaderboard,
         correctAnswerId: data.correctAnswer?.id || null,
       });
 
-      if (state.myPlayerId && data.leaderboard) {
-        const myEntry = data.leaderboard.find((e: any) => e.playerId === state.myPlayerId);
+      if (state.myPlayerId && safeLeaderboard.length > 0) {
+        const myEntry = safeLeaderboard.find((e: any) => e?.playerId === state.myPlayerId);
         if (myEntry) {
           const newScore = state.hasAnswered ? myEntry.score : state.myScore;
           const newRank = state.hasAnswered ? myEntry.rank : state.myRank;
@@ -246,9 +269,19 @@ export default function GamePage() {
 
     const handleGameEnded = (data: any) => {
       console.log('[GamePage] game_ended:', data);
+      
+      // DEBUG: Validate payload
+      if (!data) {
+        console.error('[GamePage] game_ended: Invalid payload');
+        return;
+      }
+      
+      // Defensive: ensure leaderboard is an array
+      const safeLeaderboard = Array.isArray(data.leaderboard) ? data.leaderboard : [];
+      
       useGameStore.setState({
         gameStatus: GameState.FINISHED,
-        leaderboard: data.leaderboard || [],
+        leaderboard: safeLeaderboard,
         currentQuestion: null,
       });
     };
@@ -331,6 +364,16 @@ export default function GamePage() {
     const handlePlayerLeft = (data: { playerId: string; nickname: string; timestamp: number }) => {
       console.log('[GamePage] player_left:', data);
 
+      // DEBUG: Validate payload
+      if (!data) {
+        console.error('[GamePage] player_left: Invalid payload - data is null/undefined');
+        return;
+      }
+      if (!data.playerId) {
+        console.error('[GamePage] player_left: Invalid payload - missing playerId', data);
+        return;
+      }
+
       const state = useGameStore.getState();
       
       // Check if player was in reconnecting state - if so, ignore this event
@@ -340,15 +383,22 @@ export default function GamePage() {
         return;
       }
 
+      // Defensive: ensure leaderboard is an array before filtering
+      if (!Array.isArray(state.leaderboard)) {
+        console.warn('[GamePage] player_left: leaderboard is not an array, resetting to empty array');
+        useGameStore.setState({ leaderboard: [] });
+        return;
+      }
+
       const newLeaderboard = state.leaderboard.filter(
-        (entry) => entry.playerId !== data.playerId
+        (entry) => entry?.playerId !== data.playerId
       );
 
       useGameStore.setState({ leaderboard: newLeaderboard });
 
       if (data.playerId === state.myPlayerId) {
         toast.error('Bạn đã bị ngắt kết nối');
-      } else {
+      } else if (data.nickname) {
         toast.info(`${data.nickname} đã rời phòng`);
       }
     };
@@ -360,7 +410,14 @@ export default function GamePage() {
         myPlayerId: state.myPlayerId,
         gameStatus: state.gameStatus,
         hasAnswered: state.hasAnswered,
+        dataHasLeaderboard: !!data?.leaderboard,
       });
+
+      // DEBUG: Validate payload
+      if (!data) {
+        console.error('[GamePage] score_update: Invalid payload');
+        return;
+      }
 
       if (state._isRecovering) {
         console.log('[GamePage] Skipping score_update due to HTTP recovery in progress');
@@ -377,17 +434,20 @@ export default function GamePage() {
         return;
       }
 
-      if (data.leaderboard) {
+      // Defensive: ensure leaderboard is an array
+      if (Array.isArray(data.leaderboard)) {
         useGameStore.setState({ leaderboard: data.leaderboard });
         if (state.myPlayerId) {
           const myEntry = data.leaderboard.find(
-            (e: any) => e.playerId === state.myPlayerId
+            (e: any) => e?.playerId === state.myPlayerId
           );
           if (myEntry) {
             console.log('[GamePage] Updating myScore:', myEntry.score, 'rank:', myEntry.rank);
             useGameStore.setState({ myScore: myEntry.score, myRank: myEntry.rank });
           }
         }
+      } else {
+        console.warn('[GamePage] score_update: leaderboard is not an array, ignoring');
       }
     };
 
@@ -608,6 +668,9 @@ export default function GamePage() {
       if (isHostFromStorage && accessToken) {
         console.log('[GamePage] Joining as HOST with JWT');
         socket.emit('host_join_game', { sessionId, jwt: accessToken }, (response: any) => {
+          // DEBUG: Log response
+          console.log('[GamePage] host_join_game response:', response);
+          
           if (response.success && response.state) {
             console.log('[GamePage] host_join_game success, isActualHost:', response.isActualHost);
             
@@ -615,6 +678,11 @@ export default function GamePage() {
             const correctAnswerId = response.state.status === 'QUESTION_RESULT' 
               ? (response.state.correctAnswerId || httpData?.correctAnswerId || null)
               : null;
+            
+            // Defensive: ensure leaderboard is an array
+            const safeLeaderboard = Array.isArray(response.state.leaderboard) 
+              ? response.state.leaderboard 
+              : (Array.isArray(httpData?.leaderboard) ? httpData.leaderboard : []);
             
             useGameStore.setState({
               sessionId,
@@ -628,7 +696,7 @@ export default function GamePage() {
               currentQuestion: response.state.currentQuestion || httpData?.currentQuestion || null,
               questionIndex: response.state.questionIndex ?? 0,
               totalQuestions: response.state.totalQuestions ?? 0,
-              leaderboard: response.state.leaderboard || httpData?.leaderboard || [],
+              leaderboard: safeLeaderboard,
               timeRemaining: response.state.remainingTime ?? response.state.currentQuestion?.timeLimit ?? 0,
               correctAnswerId,
               _isRecovering: false,
@@ -637,10 +705,18 @@ export default function GamePage() {
               console.warn('[GamePage] Server rejected host identity - user is NOT the host');
             }
           } else {
-            console.error('[GamePage] host_join_game failed:', response.error);
+            console.error('[GamePage] host_join_game failed:', response?.error);
             const fallbackNickname = storedNickname || authStore.user?.email?.split('@')[0] || `Player_${Date.now() % 1000}`;
             socket.emit('join_game', { sessionId, playerId: storedPlayerId || null, nickname: fallbackNickname }, (playerResponse: any) => {
+              // DEBUG: Log player response
+              console.log('[GamePage] join_game fallback response:', playerResponse);
+              
               if (playerResponse.success && playerResponse.state) {
+                // Defensive: ensure leaderboard is an array
+                const safeLeaderboard = Array.isArray(playerResponse.state.leaderboard)
+                  ? playerResponse.state.leaderboard
+                  : (Array.isArray(httpData?.leaderboard) ? httpData.leaderboard : []);
+                
                 useGameStore.setState({
                   sessionId,
                   roomId: playerResponse.state.roomId || httpData?.roomId || storedRoomId,
@@ -651,11 +727,12 @@ export default function GamePage() {
                   currentQuestion: playerResponse.state.currentQuestion || httpData?.currentQuestion || null,
                   questionIndex: playerResponse.state.questionIndex ?? 0,
                   totalQuestions: playerResponse.state.totalQuestions ?? 0,
-                  leaderboard: playerResponse.state.leaderboard || httpData?.leaderboard || [],
+                  leaderboard: safeLeaderboard,
                   timeRemaining: playerResponse.state.remainingTime ?? playerResponse.state.currentQuestion?.timeLimit ?? 0,
                   _isRecovering: false,
                 });
               } else {
+                console.error('[GamePage] join_game fallback also failed');
                 useGameStore.setState({ _isRecovering: false });
               }
             });
@@ -664,13 +741,40 @@ export default function GamePage() {
       } else if (isPlayer && storedPlayerId && storedNickname) {
         console.log('[GamePage] Joining as PLAYER');
         socket.emit('join_game', { sessionId, playerId: storedPlayerId, nickname: storedNickname }, (response: any) => {
+          // DEBUG: Log response
+          console.log('[GamePage] join_game response:', response);
+          
+          // CRITICAL: Handle session redirect (player tried to join finished session)
+          if (response.needsRedirect && response.redirectToSession) {
+            console.log(`[GamePage] Session ${sessionId} is finished, redirecting to new session ${response.redirectToSession}`);
+            
+            // Update sessionStorage with new session ID
+            sessionStorage.setItem('playerSessionId', response.redirectToSession);
+            
+            // Redirect to new session
+            window.location.href = `/game/${response.redirectToSession}`;
+            return;
+          }
+          
           if (response.success && response.state) {
             console.log('[GamePage] join_game success');
-            const myEntry = response.state.leaderboard?.find((e: any) => e.playerId === storedPlayerId);
+            
+            // Defensive: ensure leaderboard is an array
+            const safeLeaderboard = Array.isArray(response.state.leaderboard)
+              ? response.state.leaderboard
+              : (Array.isArray(httpData?.leaderboard) ? httpData.leaderboard : []);
+            
+            const myEntry = safeLeaderboard.find((e: any) => e?.playerId === storedPlayerId);
             const showLeaderboard = response.state.status !== GameState.QUESTION_ACTIVE;
             const correctAnswerId = response.state.status === 'QUESTION_RESULT'
               ? (response.state.correctAnswerId || httpData?.correctAnswerId || null)
               : null;
+            
+            // Get existing leaderboard if showing leaderboard state
+            const finalLeaderboard = showLeaderboard ? safeLeaderboard : useGameStore.getState().leaderboard;
+            const safeFinalLeaderboard = Array.isArray(finalLeaderboard) ? finalLeaderboard : [];
+            
+            const myEntryFromFinal = safeFinalLeaderboard.find((e: any) => e?.playerId === storedPlayerId);
             
             useGameStore.setState({
               sessionId,
@@ -682,14 +786,15 @@ export default function GamePage() {
               currentQuestion: response.state.currentQuestion || httpData?.currentQuestion || null,
               questionIndex: response.state.questionIndex ?? 0,
               totalQuestions: response.state.totalQuestions ?? 0,
-              leaderboard: showLeaderboard ? (response.state.leaderboard || httpData?.leaderboard || []) : useGameStore.getState().leaderboard,
+              leaderboard: safeFinalLeaderboard,
               timeRemaining: response.state.remainingTime ?? response.state.currentQuestion?.timeLimit ?? 0,
               correctAnswerId,
-              myScore: myEntry?.score ?? useGameStore.getState().myScore ?? 0,
-              myRank: myEntry?.rank ?? useGameStore.getState().myRank ?? null,
+              myScore: myEntryFromFinal?.score ?? useGameStore.getState().myScore ?? 0,
+              myRank: myEntryFromFinal?.rank ?? useGameStore.getState().myRank ?? null,
               _isRecovering: false,
             });
           } else {
+            console.error('[GamePage] join_game failed:', response?.error);
             useGameStore.setState({ _isRecovering: false });
           }
         });
