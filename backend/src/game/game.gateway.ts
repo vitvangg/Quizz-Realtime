@@ -64,6 +64,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   // Redis key prefix for host disconnect tracking
   private readonly HOST_DISCONNECT_KEY_PREFIX = 'host:disconnect:';
 
+  // Redis key prefix for tracking players in game sessions
+  // This allows RoomGateway to check if a player is in a game before emitting player_left
+  private readonly PLAYER_IN_GAME_KEY_PREFIX = 'player:in_game:';
+
   constructor(
     private readonly gameSessionService: GameSessionService,
     private readonly roomService: RoomService,
@@ -279,6 +283,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     // Remove from game session leaderboard
     if (sessionId && playerId) {
       await this.gameSessionService.removePlayerFromLeaderboard(sessionId, playerId);
+
+      // CRITICAL: Clear the "player in game" Redis key so RoomGateway can emit player_left
+      // This allows RoomGateway to properly track the player leaving the game
+      await this.redisService.del(`${this.PLAYER_IN_GAME_KEY_PREFIX}${playerId}`);
 
       // Broadcast updated leaderboard
       const leaderboard = await this.gameSessionService.getLeaderboard(sessionId);
@@ -707,6 +715,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       // Start game
       const result = await this.gameSessionService.startGame(payload.roomId, hostId);
 
+      // CRITICAL: Update room's currentSessionId so reconnecting players can be redirected
+      await this.roomService.updateCurrentSessionId(payload.roomId, result.session.id);
+      this.logger.log(`[GameGateway] Updated room ${payload.roomId} currentSessionId to ${result.session.id}`);
+
       // Register socket with verified host identity
       client.join(result.session.id);
       const identity: PlayerIdentity = {
@@ -871,6 +883,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         throw startError;
       }
 
+      // CRITICAL: Update room's currentSessionId so reconnecting players can be redirected
+      await this.roomService.updateCurrentSessionId(payload.roomId, result.session.id);
+      this.logger.log(`[GameGateway] host_play_again: Updated room ${payload.roomId} currentSessionId to ${result.session.id}`);
+
       // Register to new session
       identity.sessionId = result.session.id;
       client.join(result.session.id);
@@ -930,9 +946,40 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     try {
       const fullState = await this.gameSessionService.getFullSessionState(payload.sessionId);
 
+      // CRITICAL: Check if session is finished and if there's a newer session available
+      // This handles the replay scenario where:
+      // 1. Player is in old session that ended
+      // 2. Host creates new session via play_again
+      // 3. Player reloads - should be redirected to new session
+      let redirectToSession: string | null = null;
+      
+      if (fullState?.roomId) {
+        const currentSessionId = await this.roomService.getCurrentSessionId(fullState.roomId);
+        
+        if (currentSessionId && currentSessionId !== payload.sessionId) {
+          // Check if the session we're trying to join is already finished
+          const sessionState = await this.gameSessionService.getSessionState(payload.sessionId);
+          
+          if (sessionState?.status === GameState.FINISHED) {
+            // Session is finished and there's a newer one - redirect player
+            redirectToSession = currentSessionId;
+            this.logger.log(`[GameGateway] Player ${payload.playerId} tried to join finished session ${payload.sessionId}, redirecting to ${currentSessionId}`);
+            
+            // Return success but with redirect instruction
+            return {
+              success: true,
+              needsRedirect: true,
+              redirectToSession,
+              sessionId: payload.sessionId,
+              state: this.buildReloadResponse(fullState),
+            };
+          }
+        }
+      }
+
       // Check if this is a reconnection within grace period
       const isReconnect = this.playersPendingDisconnect.has(payload.playerId);
-      
+
       // If player was in grace period, cancel the pending disconnect
       if (isReconnect) {
         this.cancelPlayerDisconnectGracePeriod(payload.playerId, payload.sessionId, payload.nickname);
@@ -949,6 +996,15 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       client.join(payload.sessionId);
       this.registerSocketToSession(client, payload.sessionId, identity);
 
+      // CRITICAL: Mark player as in-game in Redis so RoomGateway knows to skip player_left
+      // This persists across server restarts and is checked by RoomGateway
+      await this.redisService.set(
+        `${this.PLAYER_IN_GAME_KEY_PREFIX}${payload.playerId}`,
+        JSON.stringify({ sessionId: payload.sessionId, roomId: fullState?.roomId }),
+        'EX',
+        3600 // 1 hour TTL, will be cleared on game end or explicit leave
+      );
+
       // If this is a fresh join (not reconnect), emit player_joined
       if (!isReconnect) {
         this.server.to(payload.sessionId).emit('player_joined', {
@@ -961,6 +1017,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       return {
         success: true,
         isReconnect,
+        needsRedirect: false,
+        redirectToSession: null,
         state: this.buildReloadResponse(fullState),
       };
     } catch (error) {
@@ -1086,6 +1144,37 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       return { success: true, leaderboard };
     } catch (error) {
       return { success: false, error: error.message };
+    }
+  }
+
+  // ============================================================================
+  // PUBLIC METHODS FOR OTHER GATEWAYS
+  // ============================================================================
+
+  /**
+   * Check if a player is currently in a game session
+   * Used by RoomGateway to determine whether to emit player_left on disconnect
+   */
+  async isPlayerInGame(playerId: string): Promise<boolean> {
+    const key = `${this.PLAYER_IN_GAME_KEY_PREFIX}${playerId}`;
+    const data = await this.redisService.get(key);
+    return !!data;
+  }
+
+  /**
+   * Clear player from game session
+   * Called when player explicitly leaves game or game ends
+   */
+  async clearPlayerFromGame(playerId: string): Promise<void> {
+    const key = `${this.PLAYER_IN_GAME_KEY_PREFIX}${playerId}`;
+    await this.redisService.del(key);
+    
+    // Also clear any pending disconnect timeout
+    const timeout = this.playerDisconnectTimeouts.get(playerId);
+    if (timeout) {
+      clearTimeout(timeout);
+      this.playerDisconnectTimeouts.delete(playerId);
+      this.playersPendingDisconnect.delete(playerId);
     }
   }
 

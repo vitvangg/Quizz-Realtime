@@ -268,15 +268,22 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const { socket, sessionId } = get();
       if (!socket || !sessionId) return reject(new Error('Not in game'));
       socket.emit('get_game_state', { sessionId }, (res: any) => {
+        console.log('[game.store.ts] getGameState response:', JSON.stringify(res));
         if (res.success) {
+          // Defensive: ensure leaderboard is an array
+          const safeLeaderboard = Array.isArray(res.leaderboard) ? res.leaderboard : [];
+          console.log('[game.store.ts] Setting leaderboard:', JSON.stringify(safeLeaderboard));
           set({
             gameStatus: res.state.status,
-            leaderboard: res.leaderboard,
+            leaderboard: safeLeaderboard,
             sessionId: res.state.sessionId,
             roomId: res.state.roomId,
           });
           resolve();
-        } else reject(new Error(res.error));
+        } else {
+          console.error('[game.store.ts] getGameState failed:', res.error);
+          reject(new Error(res.error));
+        }
       });
     });
   },
