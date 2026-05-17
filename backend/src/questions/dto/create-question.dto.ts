@@ -1,4 +1,4 @@
-import { IsString, IsInt, IsUUID } from 'class-validator';
+import { IsString, IsInt, IsUUID, IsOptional } from 'class-validator';
 
 export class CreateQuestionDto {
   @IsUUID()
@@ -12,4 +12,12 @@ export class CreateQuestionDto {
 
   @IsInt()
   orderIndex: number;
+
+  @IsString()
+  @IsOptional()
+  imageUrl?: string;
+
+  @IsString()
+  @IsOptional()
+  imageId?: string;
 }

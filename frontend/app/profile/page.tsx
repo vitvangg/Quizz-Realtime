@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuthStore } from "@/stores/auth.store";
 import { useUserStore } from "@/stores/user.store";
 import { Button } from "@/components/ui/button";
@@ -13,12 +13,15 @@ import {
   Camera,
   Phone,
   UserCircle,
-  FileText
+  FileText,
+  Upload
 } from "lucide-react";
+import Image from "next/image";
 
 export default function ProfileInfoPage() {
   const { user } = useAuthStore();
-  const { updateProfile, loading } = useUserStore();
+  const { updateProfile, uploadAvatar, loading } = useUserStore();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [isEditing, setIsEditing] = useState(false);
   const [profile, setProfile] = useState({
@@ -46,6 +49,17 @@ export default function ProfileInfoPage() {
     });
   };
 
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      try {
+        await uploadAvatar(file);
+      } catch (error) {
+        console.error("Upload failed", error);
+      }
+    }
+  };
+
   const handleCancel = () => {
     if (user) {
       setProfile({
@@ -61,7 +75,11 @@ export default function ProfileInfoPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await updateProfile(profile);
+      await updateProfile({
+        fullName: profile.fullName,
+        phoneNumber: profile.phoneNumber,
+        bio: profile.bio
+      });
       setIsEditing(false);
     } catch (error) {
       // Error handled by store
@@ -96,22 +114,43 @@ export default function ProfileInfoPage() {
         </div>
       </CardHeader>
       <CardContent className="pt-8">
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="space-y-3">
-            <Label htmlFor="avatar" className="font-bold uppercase tracking-widest text-xs px-1 text-muted-foreground">
-              Link ảnh đại diện
-            </Label>
-            <div className="relative">
-              <Camera className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-              <Input
-                id="avatar"
-                type="text"
-                placeholder="https://example.com/avatar.jpg"
-                className="pl-12 h-14 rounded-2xl border-2 font-bold text-lg focus-visible:ring-primary disabled:bg-muted/50 disabled:opacity-100"
-                value={profile.avatar}
-                onChange={handleChange}
-                disabled={!isEditing}
+        <form onSubmit={handleSubmit} className="space-y-8">
+          {/* Avatar Section */}
+          <div className="flex flex-col items-center gap-4">
+            <div className="relative group">
+              <div className="w-32 h-32 rounded-3xl overflow-hidden border-4 border-background shadow-xl bg-muted flex items-center justify-center">
+                {user?.avatar ? (
+                  <Image 
+                    src={user.avatar} 
+                    alt="Avatar" 
+                    fill 
+                    className="object-cover"
+                  />
+                ) : (
+                  <UserCircle className="w-16 h-16 text-muted-foreground" />
+                )}
+              </div>
+              
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={loading}
+                className="absolute -bottom-2 -right-2 bg-primary text-white p-2.5 rounded-2xl shadow-lg hover:scale-110 active:scale-95 transition-all disabled:opacity-50"
+              >
+                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Camera className="w-5 h-5" />}
+              </button>
+              
+              <input
+                type="file"
+                ref={fileInputRef}
+                className="hidden"
+                accept="image/*"
+                onChange={handleFileChange}
               />
+            </div>
+            <div className="text-center">
+              <p className="font-bold text-lg">{user?.fullName || "Người dùng"}</p>
+              <p className="text-sm text-muted-foreground">{user?.email}</p>
             </div>
           </div>
 
