@@ -337,34 +337,104 @@ export default function GamePage() {
       }
     };
 
-    // Handle player reconnecting (entering grace period)
-    const handlePlayerReconnecting = (data: { playerId: string; nickname: string; gracePeriodMs: number }) => {
-      console.log('[GamePage] player_reconnecting:', data);
-      
-      // Add to reconnecting set so UI can show "reconnecting..." status
-      useGameStore.getState().setPlayerReconnecting(data.playerId, data.nickname, data.gracePeriodMs);
-      
-      // Show toast indicating player is reconnecting
-      toast.warning(`${data.nickname} đang kết nối lại...`, {
-        duration: Math.min(data.gracePeriodMs, 5000),
+    // Handle session_switched (simplified replay flow)
+    // CRITICAL: Use embedded state from event payload - NO HTTP fetch
+    // Players must join new session socket room immediately to receive countdown events
+    const handleSessionSwitched = (data: {
+      oldSessionId: string;
+      newSessionId: string;
+      url: string;
+      timestamp: number;
+      state?: {
+        status: string;
+        currentQuestion: any;
+        questionIndex: number;
+        totalQuestions: number;
+        leaderboard: any[];
+        remainingTime: number;
+        correctAnswerId: string | null;
+        countdown: number;
+      };
+    }) => {
+      console.log('[GamePage] session_switched:', data);
+
+      const state = useGameStore.getState();
+
+      // If we're not in the old session, ignore
+      if (state.sessionId !== data.oldSessionId) {
+        console.log('[GamePage] Ignoring session_switched - not in old session');
+        return;
+      }
+
+      // Store pending session switch
+      useGameStore.setState({ _pendingSessionSwitch: { oldSessionId: data.oldSessionId, newSessionId: data.newSessionId } });
+
+      toast.info('Game mới đã bắt đầu! Đang tải...', { duration: 3000 });
+
+      // Use embedded state from event - no HTTP fetch needed
+      // This is instant and ensures players get state before countdown ticks arrive
+      useGameStore.setState({
+        sessionId: data.newSessionId,
+        gameStatus: (data.state?.status === 'STARTING' ? GameState.STARTING : (data.state?.status || GameState.WAITING)) as any,
+        currentQuestion: data.state?.currentQuestion || null,
+        questionIndex: data.state?.questionIndex ?? 0,
+        totalQuestions: data.state?.totalQuestions ?? 0,
+        leaderboard: data.state?.leaderboard || [],
+        correctAnswerId: data.state?.correctAnswerId || null,
+        hasAnswered: false,
+        selectedAnswerId: null,
+        countdown: data.state?.countdown ?? 0,
+        _pendingSessionSwitch: null,
       });
+
+      // Emit join_game to new session IMMEDIATELY
+      // This must happen before countdown ticks arrive via socket
+      if (state.socket?.connected) {
+        state.socket.emit('join_game', {
+          sessionId: data.newSessionId,
+          playerId: state.myPlayerId,
+          nickname: state.myNickname,
+        }, (joinRes: any) => {
+          if (joinRes.success) {
+            console.log('[GamePage] Rejoined new session after switch, isReconnect:', joinRes.isReconnect);
+          }
+        });
+      }
     };
 
-    // Handle player reconnected (within grace period)
-    const handlePlayerReconnected = (data: { playerId: string; nickname: string; timestamp: number }) => {
-      console.log('[GamePage] player_reconnected:', data);
-      
-      // Clear from reconnecting set
-      useGameStore.getState().clearPlayerReconnecting(data.playerId);
-      
-      // Show toast indicating player reconnected
-      toast.success(`${data.nickname} đã quay lại!`);
+    // Handle player connection status changes (simplified - no grace period)
+    const handlePlayerStatus = (data: { playerId: string; nickname: string; connection: 'CONNECTED' | 'DISCONNECTED'; isHost: boolean; timestamp: number }) => {
+      console.log('[GamePage] player_status:', data);
+
+      const state = useGameStore.getState();
+
+      // Update player status in store
+      state.setPlayerStatus({
+        playerId: data.playerId,
+        nickname: data.nickname,
+        connection: data.connection,
+        isHost: data.isHost,
+        lastSeen: data.timestamp,
+      });
+
+      if (data.connection === 'DISCONNECTED') {
+        if (data.playerId === state.myPlayerId) {
+          toast.warning('Bạn đã mất kết nối. Đang thử kết nối lại...', { duration: 5000 });
+        } else if (!data.isHost) {
+          toast.warning(`${data.nickname} đã mất kết nối`, { duration: 3000 });
+        }
+      } else {
+        if (data.playerId === state.myPlayerId) {
+          toast.success('Đã kết nối lại!');
+        } else if (!data.isHost) {
+          toast.success(`${data.nickname} đã quay lại!`);
+        }
+      }
     };
 
     const handlePlayerLeft = (data: { playerId: string; nickname: string; timestamp: number }) => {
       console.log('[GamePage] player_left:', data);
 
-      // DEBUG: Validate payload
       if (!data) {
         console.error('[GamePage] player_left: Invalid payload - data is null/undefined');
         return;
@@ -375,13 +445,6 @@ export default function GamePage() {
       }
 
       const state = useGameStore.getState();
-      
-      // Check if player was in reconnecting state - if so, ignore this event
-      // (player_left is only emitted AFTER grace period expires)
-      if (state.reconnectingPlayers.has(data.playerId)) {
-        console.log('[GamePage] Ignoring player_left for player in reconnecting state:', data.playerId);
-        return;
-      }
 
       // Defensive: ensure leaderboard is an array before filtering
       if (!Array.isArray(state.leaderboard)) {
@@ -397,7 +460,7 @@ export default function GamePage() {
       useGameStore.setState({ leaderboard: newLeaderboard });
 
       if (data.playerId === state.myPlayerId) {
-        toast.error('Bạn đã bị ngắt kết nối');
+        toast.error('Bạn đã rời phòng');
       } else if (data.nickname) {
         toast.info(`${data.nickname} đã rời phòng`);
       }
@@ -487,9 +550,9 @@ export default function GamePage() {
     socket.on('host_disconnected', handleHostDisconnected);
     socket.on('host_reconnected', handleHostReconnected);
     socket.on('session_closed', handleSessionClosed);
+    socket.on('session_switched', handleSessionSwitched);
     socket.on('player_left', handlePlayerLeft);
-    socket.on('player_reconnecting', handlePlayerReconnecting);
-    socket.on('player_reconnected', handlePlayerReconnected);
+    socket.on('player_status', handlePlayerStatus);
 
     return () => {
       socket.off('game_starting', handleGameStarting);
@@ -503,9 +566,9 @@ export default function GamePage() {
       socket.off('host_disconnected', handleHostDisconnected);
       socket.off('host_reconnected', handleHostReconnected);
       socket.off('session_closed', handleSessionClosed);
+      socket.off('session_switched', handleSessionSwitched);
       socket.off('player_left', handlePlayerLeft);
-      socket.off('player_reconnecting', handlePlayerReconnecting);
-      socket.off('player_reconnected', handlePlayerReconnected);
+      socket.off('player_status', handlePlayerStatus);
     };
   }, [sessionId, router]);
 

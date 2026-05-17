@@ -3,6 +3,7 @@ import { GameSessionService } from './game-session.service';
 import { GameGateway } from './game.gateway';
 import { GameController } from './game.controller';
 import { PlayerCacheService } from './player-cache.service';
+import { PlayerPresenceService } from './player-presence.service';
 import { AnswerQueueService } from './answer-queue.service';
 import { AnswerBatchService } from './answer-batch.service';
 import { RoomModule } from '../room/room.module';
@@ -17,6 +18,7 @@ import { AuthModule } from '../auth/auth.module';
     GameSessionService,
     GameGateway,
     PlayerCacheService,
+    PlayerPresenceService,
     AnswerQueueService,
     AnswerBatchService,
   ],
@@ -24,6 +26,7 @@ import { AuthModule } from '../auth/auth.module';
     GameSessionService,
     GameGateway,
     PlayerCacheService,
+    PlayerPresenceService,
     AnswerQueueService,
     AnswerBatchService,
   ],

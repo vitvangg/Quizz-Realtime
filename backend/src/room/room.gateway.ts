@@ -18,6 +18,11 @@ import {
   LeaveRoomPayload,
   JoinByIdPayload,
 } from './dto/websocket-payload.dto';
+import {
+  PlayerJoinedEvent,
+  PlayerLeftEvent,
+  RoomJoinedEvent,
+} from '../common/socket/socket-events.interface';
 
 interface PlayerIdentity {
   userId?: string;  // For hosts
@@ -160,14 +165,16 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
 
       if (!identity.isHost) {
-        client.to(room.id).emit('player_joined', {
-          player: {
-            id: player.id,
-            nickname: player.nickname,
-          },
+        // Emit with unified PlayerJoinedEvent format
+        const joinedEvent: PlayerJoinedEvent = {
+          playerId: player.id,
+          nickname: player.nickname,
           playerCount: room.players.length + 1,
           joinedBy: hostIdentity?.nickname || 'Host',
-        });
+          timestamp: Date.now(),
+          isHost: false,
+        };
+        client.to(room.id).emit('player_joined', joinedEvent);
       }
 
       return { success: true };
@@ -261,13 +268,14 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
         });
 
         // Broadcast to ALL sockets in room (including host if connected)
-        this.server.to(room.id).emit('player_joined', {
-          player: {
-            id: player.id,
-            nickname: player.nickname,
-          },
+        const joinedEvent: PlayerJoinedEvent = {
+          playerId: player.id,
+          nickname: player.nickname,
           playerCount: updatedRoom.players.length,
-        });
+          timestamp: Date.now(),
+          isHost: false,
+        };
+        this.server.to(room.id).emit('player_joined', joinedEvent);
 
         // Return playerId so frontend can persist it (for game session recovery after redirect)
         return { success: true, playerId: player.id };
@@ -362,12 +370,14 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
         isHost: identity.isHost,
       });
 
-      this.server.to(roomId).emit('player_left', {
+      const leftEvent: PlayerLeftEvent = {
         playerId: leftPlayerId,
         nickname: identity.nickname,
         playerCount: socketsInRoom?.size || 0,
         isHost: identity.isHost,
-      });
+        timestamp: Date.now(),
+      };
+      this.server.to(roomId).emit('player_left', leftEvent);
 
       return { success: true };
     } catch (error) {

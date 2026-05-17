@@ -464,14 +464,18 @@ export class GameSessionService {
     // Cancel timer
     this.cancelTimer(sessionId);
 
-    // Delete Redis cache
-    await this.redis.del(`game:cache:${sessionId}`);
-    await this.redis.del(`game:timer:${sessionId}`);
+    // Delete Redis cache - NOTE: key is `game:{sessionId}` (see getGameCache)
+    await this.redis.del(`game:${sessionId}`);
+
+    // Delete timer metadata
     await this.redis.del(`game:timer_meta:${sessionId}`);
     await this.redis.del(`game:timer_pause:${sessionId}`);
 
     // Delete leaderboard
-    await this.redis.del(`game:leaderboard:${sessionId}`);
+    await this.redis.del(`leaderboard:${sessionId}`);
+
+    // Delete player in-game tracking keys
+    // Note: We don't delete player names cache as it's shared across sessions
 
     this.logger.log(`[GameSessionService] Session ${sessionId} cleaned up`);
   }
@@ -912,6 +916,13 @@ export class GameSessionService {
       throw new BadRequestException(`Cannot submit answer now - game status is ${cached.status}`);
     }
 
+    // CRITICAL: Validate questionId is the CURRENT question in session
+    const currentQuestionId = cached.questionIds[cached.currentQuestionIndex];
+    if (questionId !== currentQuestionId) {
+      this.logger.warn(`[submitAnswer:${sessionId}] Invalid questionId ${questionId}, expected ${currentQuestionId}`);
+      throw new BadRequestException('Invalid question - this question is not currently active');
+    }
+
     // CRITICAL: Idempotency check using Redis distributed lock
     // This prevents race condition when player spam-clicks submit
     const idempotencyKey = `answer:lock:${sessionId}:${playerId}:${questionId}`;
@@ -930,17 +941,24 @@ export class GameSessionService {
       });
 
       if (!playerSession) {
-        throw new NotFoundException('Player session not found');
+        throw new ForbiddenException('Player is not part of this game session');
       }
 
       // Fetch question with answers
       const question = await this.prisma.question.findUnique({
         where: { id: questionId },
-        include: { answers: true },
+        include: { answers: { where: { deletedAt: null } } },
       });
 
       if (!question) {
         throw new NotFoundException('Question not found');
+      }
+
+      // CRITICAL: Validate answerId belongs to this question
+      const validAnswerIds = question.answers.map((a) => a.id);
+      if (!validAnswerIds.includes(answerId)) {
+        this.logger.warn(`[submitAnswer:${sessionId}] Invalid answerId ${answerId} for question ${questionId}`);
+        throw new BadRequestException('Invalid answer - answer does not belong to this question');
       }
 
       // Calculate score using server authoritative timestamp
