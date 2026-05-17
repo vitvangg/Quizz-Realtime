@@ -163,6 +163,7 @@ model Room {
   quizId    String     @map("quiz_id")
   hostId    String     @map("host_id")
   status    RoomStatus @default(WAITING)
+  currentSessionId String? @map("current_session_id") // CRITICAL: Track active session for replay redirect
   createdAt DateTime   @default(now()) @map("created_at")
 
   quiz     Quiz          @relation(fields: [quizId], references: [id])
