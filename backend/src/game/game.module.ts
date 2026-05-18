@@ -10,9 +10,10 @@ import { RoomModule } from '../room/room.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { RedisModule } from '../redis/redis.module';
 import { AuthModule } from '../auth/auth.module';
+import { PresenceModule } from '../presence/presence.module';
 
 @Module({
-  imports: [RoomModule, PrismaModule, RedisModule, AuthModule],
+  imports: [RoomModule, PrismaModule, RedisModule, AuthModule, PresenceModule],
   controllers: [GameController],
   providers: [
     GameSessionService,

@@ -352,4 +352,156 @@ export class PlayerPresenceService {
 
     return total;
   }
+
+  // ============================================================================
+  // LOBBY PRESENCE (RoomGateway)
+  // ============================================================================
+
+  private LOBBY_PRESENCE_TTL_SECONDS = 3600; // 1 hour for lobby presence
+
+  /**
+   * Get all rooms a player is currently in (for cross-gateway cleanup)
+   */
+  async getPlayerRooms(playerId: string): Promise<string[]> {
+    const pattern = `player:lobby:*:${playerId}`;
+    const keys = await this.redis.keys(pattern);
+    return keys.map((key) => {
+      const match = key.match(/player:lobby:([^:]+):/);
+      return match ? match[1] : null;
+    }).filter((roomId): roomId is string => roomId !== null);
+  }
+
+  /**
+   * Get lobby presence data for a specific room
+   */
+  async getLobbyPresence(roomId: string): Promise<{
+    players: Map<string, { nickname: string; isHost: boolean; joinedAt: number; socketId?: string }>;
+    host: { nickname: string; playerId: string } | null;
+  }> {
+    const playersMap = new Map<string, { nickname: string; isHost: boolean; joinedAt: number; socketId?: string }>();
+
+    // Get all player entries for this room
+    const playerKeys = await this.redis.keys(`player:lobby:${roomId}:*`);
+    for (const key of playerKeys) {
+      const data = await this.redis.get(key);
+      if (data) {
+        const playerId = key.split(':').pop()!;
+        const parsed = JSON.parse(data);
+        playersMap.set(playerId, {
+          nickname: parsed.nickname,
+          isHost: parsed.isHost || false,
+          joinedAt: parsed.joinedAt,
+          socketId: parsed.socketId,
+        });
+      }
+    }
+
+    // Get host info
+    const hostData = await this.redis.get(`lobby:${roomId}:host`);
+    let host: { nickname: string; playerId: string } | null = null;
+    if (hostData) {
+      const parsed = JSON.parse(hostData);
+      host = { nickname: parsed.nickname, playerId: parsed.playerId };
+    }
+
+    return { players: playersMap, host };
+  }
+
+  /**
+   * Check if a player is already in a room (for reload detection)
+   */
+  async isPlayerInLobby(roomId: string, playerId: string): Promise<boolean> {
+    const key = `player:lobby:${roomId}:${playerId}`;
+    const exists = await this.redis.exists(key);
+    return exists === 1;
+  }
+
+  /**
+   * Attach player to lobby room
+   */
+  async attachPlayerToLobby(params: {
+    roomId: string;
+    playerId: string;
+    nickname: string;
+    socketId: string;
+    isHost: boolean;
+  }): Promise<void> {
+    const { roomId, playerId, nickname, socketId, isHost } = params;
+
+    const key = `player:lobby:${roomId}:${playerId}`;
+    const data = JSON.stringify({
+      nickname,
+      socketId,
+      isHost,
+      joinedAt: Date.now(),
+      lastSeen: Date.now(),
+    });
+
+    await this.redis.set(key, data, 'EX', this.LOBBY_PRESENCE_TTL_SECONDS);
+
+    // Track player's rooms
+    await this.redis.sadd(`lobby:${roomId}:players`, playerId);
+
+    // Set host if this player is host
+    if (isHost) {
+      await this.redis.set(
+        `lobby:${roomId}:host`,
+        JSON.stringify({ playerId, nickname }),
+        'EX',
+        this.LOBBY_PRESENCE_TTL_SECONDS,
+      );
+    }
+
+    this.logger.debug(`[attachPlayerToLobby] ${nickname} (${playerId}) joined room ${roomId}`);
+  }
+
+  /**
+   * Update player's socket ID (for reconnect)
+   */
+  async updateLobbySocketId(roomId: string, playerId: string, socketId: string): Promise<void> {
+    const key = `player:lobby:${roomId}:${playerId}`;
+    const data = await this.redis.get(key);
+    if (data) {
+      const parsed = JSON.parse(data);
+      parsed.socketId = socketId;
+      parsed.lastSeen = Date.now();
+      await this.redis.set(key, JSON.stringify(parsed), 'EX', this.LOBBY_PRESENCE_TTL_SECONDS);
+    }
+  }
+
+  /**
+   * Detach player from lobby room
+   */
+  async detachPlayerFromLobby(roomId: string, playerId: string): Promise<void> {
+    const key = `player:lobby:${roomId}:${playerId}`;
+
+    // Check if this player was host
+    const hostData = await this.redis.get(`lobby:${roomId}:host`);
+    if (hostData) {
+      const parsed = JSON.parse(hostData);
+      if (parsed.playerId === playerId) {
+        await this.redis.del(`lobby:${roomId}:host`);
+      }
+    }
+
+    await this.redis.del(key);
+    await this.redis.srem(`lobby:${roomId}:players`, playerId);
+
+    this.logger.debug(`[detachPlayerFromLobby] ${playerId} left room ${roomId}`);
+  }
+
+  /**
+   * Get player presence in a specific lobby
+   */
+  async getPlayerLobbyPresence(roomId: string, playerId: string): Promise<{
+    nickname: string;
+    isHost: boolean;
+    socketId?: string;
+    joinedAt: number;
+  } | null> {
+    const key = `player:lobby:${roomId}:${playerId}`;
+    const data = await this.redis.get(key);
+    if (!data) return null;
+    return JSON.parse(data);
+  }
 }
