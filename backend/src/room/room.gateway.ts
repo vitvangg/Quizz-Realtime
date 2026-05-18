@@ -37,7 +37,7 @@ interface PlayerIdentity {
     origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
     credentials: true,
   },
-  namespace: '/game',
+  namespace: '/lobby',
 })
 export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
@@ -45,9 +45,6 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private socketMap = new Map<string, PlayerIdentity>();
   private roomSockets = new Map<string, Set<string>>();
-
-  // Redis key prefix for tracking players in game sessions (must match GameGateway)
-  private readonly PLAYER_IN_GAME_KEY_PREFIX = 'player:in_game:';
 
   constructor(
     private readonly roomService: RoomService,
@@ -83,21 +80,10 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
         }
       }
 
-      // CRITICAL: Check if player is in a game session BEFORE emitting player_left
-      // GameGateway manages player lifecycle during games with grace period support.
-      // If player is in game, GameGateway will handle player_reconnecting/player_left.
-      if (!isHost && playerId) {
-        const isInGame = await this.redisService.get(`${this.PLAYER_IN_GAME_KEY_PREFIX}${playerId}`);
-        if (isInGame) {
-          console.log(`[RoomGateway] Player ${nickname} is in game session, GameGateway will handle disconnect`);
-          // DO NOT call handleLeaveRoom - let GameGateway manage during games
-          return;
-        }
-      }
+      // NOTE: RoomGateway chỉ quản lý LOBBY phase
+      // Game lifecycle được quản lý bởi GameGateway khi player redirect đến /game/:id
+      // Khi player disconnect trong game, GameGateway sẽ xử lý
 
-      // Hosts that disconnect during game navigation will also call this —
-      // but the frontend's handleHostLeft does NOT redirect during
-      // game (gameStatus === STARTING). game_redirect is the authoritative redirect.
       if (!isHost) {
         await this.handleLeaveRoom(client, { roomId });
       } else {

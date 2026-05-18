@@ -56,9 +56,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   // Session callbacks for timer handling
   private sessionCallbacks = new Map<string, (data: any) => void>();
 
-  // Redis key prefix for player in-game tracking
-  private readonly PLAYER_IN_GAME_KEY_PREFIX = 'player:in_game:';
-
   constructor(
     private readonly gameSessionService: GameSessionService,
     private readonly presenceService: PlayerPresenceService,
@@ -300,19 +297,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       };
       this.registerSocket(client, identity);
 
-      // Update Redis for cross-instance tracking
-      await this.redisService.set(
-        `${this.PLAYER_IN_GAME_KEY_PREFIX}host_${hostId}`,
-        JSON.stringify({
-          sessionId: payload.sessionId,
-          roomId: fullState.roomId,
-          isHost: true,
-          socketId: client.id,
-        }),
-        'EX',
-        7200
-      );
-
       // Notify players that host is back (if was disconnected)
       this.server.to(payload.sessionId).emit('host_reconnected', { sessionId: payload.sessionId });
 
@@ -379,20 +363,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       };
       this.registerSocket(client, identity);
 
-      await this.redisService.set(
-        `${this.PLAYER_IN_GAME_KEY_PREFIX}host_${hostId}`,
-        JSON.stringify({
-          sessionId: result.session.id,
-          roomId: payload.roomId,
-          isHost: true,
-          socketId: client.id,
-        }),
-        'EX',
-        7200
-      );
-
       // Countdown + question start
+      // Emit to both sessionId (for players already in game) and roomId (for players still in lobby)
       this.server.to(result.session.id).emit('game_starting', {
+        sessionId: result.session.id,
+        countdown: 5,
+      });
+      this.roomGateway.server.to(payload.roomId).emit('game_starting', {
         sessionId: result.session.id,
         countdown: 5,
       });
@@ -400,11 +377,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       for (let i = 5; i > 0; i--) {
         await this.delay(1000);
         this.server.to(result.session.id).emit('countdown_tick', { remaining: i - 1 });
+        this.roomGateway.server.to(payload.roomId).emit('countdown_tick', { remaining: i - 1 });
       }
 
       await this.gameSessionService.updateQuestionStartTime(result.session.id, Date.now());
 
       // Emit redirect to players in room
+      // NOTE: GameGateway is on /game namespace, RoomGateway is on /lobby namespace
+      // Emit on both namespaces so redirect works during lobby phase
       this.server.to(payload.roomId).emit('game_redirect', { url: `/game/${result.session.id}`, sessionId: result.session.id });
       this.roomGateway.server.to(payload.roomId).emit('game_redirect', { url: `/game/${result.session.id}`, sessionId: result.session.id });
 
@@ -423,6 +403,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       };
 
       this.server.to(result.session.id).emit('question_start', questionStartPayload);
+      // Also emit to lobby namespace in case redirect hasn't completed yet
+      this.roomGateway.server.to(payload.roomId).emit('question_start', questionStartPayload);
 
       return { success: true, sessionId: result.session.id };
     } catch (error) {
@@ -612,10 +594,16 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         sessionId: result.session.id,
         countdown: 5,
       });
+      // Also emit to lobby namespace in case some players are still there
+      this.roomGateway.server.to(payload.roomId).emit('game_starting', {
+        sessionId: result.session.id,
+        countdown: 5,
+      });
 
       for (let i = 5; i > 0; i--) {
         await this.delay(1000);
         this.server.to(result.session.id).emit('countdown_tick', { remaining: i - 1 });
+        this.roomGateway.server.to(payload.roomId).emit('countdown_tick', { remaining: i - 1 });
       }
 
       const questionEndCallback = (data: any) => this.handleQuestionEnd(result.session.id, data);
@@ -635,6 +623,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       };
 
       this.server.to(result.session.id).emit('question_start', questionStartPayload);
+      // Also emit to lobby namespace in case redirect hasn't completed yet
+      this.roomGateway.server.to(payload.roomId).emit('question_start', questionStartPayload);
 
       return { success: true, sessionId: result.session.id };
     } catch (error) {
@@ -728,19 +718,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       client.join(payload.sessionId);
       this.socketMap.set(client.id, identity);
 
-      // Update Redis for cross-instance sync
-      await this.redisService.set(
-        `${this.PLAYER_IN_GAME_KEY_PREFIX}${payload.playerId}`,
-        JSON.stringify({
-          sessionId: payload.sessionId,
-          roomId: fullState.roomId,
-          joinedAt: Date.now(),
-          socketId: client.id,
-        }),
-        'EX',
-        7200
-      );
-
       return {
         success: true,
         isReconnect,
@@ -811,9 +788,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     // Detach player from session
     await this.presenceService.detachPlayer(payload.sessionId, payload.playerId);
 
-    // Remove from Redis tracking
-    await this.redisService.del(`${this.PLAYER_IN_GAME_KEY_PREFIX}${payload.playerId}`);
-
     // Remove from socket map
     this.socketMap.delete(client.id);
     client.leave(payload.sessionId);
@@ -868,15 +842,24 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   // PUBLIC METHODS FOR OTHER GATEWAYS
   // ============================================================================
 
+  /**
+   * Check if player is currently in any game session
+   * Uses presenceService instead of redundant player:in_game:* keys
+   */
   async isPlayerInGame(playerId: string): Promise<boolean> {
-    const key = `${this.PLAYER_IN_GAME_KEY_PREFIX}${playerId}`;
-    const data = await this.redisService.get(key);
-    return !!data;
+    const sessions = await this.presenceService.getPlayerSessions(playerId);
+    return sessions.length > 0;
   }
 
+  /**
+   * Clear player from all game sessions
+   * Uses presenceService for cross-instance cleanup
+   */
   async clearPlayerFromGame(playerId: string): Promise<void> {
-    const key = `${this.PLAYER_IN_GAME_KEY_PREFIX}${playerId}`;
-    await this.redisService.del(key);
+    const sessions = await this.presenceService.getPlayerSessions(playerId);
+    for (const sessionId of sessions) {
+      await this.presenceService.detachPlayer(sessionId, playerId);
+    }
   }
 
   // ============================================================================

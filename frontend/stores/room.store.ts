@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { toast } from 'sonner';
 import { Socket } from 'socket.io-client';
-import { getSocket } from '@/lib/socket';
+import { getLobbySocket, connectLobbySocket, removeAllLobbyListeners } from '@/lib/lobby-socket';
 import { Room, Player, RoomJoinedPayload, PlayerJoinedPayload, PlayerLeftPayload } from '@/types/room.type';
 import { roomService } from '@/services/room.service';
 import { normalizePlayerJoinedEvent, normalizePlayerLeftEvent } from '@/lib/socket-normalizer';
@@ -58,8 +58,14 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       return; // already initialized with shared socket
     }
 
-    const newSocket = getSocket();
+    const newSocket = getLobbySocket();
     
+    // Connect the lobby socket
+    if (!newSocket.connected) {
+      console.log('[RoomStore] Connecting lobby socket...');
+      connectLobbySocket();
+    }
+
     // Track listener count for debugging
     let listenerCount = 0;
     const registerListener = (event: string, handler: (...args: any[]) => void) => {
@@ -69,12 +75,12 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     };
 
     newSocket.on('connect', () => {
-      console.log('[Socket] Connected:', newSocket.id);
+      console.log('[LobbySocket] Connected:', newSocket.id);
       set({ isConnected: true, error: null });
     });
 
     newSocket.on('disconnect', (reason) => {
-      console.log('[Socket] Disconnected:', reason);
+      console.log('[LobbySocket] Disconnected:', reason);
       set({ isConnected: false });
     });
 
@@ -224,11 +230,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       const events = [
         'room_joined', 'player_joined', 'player_left',
         'player_reconnecting', 'player_reconnected', 'host_left',
-        'room_left', 'error', 'game_starting', 'game_redirect',
-        'countdown_tick', 'question_start', 'question_result',
-        'leaderboard_update', 'game_ended', 'session_closed',
-        'host_disconnected', 'host_reconnected', 'score_update',
-        'system:freeze', 'system:maintenance', 'timer_resume',
+        'room_left', 'error',
       ];
       
       events.forEach(event => {

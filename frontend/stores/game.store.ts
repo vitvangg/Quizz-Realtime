@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { toast } from 'sonner';
 import { Socket } from 'socket.io-client';
-import { getSocket, registerStoreUpdater } from '@/lib/socket';
+import { getGameSocket, connectGameSocket } from '@/lib/game-socket';
 import { GameState, Question, LeaderboardEntry } from '@/types/game.type';
 import { useAuthStore } from './auth.store';
 
@@ -137,15 +137,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const { socket } = get();
     if (socket) return;
 
-    registerStoreUpdater((updater) => {
-      set(updater);
-    });
-
-    const newSocket = getSocket();
+    const newSocket = getGameSocket();
 
     if (!newSocket.connected) {
-      console.log('[GameStore] Connecting socket...');
-      newSocket.connect();
+      console.log('[GameStore] Connecting game socket...');
+      connectGameSocket();
     }
 
     set({ socket: newSocket });

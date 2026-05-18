@@ -620,6 +620,19 @@ export class GameSessionService {
 
     const leaderboard = await this.getLeaderboard(sessionId);
 
+    // Check if we need to redirect to a newer session
+    let currentSessionId: string | undefined;
+    if (cached?.status === GameState.FINISHED) {
+      // Get the current session ID from room
+      const room = await this.prisma.room.findUnique({
+        where: { id: session.roomId },
+        select: { currentSessionId: true },
+      });
+      if (room?.currentSessionId && room.currentSessionId !== sessionId) {
+        currentSessionId = room.currentSessionId;
+      }
+    }
+
     return {
       sessionId: session.id,
       roomId: session.roomId,
@@ -633,8 +646,9 @@ export class GameSessionService {
       currentQuestion,
       correctAnswerId,
       leaderboard,
-      serverTime: Date.now(), // Thời điểm server trả response
-      questionStartedAt: cached?.questionStartedAt || null, // Thời điểm câu hỏi bắt đầu (server time)
+      serverTime: Date.now(),
+      questionStartedAt: cached?.questionStartedAt || null,
+      currentSessionId, // Include for redirect if session is finished
     };
   }
 

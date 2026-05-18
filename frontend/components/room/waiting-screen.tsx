@@ -68,14 +68,22 @@ export function WaitingScreen({ roomId }: WaitingScreenProps) {
       toast.info(`${data.nickname} đã rời phòng`);
     };
 
+    const handleGameRedirect = (data: { url: string; sessionId: string }) => {
+      console.log('[WaitingScreen] game_redirect received:', data);
+      // Set pendingRedirect to trigger redirect effect
+      useGameStore.setState({ _pendingRedirect: data.url });
+    };
+
     roomSocket.on('room_left', handleRoomLeft);
     roomSocket.on('host_left', handleHostLeft);
     roomSocket.on('player_left', handlePlayerLeft);
+    roomSocket.on('game_redirect', handleGameRedirect);
 
     return () => {
       roomSocket.off('room_left', handleRoomLeft);
       roomSocket.off('host_left', handleHostLeft);
       roomSocket.off('player_left', handlePlayerLeft);
+      roomSocket.off('game_redirect', handleGameRedirect);
     };
   }, [roomSocket, router, resetRoomStore]);
 
@@ -150,6 +158,8 @@ export function WaitingScreen({ roomId }: WaitingScreenProps) {
           sessionStorage.setItem('hostUserId', String(authStore.user.id));
           console.log('[WaitingScreen] Saved hostUserId:', authStore.user.id);
         }
+        // NOTE: Redirect will be triggered by game_starting/game_redirect event
+        // via the handleGameRedirect listener in this component
         toast.success('Game bắt đầu!', { id: 'start-game' });
       }
     } catch (error) {

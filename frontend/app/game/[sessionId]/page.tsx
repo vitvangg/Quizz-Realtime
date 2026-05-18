@@ -619,6 +619,15 @@ export default function GamePage() {
         httpData = response.data;
         console.log('[GamePage] HTTP state recovered:', httpData);
 
+        // CRITICAL: If session is FINISHED, redirect immediately BEFORE setting any state
+        // This prevents flash of old FINISHED state on page reload after host_play_again
+        if (httpData.status === 'FINISHED' && httpData.currentSessionId) {
+          console.log(`[GamePage] Session finished, redirecting to new session ${httpData.currentSessionId}`);
+          sessionStorage.setItem('playerSessionId', httpData.currentSessionId);
+          window.location.href = `/game/${httpData.currentSessionId}`;
+          return; // Don't set any state - we're redirecting
+        }
+
         useGameStore.setState({
           currentQuestion: null,
           leaderboard: [],
