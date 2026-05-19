@@ -46,15 +46,15 @@ export default function ProfileLayout({
   ];
 
   return (
-    <div className="max-w-6xl mx-auto py-12 px-4 space-y-12 pb-32">
+    <div className="max-w-6xl mx-auto px-4 space-y-12 pb-32">
       {/* HEADER */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 sticky top-16 z-40 bg-background/90 backdrop-blur-xl py-6 border-b transition-all duration-300">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 sticky top-0 z-40 bg-background/90 backdrop-blur-xl py-6 px-4 md:px-8 border-b transition-all duration-300 rounded-b-3xl">
         <div className="flex items-center gap-5">
           <Link href="/quiz">
             <Button
               variant="ghost"
               size="icon"
-              className="rounded-2xl bg-muted hover:bg-primary hover:text-white transition-all"
+              className="rounded-full bg-muted hover:bg-primary hover:text-white transition-all border shadow-sm"
             >
               <ArrowLeft className="h-5 w-5" />
             </Button>
@@ -71,7 +71,7 @@ export default function ProfileLayout({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 pt-6">
         {/* SHARED SIDEBAR */}
         <div className="space-y-6 lg:col-span-1">
           <Card className="border-2 border-primary/10 overflow-hidden rounded-3xl shadow-xl shadow-primary/5">
