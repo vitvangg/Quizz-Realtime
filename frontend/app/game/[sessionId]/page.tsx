@@ -1877,7 +1877,7 @@ export default function GamePage() {
                         </span>
                       </div>
                       </div>
-                      <span className="font-black text-xl text-black">{entry.score} pts</span>
+                      {/* <span className="font-black text-xl text-black">{entry.score} pts</span> */}
                     </div>
                   ))}
                   {leaderboard.length === 0 && (
