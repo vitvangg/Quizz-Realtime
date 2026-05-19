@@ -5,11 +5,28 @@ import { Logger } from '@nestjs/common';
 
 const logger = new Logger('RedisAdapter');
 
-let pubClient: RedisClientType;
-let subClient: RedisClientType;
+// Singleton state - shared across all gateways
+let pubClient: RedisClientType | null = null;
+let subClient: RedisClientType | null = null;
 let isInitialized = false;
-let currentIo: Server | null = null;
+let initPromise: Promise<void> | null = null;
 
+function getRedisUrl(config: { host: string; port: number; password?: string }): string {
+  if (config.password) {
+    return `redis://:${config.password}@${config.host}:${config.port}`;
+  }
+  return `redis://${config.host}:${config.port}`;
+}
+
+/**
+ * Setup Redis Adapter for Socket.IO server.
+ * This is a singleton - calling multiple times will skip re-initialization.
+ * The adapter is applied globally to the server, which means all namespaces
+ * (/lobby, /game, etc.) will share the same Redis adapter for cross-namespace messaging.
+ * 
+ * @param io - The NestJS Socket.IO server instance
+ * @param redisConfig - Redis connection configuration
+ */
 export async function setupRedisAdapter(
   io: Server,
   redisConfig: {
@@ -18,71 +35,66 @@ export async function setupRedisAdapter(
     password?: string;
   }
 ): Promise<void> {
-  // If already initialized with the same server, skip
-  if (isInitialized && currentIo === io) {
-    logger.log('Redis Adapter already initialized for this server, skipping');
+  // If already initialized, skip
+  if (isInitialized && pubClient && subClient) {
+    logger.log('Redis Adapter already initialized, skipping');
     return;
   }
 
-  // If already initialized with a different server, cleanup first
-  if (isInitialized && currentIo !== io) {
-    logger.warn('Redis Adapter was initialized with a different server, reinitializing');
-    await teardownRedisAdapter();
+  // If initialization is in progress, wait for it
+  if (initPromise) {
+    logger.log('Redis Adapter initialization in progress, waiting...');
+    await initPromise;
+    return;
   }
 
-  const { host, port, password } = redisConfig;
+  // Start initialization
+  initPromise = (async () => {
+    const url = getRedisUrl(redisConfig);
 
-  // Build Redis URL
-  let url: string;
-  if (password) {
-    url = `redis://:${password}@${host}:${port}`;
-  } else {
-    url = `redis://${host}:${port}`;
-  }
+    // Create two Redis clients: one for publishing, one for subscribing
+    pubClient = createClient({ url });
+    subClient = pubClient.duplicate();
 
-  // Create two Redis clients: one for publishing, one for subscribing
-  pubClient = createClient({ url });
-  subClient = pubClient.duplicate();
+    // Handle errors
+    pubClient.on('error', (err) => logger.error('Redis Pub Client Error', err));
+    subClient.on('error', (err) => logger.error('Redis Sub Client Error', err));
 
-  // Handle errors
-  pubClient.on('error', (err) => logger.error('Redis Pub Client Error', err));
-  subClient.on('error', (err) => logger.error('Redis Sub Client Error', err));
+    // Connect both clients
+    await Promise.all([
+      pubClient.connect(),
+      subClient.connect(),
+    ]);
 
-  // Connect both clients
-  await Promise.all([
-    pubClient.connect(),
-    subClient.connect(),
-  ]);
+    // Get raw Socket.IO server and set adapter globally
+    // This applies to ALL namespaces including /lobby and /game
+    const rawIo = (io as unknown as { server: Server }).server;
+    rawIo.adapter(createAdapter(pubClient, subClient));
 
-  // Get raw Socket.IO server from NestJS wrapper
-  const rawIo = (io as unknown as { server: Server }).server;
+    isInitialized = true;
+    logger.log('Socket.IO Redis Adapter initialized');
+    logger.log(`Connected to Redis at ${redisConfig.host}:${redisConfig.port}`);
+  })();
 
-  // Setup Redis Adapter on raw Socket.IO server
-  rawIo.adapter(createAdapter(pubClient, subClient));
-
-  isInitialized = true;
-  currentIo = io;
-
-  logger.log('Socket.IO Redis Adapter initialized');
-  logger.log(`Connected to Redis at ${host}:${port}`);
+  await initPromise;
 }
 
+/**
+ * Teardown Redis Adapter connections.
+ * Should be called on application shutdown.
+ */
 export async function teardownRedisAdapter(): Promise<void> {
   if (pubClient) {
     await pubClient.quit();
-    pubClient = undefined as any;
+    pubClient = null;
   }
   if (subClient) {
     await subClient.quit();
-    subClient = undefined as any;
+    subClient = null;
   }
   isInitialized = false;
-  currentIo = null;
+  initPromise = null;
   logger.log('Redis Adapter connections closed');
-}
-
-export function getPubClient(): RedisClientType | undefined {
-  return pubClient;
 }
 
 export function isRedisAdapterInitialized(): boolean {

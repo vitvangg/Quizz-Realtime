@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { RedisService } from '../redis/redis.service';
+import { GAME_CONSTANTS } from 'src/common/constants';
 
 /**
  * Player Presence Service - Redis-authoritative player connection state
@@ -49,8 +50,8 @@ export interface SessionPresence {
 export class PlayerPresenceService {
   private readonly logger = new Logger(PlayerPresenceService.name);
 
-  // TTL: 24 hours for presence data
-  private readonly PRESENCE_TTL_SECONDS = 24 * 60 * 60;
+  // TTL: Use centralized constants
+  private readonly PRESENCE_TTL_SECONDS = GAME_CONSTANTS.PLAYER_PRESENCE_TTL;
 
   // Key prefixes
   private sessionKey(sessionId: string) { return `presence:session:${sessionId}`; }
@@ -357,7 +358,8 @@ export class PlayerPresenceService {
   // LOBBY PRESENCE (RoomGateway)
   // ============================================================================
 
-  private LOBBY_PRESENCE_TTL_SECONDS = 3600; // 1 hour for lobby presence
+  // TTL: Use centralized constants
+  private LOBBY_PRESENCE_TTL_SECONDS = GAME_CONSTANTS.LOBBY_PRESENCE_TTL;
 
   /**
    * Get all rooms a player is currently in (for cross-gateway cleanup)
@@ -456,7 +458,7 @@ export class PlayerPresenceService {
   }
 
   /**
-   * Update player's socket ID (for reconnect)
+   * Update player's socket ID and mark as connected (for reconnect)
    */
   async updateLobbySocketId(roomId: string, playerId: string, socketId: string): Promise<void> {
     const key = `player:lobby:${roomId}:${playerId}`;
@@ -465,7 +467,10 @@ export class PlayerPresenceService {
       const parsed = JSON.parse(data);
       parsed.socketId = socketId;
       parsed.lastSeen = Date.now();
+      parsed.connection = 'CONNECTED';
+      delete parsed.disconnectedAt;
       await this.redis.set(key, JSON.stringify(parsed), 'EX', this.LOBBY_PRESENCE_TTL_SECONDS);
+      this.logger.debug(`[updateLobbySocketId] ${playerId} reconnected in room ${roomId}`);
     }
   }
 
@@ -488,6 +493,24 @@ export class PlayerPresenceService {
     await this.redis.srem(`lobby:${roomId}:players`, playerId);
 
     this.logger.debug(`[detachPlayerFromLobby] ${playerId} left room ${roomId}`);
+  }
+
+  /**
+   * Mark player as disconnected but keep them in room (for reconnect grace period)
+   * Does NOT remove from room - just updates connection status
+   */
+  async markDisconnectedInLobby(roomId: string, playerId: string): Promise<void> {
+    const key = `player:lobby:${roomId}:${playerId}`;
+    const data = await this.redis.get(key);
+    if (data) {
+      const parsed = JSON.parse(data);
+      parsed.connection = 'DISCONNECTED';
+      parsed.disconnectedAt = Date.now();
+      // Keep player in room but mark as disconnected
+      await this.redis.set(key, JSON.stringify(parsed), 'EX', this.LOBBY_PRESENCE_TTL_SECONDS);
+      this.logger.debug(`[markDisconnectedInLobby] ${playerId} marked disconnected in room ${roomId}`);
+    }
+    // NOTE: Player stays in lobby:{roomId}:players set
   }
 
   /**

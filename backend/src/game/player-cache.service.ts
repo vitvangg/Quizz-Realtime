@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { RedisService } from '../redis/redis.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { GAME_CONSTANTS } from 'src/common/constants';
 
 /**
  * Player name caching with TTL support
@@ -15,8 +16,8 @@ import { PrismaService } from '../prisma/prisma.service';
 export class PlayerCacheService {
   private readonly logger = new Logger(PlayerCacheService.name);
   
-  /** Default TTL: 24 hours */
-  private readonly DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
+  /** Default TTL: Use centralized constants */
+  private readonly DEFAULT_TTL_MS = GAME_CONSTANTS.PLAYER_NAME_CACHE_TTL_MS;
   
   /** Keys for Redis */
   private readonly NAMES_KEY = 'player:names';

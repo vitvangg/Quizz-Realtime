@@ -10,7 +10,8 @@ import { GameState } from '@/types/game.type';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { apiClient } from '@/lib/apiClient';
-import { getSocket, connectSocketWithAuth, registerStoreUpdater } from '@/lib/socket';
+import { registerStoreUpdater } from '@/lib/socket';
+import { getGameSocket, connectGameSocket } from '@/lib/game-socket';
 import { Zap, Trophy, Crown, Clock, Target, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 
 // ============================================================================
@@ -127,9 +128,13 @@ export default function GamePage() {
   const [hasRecoveredFromHttp, setHasRecoveredFromHttp] = useState(false);
 
   const hasRecoveredRef = useRef(false);
+  const joinedSessionRef = useRef<string | null>(null);
+  const lastJoinedTimeRef = useRef<number>(0);
 
   useEffect(() => {
     hasRecoveredRef.current = false;
+    joinedSessionRef.current = null;
+    lastJoinedTimeRef.current = 0;
   }, [sessionId]);
 
   useEffect(() => {
@@ -162,7 +167,7 @@ export default function GamePage() {
       useGameStore.setState(updater);
     });
 
-    const socket = getSocket();
+    const socket = getGameSocket();
     useGameStore.setState({ socket });
 
     const handleGameStarting = (data: { sessionId: string; countdown: number }) => {
@@ -293,9 +298,11 @@ export default function GamePage() {
       });
     };
 
-    const handleHostReconnected = () => {
-      console.log('[GamePage] host_reconnected');
-      toast.success('Host đã kết nối lại!');
+    const handleHostReconnected = (data: { sessionId: string; reason?: string; phase?: string }) => {
+      console.log('[GamePage] host_reconnected:', data);
+      // TEMPORARILY DISABLED: This event should only fire for actual host reload during game
+      // Not for first join after game_redirect
+      // toast.success('Host đã kết nối lại!');
     };
 
     const handleSessionClosed = (data: { sessionId: string; reason: 'HOST_EXITED' | 'GAME_FINISHED' | 'HOST_DISCONNECTED' }) => {
@@ -337,14 +344,29 @@ export default function GamePage() {
       }
     };
 
-    // Handle session_switched (simplified replay flow)
-    // CRITICAL: Use embedded state from event payload - NO HTTP fetch
-    // Players must join new session socket room immediately to receive countdown events
-    const handleSessionSwitched = (data: {
+    // Unified session transition handler — handles BOTH host and player play_again.
+    //
+    // TIMELINE:
+    //   1. host_play_again emitted → backend creates new session, updates host presence,
+    //      moves host socket to new room, then emits session_switched to OLD room.
+    //   2. session_switched received by ALL (host + players still in old room).
+    //   3. Handler stores embedded state in sessionStorage (playAgainState) and navigates
+    //      to /game/{newSessionId} via router.replace → page remounts.
+    //   4. Remounted useEffect sees valid playAgainState → skips HTTP fetch,
+    //      hydrates store with STARTING state, emits join_game.
+    //   5. question_start arrives after countdown → game proceeds.
+    //
+    // KEY PRINCIPLES:
+    //   - Does NOT update store directly (would be overwritten on remount anyway).
+    //   - Does NOT emit join_game here (handled after remount in useEffect).
+    //   - Guards against duplicate events using sessionStorage key + timestamp.
+    //   - session_started event listener is also kept for backward compat (if any old
+    //     socket connections receive it), but it's now unreachable from backend.
+    const handleSessionTransition = (data: {
       oldSessionId: string;
       newSessionId: string;
-      url: string;
-      timestamp: number;
+      url?: string;
+      timestamp?: number;
       state?: {
         status: string;
         currentQuestion: any;
@@ -355,60 +377,87 @@ export default function GamePage() {
         correctAnswerId: string | null;
         countdown: number;
       };
+      // session_started uses "sessionId" instead of "newSessionId"
+      sessionId?: string;
     }) => {
-      console.log('[GamePage] session_switched:', data);
+      // Normalise: support both session_started (sessionId) and session_switched (newSessionId)
+      const resolvedNewSessionId = data.newSessionId || (data as any).sessionId;
+      const resolvedOldSessionId = data.oldSessionId || sessionId;
+
+      console.log('[GamePage] session_transition:', { resolvedNewSessionId, resolvedOldSessionId, data });
 
       const state = useGameStore.getState();
 
-      // If we're not in the old session, ignore
-      if (state.sessionId !== data.oldSessionId) {
-        console.log('[GamePage] Ignoring session_switched - not in old session');
-        return;
+      // GUARD: Ignore if we're already handling this new session (duplicate event)
+      // Use sessionStorage to survive page remount attempts
+      const pendingKey = `playAgain:${resolvedNewSessionId}`;
+      const existingPending = sessionStorage.getItem(pendingKey);
+      if (existingPending) {
+        const pending = JSON.parse(existingPending);
+        const age = Date.now() - (pending._timestamp || 0);
+        if (age < 15000) {
+          console.log('[GamePage] Ignoring duplicate session_transition for', resolvedNewSessionId);
+          return;
+        }
       }
 
-      // Store pending session switch
-      useGameStore.setState({ _pendingSessionSwitch: { oldSessionId: data.oldSessionId, newSessionId: data.newSessionId } });
+      // Mark pending so page won't double-process
+      sessionStorage.setItem(pendingKey, JSON.stringify({
+        resolvedNewSessionId,
+        resolvedOldSessionId,
+        _timestamp: Date.now(),
+        _fromPlayAgain: true,
+      }));
 
       toast.info('Game mới đã bắt đầu! Đang tải...', { duration: 3000 });
 
-      // Use embedded state from event - no HTTP fetch needed
-      // This is instant and ensures players get state before countdown ticks arrive
-      useGameStore.setState({
-        sessionId: data.newSessionId,
-        gameStatus: (data.state?.status === 'STARTING' ? GameState.STARTING : (data.state?.status || GameState.WAITING)) as any,
-        currentQuestion: data.state?.currentQuestion || null,
-        questionIndex: data.state?.questionIndex ?? 0,
+      // Store embedded state for recovery after page remount.
+      // This is the SOLE source of truth after remount — HTTP fetch is SKIPPED.
+      sessionStorage.setItem('playAgainState', JSON.stringify({
+        sessionId: resolvedNewSessionId,
+        gameStatus: GameState.STARTING,
+        currentQuestion: null,
+        questionIndex: 0,
         totalQuestions: data.state?.totalQuestions ?? 0,
         leaderboard: data.state?.leaderboard || [],
-        correctAnswerId: data.state?.correctAnswerId || null,
+        correctAnswerId: null,
         hasAnswered: false,
         selectedAnswerId: null,
-        countdown: data.state?.countdown ?? 0,
-        _pendingSessionSwitch: null,
-      });
+        countdown: data.state?.countdown ?? 5,
+        isHost: state.isHost,
+        myPlayerId: state.myPlayerId,
+        myNickname: state.myNickname,
+        roomId: state.roomId,
+        _fromPlayAgain: true,
+        _timestamp: Date.now(),
+      }));
 
-      // Emit join_game to new session IMMEDIATELY
-      // This must happen before countdown ticks arrive via socket
-      if (state.socket?.connected) {
-        state.socket.emit('join_game', {
-          sessionId: data.newSessionId,
-          playerId: state.myPlayerId,
-          nickname: state.myNickname,
-        }, (joinRes: any) => {
-          if (joinRes.success) {
-            console.log('[GamePage] Rejoined new session after switch, isReconnect:', joinRes.isReconnect);
-          }
-        });
+      // Update sessionStorage identity keys for remount detection
+      if (state.isHost) {
+        sessionStorage.setItem('hostSessionId', resolvedNewSessionId);
+      } else {
+        sessionStorage.setItem('playerSessionId', resolvedNewSessionId);
       }
+
+      // Navigate to new session — router.replace triggers page remount
+      const redirectUrl = data.url || `/game/${resolvedNewSessionId}`;
+      console.log('[GamePage] Navigating to new session:', redirectUrl);
+      router.replace(redirectUrl);
     };
 
-    // Handle player connection status changes (simplified - no grace period)
+    // Alias for backward compat (backend used to emit session_started separately)
+    const handleSessionStarted = handleSessionTransition;
+    const handleSessionSwitched = handleSessionTransition;
+
+    // Handle player connection status changes
+    // NOTE: player_status only updates connection state, NO toasts for reload/reconnect
+    // Toast for join/leave comes from player_joined/player_left events only
     const handlePlayerStatus = (data: { playerId: string; nickname: string; connection: 'CONNECTED' | 'DISCONNECTED'; isHost: boolean; timestamp: number }) => {
       console.log('[GamePage] player_status:', data);
 
       const state = useGameStore.getState();
 
-      // Update player status in store
+      // Update player status in store - NO toasts
       state.setPlayerStatus({
         playerId: data.playerId,
         nickname: data.nickname,
@@ -417,19 +466,8 @@ export default function GamePage() {
         lastSeen: data.timestamp,
       });
 
-      if (data.connection === 'DISCONNECTED') {
-        if (data.playerId === state.myPlayerId) {
-          toast.warning('Bạn đã mất kết nối. Đang thử kết nối lại...', { duration: 5000 });
-        } else if (!data.isHost) {
-          toast.warning(`${data.nickname} đã mất kết nối`, { duration: 3000 });
-        }
-      } else {
-        if (data.playerId === state.myPlayerId) {
-          toast.success('Đã kết nối lại!');
-        } else if (!data.isHost) {
-          toast.success(`${data.nickname} đã quay lại!`);
-        }
-      }
+      // NO toasts here - connection status updates silently
+      // Toast for actual join/leave is handled by player_joined/player_left events
     };
 
     const handlePlayerLeft = (data: { playerId: string; nickname: string; timestamp: number }) => {
@@ -550,7 +588,8 @@ export default function GamePage() {
     socket.on('host_disconnected', handleHostDisconnected);
     socket.on('host_reconnected', handleHostReconnected);
     socket.on('session_closed', handleSessionClosed);
-    socket.on('session_switched', handleSessionSwitched);
+    socket.on('session_started', handleSessionTransition);
+    socket.on('session_switched', handleSessionTransition);
     socket.on('player_left', handlePlayerLeft);
     socket.on('player_status', handlePlayerStatus);
 
@@ -565,9 +604,10 @@ export default function GamePage() {
       socket.off('room_closed', handleRoomClosed);
       socket.off('host_disconnected', handleHostDisconnected);
       socket.off('host_reconnected', handleHostReconnected);
-      socket.off('session_closed', handleSessionClosed);
-      socket.off('session_switched', handleSessionSwitched);
-      socket.off('player_left', handlePlayerLeft);
+    socket.off('session_closed', handleSessionClosed);
+    socket.off('session_started', handleSessionTransition);
+    socket.off('session_switched', handleSessionTransition);
+    socket.off('player_left', handlePlayerLeft);
       socket.off('player_status', handlePlayerStatus);
     };
   }, [sessionId, router]);
@@ -609,6 +649,150 @@ export default function GamePage() {
     const isPlayer = !isHostFromStorage && !!storedPlayerId && !!storedNickname;
     console.log('[GamePage] Role: isHostFromStorage=', isHostFromStorage, 'isPlayer=', isPlayer);
 
+    // Check for redirect state FIRST (from previous redirect via router.replace)
+    const checkRedirectState = (): boolean => {
+      const redirectStateStr = sessionStorage.getItem('redirectState');
+      if (!redirectStateStr) return false;
+      
+      try {
+        const redirectState = JSON.parse(redirectStateStr);
+        if (redirectState.sessionId === sessionId && redirectState.reason === 'finished_redirect' &&
+            (Date.now() - redirectState._timestamp) < 30000) {
+          console.log('[GamePage] Using redirect state:', redirectState);
+          sessionStorage.removeItem('redirectState');
+          
+          // Hydrate from redirect state
+          useGameStore.setState({
+            sessionId,
+            roomId: redirectState.state?.roomId || storedRoomId,
+            gameStatus: GameState.FINISHED,
+            leaderboard: redirectState.state?.leaderboard || [],
+            currentQuestion: null,
+            _isRecovering: false,
+          });
+          
+          // Connect socket and emit join_game
+          connectGameSocket(accessToken ?? undefined);
+          const socket = getGameSocket();
+          
+          console.log('[GamePage] redirect recovery: socket.id=', socket.id, 'sessionId=', sessionId, 'reason=finished_redirect');
+          
+          if (socket.connected) {
+            useGameStore.setState({ socket });
+            socket.emit('join_game', { sessionId, playerId: storedPlayerId, nickname: storedNickname }, (joinRes: any) => {
+              console.log('[GamePage] join_game response:', joinRes);
+            });
+          } else {
+            socket.on('connect', () => {
+              useGameStore.setState({ socket });
+              socket.emit('join_game', { sessionId, playerId: storedPlayerId, nickname: storedNickname }, (joinRes: any) => {
+                console.log('[GamePage] join_game response:', joinRes);
+              });
+            });
+          }
+          
+          setIsJoining(false);
+          return true;
+        } else {
+          sessionStorage.removeItem('redirectState');
+          return false;
+        }
+      } catch (e) {
+        sessionStorage.removeItem('redirectState');
+        return false;
+      }
+    };
+
+    // If redirect state exists, skip normal HTTP fetch
+    if (checkRedirectState()) {
+      return;
+    }
+
+    // --- playAgainState recovery (skip HTTP fetch) ---
+    // After session_transition navigates via router.replace, the page remounts.
+    // The remounted useEffect checks for valid playAgainState and hydrates
+    // directly from sessionStorage without an HTTP fetch.
+    const storedPlayAgain = sessionStorage.getItem('playAgainState');
+    if (storedPlayAgain) {
+      try {
+        const playAgain = JSON.parse(storedPlayAgain);
+        const age = Date.now() - (playAgain._timestamp || 0);
+
+        // Only consume if it's for this sessionId and not stale (15s window)
+        if (playAgain.sessionId === sessionId && age < 15000) {
+          console.log('[GamePage] Recovering from playAgainState:', playAgain);
+
+          useGameStore.setState({
+            sessionId: playAgain.sessionId,
+            roomId: playAgain.roomId || null,
+            gameStatus: GameState.STARTING,
+            isHost: playAgain.isHost,
+            myPlayerId: playAgain.myPlayerId,
+            myNickname: playAgain.myNickname,
+            currentQuestion: null,
+            questionIndex: 0,
+            totalQuestions: playAgain.totalQuestions || 0,
+            leaderboard: playAgain.leaderboard || [],
+            correctAnswerId: null,
+            hasAnswered: false,
+            selectedAnswerId: null,
+            countdown: playAgain.countdown ?? 5,
+            _isRecovering: false,
+          });
+
+          // Connect socket and emit join_game (host → host_join_game, player → join_game)
+          connectGameSocket(accessToken ?? undefined);
+          const socket = getGameSocket();
+
+          if (socket.connected) {
+            useGameStore.setState({ socket });
+            if (playAgain.isHost) {
+              socket.emit('host_join_game', { sessionId, jwt: accessToken }, (res: any) => {
+                console.log('[GamePage] playAgainState: host_join_game response:', res);
+              });
+            } else {
+              socket.emit('join_game', {
+                sessionId,
+                playerId: playAgain.myPlayerId,
+                nickname: playAgain.myNickname,
+              }, (res: any) => {
+                console.log('[GamePage] playAgainState: join_game response:', res);
+              });
+            }
+          } else {
+            socket.on('connect', () => {
+              useGameStore.setState({ socket });
+              if (playAgain.isHost) {
+                socket.emit('host_join_game', { sessionId, jwt: accessToken }, (res: any) => {
+                  console.log('[GamePage] playAgainState: host_join_game response:', res);
+                });
+              } else {
+                socket.emit('join_game', {
+                  sessionId,
+                  playerId: playAgain.myPlayerId,
+                  nickname: playAgain.myNickname,
+                }, (res: any) => {
+                  console.log('[GamePage] playAgainState: join_game response:', res);
+                });
+              }
+            });
+          }
+
+          // Clean up after consuming
+          sessionStorage.removeItem('playAgainState');
+
+          setIsJoining(false);
+          return;
+        } else {
+          // Stale or wrong session — clear it
+          sessionStorage.removeItem('playAgainState');
+        }
+      } catch (e) {
+        sessionStorage.removeItem('playAgainState');
+      }
+    }
+    // --- end playAgainState recovery ---
+
     let httpData: any = null;
 
     const recoverState = async () => {
@@ -623,8 +807,22 @@ export default function GamePage() {
         // This prevents flash of old FINISHED state on page reload after host_play_again
         if (httpData.status === 'FINISHED' && httpData.currentSessionId) {
           console.log(`[GamePage] Session finished, redirecting to new session ${httpData.currentSessionId}`);
+          
+          // Store redirect state with full game state for SPA navigation
+          sessionStorage.setItem('redirectState', JSON.stringify({
+            sessionId: httpData.currentSessionId,
+            reason: 'finished_redirect',
+            state: {
+              status: httpData.status,
+              roomId: httpData.roomId,
+              leaderboard: httpData.leaderboard || [],
+            },
+            _timestamp: Date.now(),
+          }));
           sessionStorage.setItem('playerSessionId', httpData.currentSessionId);
-          window.location.href = `/game/${httpData.currentSessionId}`;
+          
+          // Use router.replace for SPA navigation
+          router.replace(`/game/${httpData.currentSessionId}`);
           return; // Don't set any state - we're redirecting
         }
 
@@ -744,7 +942,11 @@ export default function GamePage() {
           console.log('[GamePage] host_join_game response:', response);
           
           if (response.success && response.state) {
-            console.log('[GamePage] host_join_game success, isActualHost:', response.isActualHost);
+            console.log('[GamePage] host_join_game success', {
+              isActualHost: response.isActualHost,
+              isReconnect: response.isReconnect,
+              rejoinReason: response.rejoinReason,
+            });
             
             const actualIsHost = response.isActualHost;
             const correctAnswerId = response.state.status === 'QUESTION_RESULT' 
@@ -820,11 +1022,17 @@ export default function GamePage() {
           if (response.needsRedirect && response.redirectToSession) {
             console.log(`[GamePage] Session ${sessionId} is finished, redirecting to new session ${response.redirectToSession}`);
             
-            // Update sessionStorage with new session ID
+            // Store redirect state with full game state for SPA navigation
+            sessionStorage.setItem('redirectState', JSON.stringify({
+              sessionId: response.redirectToSession,
+              reason: 'finished_redirect',
+              state: response.state,
+              _timestamp: Date.now(),
+            }));
             sessionStorage.setItem('playerSessionId', response.redirectToSession);
             
-            // Redirect to new session
-            window.location.href = `/game/${response.redirectToSession}`;
+            // Use router.replace for SPA navigation
+            router.replace(`/game/${response.redirectToSession}`);
             return;
           }
           
@@ -877,12 +1085,12 @@ export default function GamePage() {
     };
 
     const initGame = async () => {
-      const socket = getSocket();
+      const socket = getGameSocket();
       
       if (!socket.connected) {
         console.log('[GamePage] Connecting socket with auth token...');
         if (accessToken) {
-          connectSocketWithAuth(accessToken);
+          connectGameSocket(accessToken ?? undefined);
         } else {
           socket.connect();
         }
@@ -942,18 +1150,20 @@ export default function GamePage() {
     });
   };
 
-  const handlePlayAgain = async () => {
-    const { sessionId: sid, roomId: rid, playAgain } = useGameStore.getState();
-    if (!sid || !rid) return;
-    try {
-      const newSessionId = await playAgain(sid, rid);
-      if (newSessionId) {
-        sessionStorage.setItem('hostSessionId', newSessionId);
-        router.push(`/game/${newSessionId}`);
+  const handlePlayAgain = () => {
+    const gameStore = useGameStore.getState();
+    const { sessionId: sid, roomId: rid, socket } = gameStore;
+    if (!sid || !rid || !socket) return;
+    
+    // Emit play_again — backend will emit session_switched to this socket too.
+    // The session_switched handler stores state + navigates via router.replace.
+    socket.emit('host_play_again', { sessionId: sid, roomId: rid }, (response: any) => {
+      if (!response.success) {
+        toast.error(response.error || 'Không thể chơi lại');
       }
-    } catch (error) {
-      console.error('[GamePage] play_again error:', error);
-    }
+      // No store update here — session_transition handler handles everything.
+      // If response has new sessionId it's just for logging/debug.
+    });
   };
 
   const handleLeaveRoom = () => {

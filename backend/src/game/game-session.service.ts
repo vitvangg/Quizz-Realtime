@@ -10,6 +10,7 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { RedisService } from 'src/redis/redis.service';
 import { PlayerCacheService } from './player-cache.service';
 import { AnswerQueueService, QueuedAnswer } from './answer-queue.service';
+import { GAME_CONSTANTS } from 'src/common/constants';
 
 export enum GameState {
   WAITING = 'WAITING',
@@ -153,7 +154,7 @@ export class GameSessionService {
       `game:${session.id}`,
       JSON.stringify(gameCache),
       'EX',
-      7200,
+      GAME_CONSTANTS.GAME_CACHE_TTL,
     );
 
     // Add regular players to leaderboard (their player.id values)
@@ -391,7 +392,7 @@ export class GameSessionService {
       `game:${sessionId}`,
       JSON.stringify(newCache),
       'EX',
-      7200,
+      GAME_CONSTANTS.GAME_CACHE_TTL,
     );
 
     const questionData = {
@@ -748,7 +749,7 @@ export class GameSessionService {
       `game:timer_meta:${sessionId}`,
       JSON.stringify({ totalMs, scheduledAt, timerVersion }),
       'EX',
-      7200,
+      GAME_CONSTANTS.GAME_CACHE_TTL,
     );
 
     this.logger.log(`Timer scheduled for session ${sessionId}: ${timeLimit}s (version=${timerVersion})`);
@@ -774,7 +775,7 @@ export class GameSessionService {
         `game:timer_pause:${sessionId}`,
         String(remaining),
         'EX',
-        86400,
+        GAME_CONSTANTS.PLAYER_PRESENCE_TTL,
       );
 
       this.logger.warn(`[FREEZE] Timer paused for ${sessionId}, remaining: ${(remaining / 1000).toFixed(1)}s`);
@@ -822,7 +823,7 @@ export class GameSessionService {
         `game:${sessionId}`,
         JSON.stringify(updated),
         'EX',
-        7200,
+        GAME_CONSTANTS.GAME_CACHE_TTL,
       );
     }
   }
@@ -988,8 +989,8 @@ export class GameSessionService {
 
         // CRITICAL: Cap timeTaken to prevent negative bonus from network issues
         const cappedTimeTaken = Math.min(timeTaken, maxTime);
-        const timeBonus = Math.max(0, Math.floor((maxTime - cappedTimeTaken) / 10));
-        scoreEarned = 1000 + timeBonus;
+        const timeBonus = Math.max(0, Math.floor((maxTime - cappedTimeTaken) / GAME_CONSTANTS.TIME_BONUS_DIVISOR));
+        scoreEarned = GAME_CONSTANTS.BASE_SCORE + timeBonus;
 
         // Update Redis leaderboard immediately (fast path)
         await this.updateScore(sessionId, playerId, scoreEarned);

@@ -7,6 +7,10 @@ import { roomService } from '@/services/room.service';
 import { normalizePlayerJoinedEvent, normalizePlayerLeftEvent } from '@/lib/socket-normalizer';
 import axios from 'axios';
 
+// Guard to prevent duplicate listener registration
+// This is shared across all store instances (module-level singleton)
+let listenersRegistered = false;
+
 interface RoomState {
   socket: Socket | null;
   isConnected: boolean;
@@ -22,7 +26,7 @@ interface RoomState {
   removeAllListeners: () => void;
   createRoom: (quizId: string) => Promise<Room>;
   joinRoom: (pin: string, nickname: string) => Promise<void>;
-  joinRoomById: (roomId: string, nickname: string, jwt?: string) => Promise<void>;
+  joinRoomById: (roomId: string, nickname: string, jwt?: string, playerId?: string) => Promise<void>;
   leaveRoom: () => Promise<void>;
   getRoomState: (roomId: string) => Promise<void>;
   setCurrentRoom: (room: Room | null) => void;
@@ -53,9 +57,11 @@ export const useRoomStore = create<RoomState>((set, get) => ({
 
   connectSocket: () => {
     const { socket } = get();
-    if (socket) {
-      console.log('[RoomStore] connectSocket: socket already exists, skipping listener registration');
-      return; // already initialized with shared socket
+    
+    // Guard: prevent duplicate listener registration
+    if (socket || listenersRegistered) {
+      console.log('[RoomStore] connectSocket: skipping, socket exists:', !!socket, 'listenersRegistered:', listenersRegistered);
+      return;
     }
 
     const newSocket = getLobbySocket();
@@ -164,6 +170,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
 
     registerListener('player_left', (data: any) => {
       console.log('[Socket] player_left received:', JSON.stringify(data));
+      console.log('[Socket] player_left listener count:', newSocket.listeners('player_left').length);
       
       // Normalize payload using shared normalizer
       const player = normalizePlayerLeftEvent(data);
@@ -204,6 +211,12 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       console.log('[Socket] host_left received:', JSON.stringify(data));
     });
 
+    registerListener('player_status', (data: { playerId: string; nickname: string; connection: string; isHost: boolean; timestamp: number }) => {
+      console.log('[Socket] player_status received:', JSON.stringify(data));
+      // Update player connection status in UI if needed
+      // This event is for status tracking, not for adding/removing players from list
+    });
+
     registerListener('room_left', (data: { roomId: string; message: string; isHost?: boolean }) => {
       console.log('[Socket] room_left received:', JSON.stringify(data));
     });
@@ -215,11 +228,17 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     });
 
     console.log('[RoomStore] connectSocket: registered', listenerCount, 'listeners, socket.id:', newSocket.id);
+    
+    // Mark listeners as registered to prevent duplicate registration
+    listenersRegistered = true;
+    
     set({ socket: newSocket });
   },
 
   disconnectSocket: () => {
     // Socket is shared — never disconnect it here.
+    // Reset listener guard so next connectSocket() can re-register
+    listenersRegistered = false;
     set({ socket: null, isConnected: false });
   },
 
@@ -239,6 +258,9 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       
       console.log('[RoomStore] Removed all socket listeners');
     }
+    
+    // Reset guard so next connectSocket() can re-register
+    listenersRegistered = false;
     set({ socket: null });
   },
 
@@ -358,7 +380,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     });
   },
 
-  joinRoomById: async (roomId: string, nickname: string, jwt?: string) => {
+  joinRoomById: async (roomId: string, nickname: string, jwt?: string, playerId?: string) => {
     // Always call connectSocket — it no-ops if socket already exists.
     const { connectSocket } = get();
 
@@ -387,13 +409,21 @@ export const useRoomStore = create<RoomState>((set, get) => ({
         return;
       }
 
-      currentSocket.emit('join_by_id', { roomId, nickname, jwt }, (response: any) => {
+      currentSocket.emit('join_by_id', { roomId, nickname, jwt, playerId }, (response: any) => {
         if (response.success) {
           if (response.playerId) {
             sessionStorage.setItem('playerId', response.playerId);
             sessionStorage.setItem('playerNickname', nickname);
             sessionStorage.setItem('currentRoomId', roomId);
-            sessionStorage.setItem('isHost', 'false');
+            // Host flag set by server in room_joined event
+            if (response.isHost) {
+              sessionStorage.setItem('isHost', 'true');
+            }
+          } else if (playerId) {
+            // Existing player reconnecting
+            sessionStorage.setItem('playerId', playerId);
+            sessionStorage.setItem('playerNickname', nickname);
+            sessionStorage.setItem('currentRoomId', roomId);
           }
           resolve();
         } else {

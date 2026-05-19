@@ -8,7 +8,7 @@ import {
   MessageBody,
   ConnectedSocket,
 } from '@nestjs/websockets';
-import { OnModuleDestroy, Logger } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
 import { OnEvent } from '@nestjs/event-emitter';
@@ -17,11 +17,12 @@ import { PlayerPresenceService, ConnectionStatus } from './player-presence.servi
 import { RoomService } from '../room/room.service';
 import { RoomGateway } from '../room/room.gateway';
 import { RedisService } from '../redis/redis.service';
-import { setupRedisAdapter, teardownRedisAdapter } from './redis-adapter.setup';
+import { setupRedisAdapter } from './redis-adapter.setup';
 import {
   PlayerJoinedEvent,
   PlayerLeftEvent,
 } from '../common/socket/socket-events.interface';
+import { GAME_CONSTANTS } from '../common/constants';
 
 /**
  * Simplified Player Identity - socket only stores minimal data
@@ -43,7 +44,7 @@ interface PlayerIdentity {
   },
   namespace: '/game',
 })
-export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit, OnModuleDestroy {
+export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit {
   @WebSocketServer()
   server: Server;
 
@@ -68,6 +69,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   afterInit(server: Server) {
     this.logger.log('[GameGateway] Initialized (Stateless Socket Architecture)');
 
+    // Setup Redis Adapter once (idempotent - safe to call from multiple gateways)
     setupRedisAdapter(server, {
       host: process.env.REDIS_HOST || 'localhost',
       port: parseInt(process.env.REDIS_PORT || '6379'),
@@ -77,9 +79,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     });
   }
 
-  async onModuleDestroy() {
-    await teardownRedisAdapter();
-  }
+  // NOTE: onModuleDestroy intentionally removed
+  // Redis Adapter teardown is handled at app-level shutdown if needed
+  // This ensures no gateway prematurely closes connections used by others
 
   getConnectionCount(): number {
     return this.socketMap.size;
@@ -231,9 +233,46 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     };
   }
 
-  private verifyHost(client: Socket): PlayerIdentity | null {
+  /**
+   * Verify if the client is the actual host for the session.
+   * Checks BOTH socketMap (for isHost flag) AND Redis (authoritative state).
+   *
+   * This prevents:
+   * - Socket replay attacks where someone reuses old socket data
+   * - Cases where socketMap was cleared/restored incorrectly
+   * - Multi-instance race conditions
+   */
+  private async verifyHost(client: Socket, sessionId: string): Promise<PlayerIdentity | null> {
     const identity = this.socketMap.get(client.id);
-    if (!identity?.isHost) return null;
+    
+    this.logger.log(`[verifyHost] Checking host for session=${sessionId}, socket=${client.id}, identity=${JSON.stringify(identity)}`);
+    
+    if (!identity?.isHost) {
+      this.logger.warn(`[verifyHost] No host identity found for socket ${client.id}`);
+      return null;
+    }
+
+    // Verify against Redis authoritative state
+    const hostId = await this.presenceService.getHostId(sessionId);
+    this.logger.log(`[verifyHost] Redis hostId for session=${sessionId}: ${hostId}`);
+    
+    if (!hostId) {
+      this.logger.warn(`[verifyHost] No host found in Redis for session ${sessionId}`);
+      return null;
+    }
+
+    // Compare playerId (which is in format host_{userId}) with Redis hostId
+    // NOTE: identity.playerId is "host_{userId}" format, identity.userId is just userId
+    const clientPlayerId = identity.playerId;
+    
+    this.logger.log(`[verifyHost] Comparing clientPlayerId=${clientPlayerId} with hostId=${hostId}`);
+    
+    if (clientPlayerId !== hostId) {
+      this.logger.warn(`[verifyHost] Player ${clientPlayerId} is not the host (actual host: ${hostId})`);
+      return null;
+    }
+
+    this.logger.log(`[verifyHost] Host verification passed for ${clientPlayerId}`);
     return identity;
   }
 
@@ -278,18 +317,44 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         return { success: false, error: 'Only the host can join as host' };
       }
 
-      // Attach to session via Redis (stateless approach)
-      await this.presenceService.attachPlayer({
-        sessionId: payload.sessionId,
-        playerId: `host_${hostId}`,
-        nickname: 'Host',
-        socketId: client.id,
-        isHost: true,
-      });
+      const hostPlayerId = `host_${hostId}`;
+      
+      // Check if host already exists in session (reconnect/refresh case)
+      // This happens after host_play_again where host was already attached
+      const existingPresence = await this.presenceService.getPlayerPresence(payload.sessionId, hostPlayerId);
+      const isRejoin = !!existingPresence;
+      
+      let rejoinReason: string | undefined;
+      let isRefresh = false;
+
+      if (isRejoin) {
+        if (existingPresence.socketId === client.id) {
+          // Same socket - this is a session refresh (e.g., page re-render after play_again)
+          isRefresh = true;
+          rejoinReason = 'session_refresh';
+          this.logger.log(`[GameGateway] Host session refresh (same socket) for session=${payload.sessionId}`);
+        } else {
+          // Different socket - this is a reconnect (host disconnected and reconnected)
+          rejoinReason = 'reconnect';
+          this.logger.log(`[GameGateway] Host reconnect detected, updating socketId: ${existingPresence.socketId} -> ${client.id}`);
+          await this.presenceService.updateSocketId(payload.sessionId, hostPlayerId, client.id);
+        }
+      } else {
+        // First time joining - attach as new host
+        this.logger.log(`[GameGateway] Host first join, attaching to session=${payload.sessionId}`);
+        
+        await this.presenceService.attachPlayer({
+          sessionId: payload.sessionId,
+          playerId: hostPlayerId,
+          nickname: 'Host',
+          socketId: client.id,
+          isHost: true,
+        });
+      }
 
       const identity: PlayerIdentity = {
         userId: hostId,
-        playerId: `host_${hostId}`,
+        playerId: hostPlayerId,
         roomId: fullState.roomId,
         sessionId: payload.sessionId,
         nickname: 'Host',
@@ -297,15 +362,17 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       };
       this.registerSocket(client, identity);
 
-      // Notify players that host is back (if was disconnected)
-      this.server.to(payload.sessionId).emit('host_reconnected', { sessionId: payload.sessionId });
-
-      this.logger.log(`[GameGateway] Host registered for session=${payload.sessionId}, userId=${hostId}`);
+      // NOTE: Do NOT emit host_reconnected here!
+      // host_join_game is called during game redirect (first join), NOT during actual host reconnect.
+      // Real host reconnect detection happens in handleDisconnect/handleConnection lifecycle.
+      
+      this.logger.log(`[GameGateway] Host registered for session=${payload.sessionId}, userId=${hostId}, isRejoin=${isRejoin}, reason=${rejoinReason}`);
 
       return {
         success: true,
         isActualHost,
-        isReconnect: false,
+        isReconnect: isRejoin && !isRefresh,
+        rejoinReason,
         state: this.buildReloadResponse(fullState),
       };
     } catch (error) {
@@ -388,6 +455,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       this.server.to(payload.roomId).emit('game_redirect', { url: `/game/${result.session.id}`, sessionId: result.session.id });
       this.roomGateway.server.to(payload.roomId).emit('game_redirect', { url: `/game/${result.session.id}`, sessionId: result.session.id });
 
+      // Buffer time for players to navigate from lobby to game and join socket
+      await this.delay(GAME_CONSTANTS.GAME_REDIRECT_BUFFER_MS);
+
       const questionEndCallback = (data: any) => this.handleQuestionEnd(result.session.id, data);
       this.sessionCallbacks.set(result.session.id, questionEndCallback);
       this.gameSessionService.scheduleQuestionEnd(result.session.id, result.firstQuestion.timeLimit, questionEndCallback);
@@ -402,9 +472,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         questionVersion: 1,
       };
 
+      // Only emit to /game namespace - players must be on game page to receive
       this.server.to(result.session.id).emit('question_start', questionStartPayload);
-      // Also emit to lobby namespace in case redirect hasn't completed yet
-      this.roomGateway.server.to(payload.roomId).emit('question_start', questionStartPayload);
 
       return { success: true, sessionId: result.session.id };
     } catch (error) {
@@ -419,7 +488,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     @MessageBody() payload: { sessionId: string },
   ) {
     try {
-      const identity = this.verifyHost(client);
+      const identity = await this.verifyHost(client, payload.sessionId);
       if (!identity) return { success: false, error: 'Only host can advance question' };
 
       if (identity.sessionId !== payload.sessionId) {
@@ -472,7 +541,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     @MessageBody() payload: { sessionId: string },
   ) {
     try {
-      const identity = this.verifyHost(client);
+      const identity = await this.verifyHost(client, payload.sessionId);
       if (!identity) return { success: false, error: 'Only host can end game' };
 
       this.gameSessionService.cancelTimer(payload.sessionId);
@@ -494,7 +563,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     @MessageBody() payload: { sessionId: string; roomId: string },
   ) {
     try {
-      const identity = this.verifyHost(client);
+      const identity = await this.verifyHost(client, payload.sessionId);
       if (!identity) return { success: false, error: 'Only host can close room' };
 
       await this.cleanupSession(payload.sessionId, 'HOST_EXITED');
@@ -511,7 +580,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     @MessageBody() payload: { sessionId: string; roomId: string },
   ) {
     try {
-      const identity = this.verifyHost(client);
+      const identity = await this.verifyHost(client, payload.sessionId);
       if (!identity) return { success: false, error: 'Only host can restart game' };
 
       const hostId = identity.userId || identity.playerId;
@@ -544,38 +613,21 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       });
 
       identity.sessionId = result.session.id;
-      // CRITICAL: Leave old session room BEFORE emitting session_switched
-      // This prevents the host's own socket from receiving session_switched
-      // which would cause a redundant navigation in the host's browser
       client.leave(oldSessionId);
       client.join(result.session.id);
       this.registerSocket(client, identity);
 
-      // NOW emit session_switched to old session (players only - host has already left)
-      // Include full game state so players can update UI immediately without HTTP fetch
-      // This is critical: players need this state BEFORE they join the new socket room
-      // so they don't miss the countdown/question_start events
+      // Emit session_switched to OLD session room.
+      // BOTH host and players are still in the old room at this point,
+      // so a single event to oldSessionId covers everyone.
+      // Hosts receive it too (their socket hasn't left yet), but since
+      // session_switched sets gameStatus=STARTING in sessionStorage and
+      // the remount useEffect skips HTTP fetch when playAgainState is valid,
+      // the host ends up in the correct STARTING state on the new session URL.
       this.server.to(oldSessionId).emit('session_switched', {
         oldSessionId,
         newSessionId: result.session.id,
         url: `/game/${result.session.id}`,
-        timestamp: Date.now(),
-        // Include full game state to avoid HTTP fetch delay
-        state: {
-          status: 'STARTING',
-          currentQuestion: null,
-          questionIndex: 0,
-          totalQuestions: result.totalQuestions,
-          leaderboard: [],
-          remainingTime: result.firstQuestion.timeLimit,
-          correctAnswerId: null,
-          countdown: 5,
-        },
-      });
-
-      // Also emit to new session for players who joined directly
-      this.server.to(result.session.id).emit('session_started', {
-        sessionId: result.session.id,
         timestamp: Date.now(),
         state: {
           status: 'STARTING',
@@ -606,6 +658,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         this.roomGateway.server.to(payload.roomId).emit('countdown_tick', { remaining: i - 1 });
       }
 
+      // Buffer time for players to navigate and join the new game session
+      await this.delay(GAME_CONSTANTS.GAME_REDIRECT_BUFFER_MS);
+
       const questionEndCallback = (data: any) => this.handleQuestionEnd(result.session.id, data);
       this.sessionCallbacks.set(result.session.id, questionEndCallback);
       this.gameSessionService.scheduleQuestionEnd(result.session.id, result.firstQuestion.timeLimit, questionEndCallback);
@@ -622,9 +677,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         questionVersion: 1,
       };
 
+      // Only emit to /game namespace - players must be on game page to receive
       this.server.to(result.session.id).emit('question_start', questionStartPayload);
-      // Also emit to lobby namespace in case redirect hasn't completed yet
-      this.roomGateway.server.to(payload.roomId).emit('question_start', questionStartPayload);
 
       return { success: true, sessionId: result.session.id };
     } catch (error) {

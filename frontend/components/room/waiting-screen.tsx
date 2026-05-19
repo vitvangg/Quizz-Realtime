@@ -64,10 +64,6 @@ export function WaitingScreen({ roomId }: WaitingScreenProps) {
       setTimeout(() => router.push('/'), 2000);
     };
 
-    const handlePlayerLeft = (data: { nickname: string }) => {
-      toast.info(`${data.nickname} đã rời phòng`);
-    };
-
     const handleGameRedirect = (data: { url: string; sessionId: string }) => {
       console.log('[WaitingScreen] game_redirect received:', data);
       // Set pendingRedirect to trigger redirect effect
@@ -76,13 +72,13 @@ export function WaitingScreen({ roomId }: WaitingScreenProps) {
 
     roomSocket.on('room_left', handleRoomLeft);
     roomSocket.on('host_left', handleHostLeft);
-    roomSocket.on('player_left', handlePlayerLeft);
+    // NOTE: player_left toast is handled by room.store.ts
+    // DO NOT add duplicate listener here
     roomSocket.on('game_redirect', handleGameRedirect);
 
     return () => {
       roomSocket.off('room_left', handleRoomLeft);
       roomSocket.off('host_left', handleHostLeft);
-      roomSocket.off('player_left', handlePlayerLeft);
       roomSocket.off('game_redirect', handleGameRedirect);
     };
   }, [roomSocket, router, resetRoomStore]);
