@@ -7,9 +7,7 @@ import { useRouter } from "next/navigation";
 import {
   LogOut,
   User,
-  LayoutDashboard,
-  PlusCircle,
-  Trophy,
+
   Gamepad2
 } from "lucide-react";
 
@@ -38,21 +36,6 @@ export default function QuizLayout({
               </div>
               <span className="text-xl font-black tracking-tighter text-primary">QUIZZY</span>
             </Link>
-
-            <nav className="hidden md:flex items-center gap-1">
-              <Button variant="ghost" asChild className="gap-2 font-medium">
-                <Link href="/quiz">
-                  <LayoutDashboard className="h-4 w-4" />
-                  Bộ sưu tập
-                </Link>
-              </Button>
-              <Button variant="ghost" asChild className="gap-2 font-medium">
-                <Link href="/quiz/build">
-                  <PlusCircle className="h-4 w-4" />
-                  Tạo mới
-                </Link>
-              </Button>
-            </nav>
           </div>
 
           <div className="flex items-center gap-3">
@@ -62,7 +45,7 @@ export default function QuizLayout({
                   <p className="text-sm font-bold leading-none">{user.email?.split('@')[0]}</p>
                   <p className="text-[10px] text-muted-foreground uppercase font-black">Người tạo</p>
                 </div>
-                
+
                 <div className="flex items-center gap-2">
                   <Button
                     variant="ghost"

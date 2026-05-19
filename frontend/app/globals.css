@@ -134,9 +134,11 @@
   * {
     @apply border-border outline-ring/50;
   }
+
   body {
     @apply bg-background text-foreground;
   }
+
   html {
     @apply font-sans;
   }
@@ -144,83 +146,142 @@
 
 /* Neo-Brutalism Utility Classes */
 @layer utilities {
+
   /* Hard Shadows */
   .shadow-brutal {
     box-shadow: 4px 4px 0px 0px var(--black);
   }
+
   .shadow-brutal-sm {
     box-shadow: 2px 2px 0px 0px var(--black);
   }
+
   .shadow-brutal-lg {
     box-shadow: 6px 6px 0px 0px var(--black);
   }
+
   .shadow-brutal-xl {
     box-shadow: 8px 8px 0px 0px var(--black);
   }
-  
+
   /* Neo-Brutalism Border */
   .border-brutal {
     border-width: 3px;
     border-style: solid;
     border-color: var(--black);
   }
+
   .border-brutal-thick {
     border-width: 4px;
     border-style: solid;
     border-color: var(--black);
   }
-  
+
   /* Hover Effects */
   .hover-brutal:hover {
     transform: translate(2px, 2px);
     box-shadow: 2px 2px 0px 0px var(--black);
   }
-  
+
   /* Button Press Effect */
   .btn-press:active {
     transform: translate(4px, 4px);
     box-shadow: none !important;
   }
-  
+
   /* Playful Colors */
-  .bg-neon-yellow { background-color: #FEFD2E; }
-  .bg-neon-pink { background-color: #FF6B9D; }
-  .bg-neon-blue { background-color: #4ECDC4; }
-  .bg-neon-green { background-color: #95E616; }
-  .bg-neon-orange { background-color: #FF9F1C; }
-  .bg-neon-purple { background-color: #9B5DE5; }
-  
-  .text-neon-yellow { color: #FEFD2E; }
-  .text-neon-pink { color: #FF6B9D; }
-  .text-neon-blue { color: #4ECDC4; }
-  .text-neon-green { color: #95E616; }
-  .text-neon-orange { color: #FF9F1C; }
-  .text-neon-purple { color: #9B5DE5; }
-  
-  .border-neon-yellow { border-color: #FEFD2E; }
-  .border-neon-pink { border-color: #FF6B9D; }
-  .border-neon-blue { border-color: #4ECDC4; }
-  .border-neon-green { border-color: #95E616; }
-  .border-neon-orange { border-color: #FF9F1C; }
-  .border-neon-purple { border-color: #9B5DE5; }
-  
+  .bg-neon-yellow {
+    background-color: #FEFD2E;
+  }
+
+  .bg-neon-pink {
+    background-color: #FF6B9D;
+  }
+
+  .bg-neon-blue {
+    background-color: #4ECDC4;
+  }
+
+  .bg-neon-green {
+    background-color: #95E616;
+  }
+
+  .bg-neon-orange {
+    background-color: #FF9F1C;
+  }
+
+  .bg-neon-purple {
+    background-color: #9B5DE5;
+  }
+
+  .text-neon-yellow {
+    color: #FEFD2E;
+  }
+
+  .text-neon-pink {
+    color: #FF6B9D;
+  }
+
+  .text-neon-blue {
+    color: #4ECDC4;
+  }
+
+  .text-neon-green {
+    color: #95E616;
+  }
+
+  .text-neon-orange {
+    color: #FF9F1C;
+  }
+
+  .text-neon-purple {
+    color: #9B5DE5;
+  }
+
+  .border-neon-yellow {
+    border-color: #FEFD2E;
+  }
+
+  .border-neon-pink {
+    border-color: #FF6B9D;
+  }
+
+  .border-neon-blue {
+    border-color: #4ECDC4;
+  }
+
+  .border-neon-green {
+    border-color: #95E616;
+  }
+
+  .border-neon-orange {
+    border-color: #FF9F1C;
+  }
+
+  .border-neon-purple {
+    border-color: #9B5DE5;
+  }
+
   /* Selection */
   ::selection {
     background-color: #FF6B9D;
     color: #FFFFFF;
   }
-  
+
   /* Scrollbar Styling */
   ::-webkit-scrollbar {
     width: 12px;
   }
+
   ::-webkit-scrollbar-track {
     background: #FEFD2E;
   }
+
   ::-webkit-scrollbar-thumb {
     background: #000000;
     border: 2px solid #FEFD2E;
   }
+
   ::-webkit-scrollbar-thumb:hover {
     background: #333333;
   }
@@ -232,6 +293,7 @@
     opacity: 0;
     transform: translateY(20px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -244,9 +306,12 @@
 
 /* Animation for bounce */
 @keyframes bounce-slight {
-  0%, 100% {
+
+  0%,
+  100% {
     transform: translateY(0);
   }
+
   50% {
     transform: translateY(-5px);
   }
