@@ -28,6 +28,7 @@ import { RedisModule } from './redis/redis.module';
 import { DashboardModule } from './admin/system/dashboard/dashboard.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { CloudinaryModule } from './common/cloudinary/cloudinary.module';
+import { AiModule } from './ai/ai.module';
 
 @Module({
   imports: [
@@ -59,10 +60,11 @@ import { CloudinaryModule } from './common/cloudinary/cloudinary.module';
     RedisModule,
     DashboardModule,
     CloudinaryModule,
+    AiModule,
   ],
   controllers: [AppController],
   providers: [
-    AppService, 
+    AppService,
     PrismaService,
     {
       provide: APP_INTERCEPTOR,
@@ -70,4 +72,4 @@ import { CloudinaryModule } from './common/cloudinary/cloudinary.module';
     }
   ],
 })
-export class AppModule {}
+export class AppModule { }
