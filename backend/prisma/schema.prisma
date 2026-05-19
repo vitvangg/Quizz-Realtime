@@ -36,6 +36,7 @@ model User {
   status       String   @default("ACTIVE") // ACTIVE, BANNED
   fullName     String?   @map("full_name")
   avatar       String?
+  avatarId     String?  @map("avatar_id")
   phoneNumber  String?  @map("phone_number")
   bio          String?
   createdAt    DateTime @default(now()) @map("created_at")
@@ -122,14 +123,20 @@ model Question {
   id         String @id @default(uuid())
   quizId     String @map("quiz_id")
   content    String
+  imageUrl   String? @map("image_url")
+  imageId    String? @map("image_id")
   timeLimit  Int    @map("time_limit")
   orderIndex Int    @map("order_index")
+
+  deletedAt DateTime? @map("deleted_at")
 
   quiz          Quiz           @relation(fields: [quizId], references: [id], onDelete: Cascade)
   answers       Answer[]
   playerAnswers PlayerAnswer[]
 
   @@index([quizId])
+  @@index([deletedAt])
+
   @@map("questions")
 }
 
@@ -139,10 +146,14 @@ model Answer {
   content    String
   isCorrect  Boolean @map("is_correct")
 
+  deletedAt DateTime? @map("deleted_at")
+
   question      Question       @relation(fields: [questionId], references: [id], onDelete: Cascade)
   playerAnswers PlayerAnswer[]
 
   @@index([questionId])
+  @@index([deletedAt])
+
   @@map("answers")
 }
 
@@ -155,6 +166,7 @@ model Room {
   quizId    String     @map("quiz_id")
   hostId    String     @map("host_id")
   status    RoomStatus @default(WAITING)
+  currentSessionId String? @map("current_session_id") // CRITICAL: Track active session for replay redirect
   createdAt DateTime   @default(now()) @map("created_at")
 
   quiz     Quiz          @relation(fields: [quizId], references: [id])

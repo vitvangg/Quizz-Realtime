@@ -6,14 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
-import { 
-  PlusCircle, 
-  Save, 
-  ArrowLeft, 
-  LayoutGrid, 
+import {
+  PlusCircle,
+  Save,
+  ArrowLeft,
+  LayoutGrid,
   Loader2,
   Info,
-  FileText 
+  FileText
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -35,6 +35,10 @@ interface Question {
   id: string;
   content: string;
   timeLimit: number;
+  imageUrl?: string;
+  imageId?: string;
+  pendingFile?: File;
+  previewUrl?: string;
   answers: Answer[];
 }
 
@@ -66,6 +70,8 @@ export default function EditQuizPage() {
           id: q.id,
           content: q.content,
           timeLimit: q.timeLimit,
+          imageUrl: q.imageUrl,
+          imageId: q.imageId,
           answers: q.answers.map((a: any) => ({
             id: a.id,
             content: a.content,
@@ -116,15 +122,35 @@ export default function EditQuizPage() {
     setQuestions(questions.filter((q) => q.id !== id));
   };
 
-  const updateQuestion = (id: string, field: keyof Question, value: any) => {
-    setQuestions(
-      questions.map((q) => (q.id === id ? { ...q, [field]: value } : q))
+  const updateQuestion = (
+    id: string,
+    field: keyof Question,
+    value: any
+  ) => {
+    // 🔥 Nếu sửa timeLimit của câu đầu tiên
+    // thì apply cho toàn bộ câu hỏi
+    if (field === "timeLimit" && questions[0]?.id === id) {
+      setQuestions((prev) =>
+        prev.map((q) => ({
+          ...q,
+          timeLimit: value,
+        }))
+      );
+
+      return;
+    }
+
+    // 🔥 Các trường hợp khác → update riêng
+    setQuestions((prev) =>
+      prev.map((q) =>
+        q.id === id ? { ...q, [field]: value } : q
+      )
     );
   };
 
   const addAnswer = (questionId: string) => {
-    setQuestions(
-      questions.map((q) => {
+    setQuestions((prev) =>
+      prev.map((q) => {
         if (q.id === questionId && q.answers.length < 4) {
           return {
             ...q,
@@ -140,8 +166,8 @@ export default function EditQuizPage() {
   };
 
   const removeAnswer = (questionId: string, answerId: string) => {
-    setQuestions(
-      questions.map((q) => {
+    setQuestions((prev) =>
+      prev.map((q) => {
         if (q.id === questionId && q.answers.length > 2) {
           const newAnswers = q.answers.filter((a) => a.id !== answerId);
           if (q.answers.find(a => a.id === answerId)?.isCorrect) {
@@ -155,8 +181,8 @@ export default function EditQuizPage() {
   };
 
   const updateAnswer = (questionId: string, answerId: string, field: keyof Answer, value: any) => {
-    setQuestions(
-      questions.map((q) => {
+    setQuestions((prev) =>
+      prev.map((q) => {
         if (q.id === questionId) {
           return {
             ...q,
@@ -203,6 +229,16 @@ export default function EditQuizPage() {
         toast.error(`Câu hỏi ${i + 1} chưa chọn đáp án đúng!`);
         return;
       }
+      const emptyAnswerIndex = questions[i].answers.findIndex(
+        (a) => !a.content.trim()
+      );
+
+      if (emptyAnswerIndex !== -1) {
+        toast.error(
+          `Câu hỏi ${i + 1} đang thiếu nội dung đáp án ${emptyAnswerIndex + 1}!`
+        );
+        return;
+      }
     }
 
     setSaving(true);
@@ -211,27 +247,70 @@ export default function EditQuizPage() {
       const currentQuizData = await quizService.getById(quizId);
 
       if (currentQuizData.questions && currentQuizData.questions.length > 0) {
-        await Promise.all(
-          currentQuizData.questions.map((q: any) => questionStore.delete(q.id))
-        );
+        // Xóa các câu hỏi đã bị người dùng xóa khỏi danh sách
+        const currentQuestionIds = questions.map(q => q.id);
+        for (const oldQ of currentQuizData.questions) {
+          if (!currentQuestionIds.includes(oldQ.id)) {
+            await questionStore.delete(oldQ.id);
+          }
+        }
       }
 
       for (let i = 0; i < questions.length; i++) {
         const q = questions[i];
-        const newQuestion = await questionStore.create({
-          quizId,
-          content: q.content,
-          timeLimit: q.timeLimit,
-          orderIndex: i
-        });
-
-        const questionId = newQuestion.id;
-        for (const a of q.answers) {
-          await answerStore.create({
-            questionId,
-            content: a.content,
-            isCorrect: a.isCorrect
+        let questionId = q.id;
+        
+        if (q.id.startsWith("q-")) {
+          // Tạo câu hỏi mới
+          const newQuestion = await questionStore.create({
+            quizId,
+            content: q.content,
+            timeLimit: q.timeLimit,
+            orderIndex: i,
+            imageUrl: q.imageUrl,
+            imageId: q.imageId
           });
+          questionId = newQuestion.id;
+        } else {
+          // Cập nhật câu hỏi hiện có
+          await questionStore.update(questionId, {
+            content: q.content,
+            timeLimit: q.timeLimit,
+            orderIndex: i,
+            imageUrl: q.imageUrl,
+            imageId: q.imageId
+          });
+
+          // Xóa các đáp án đã bị người dùng xóa khỏi câu hỏi này
+          const oldQ = currentQuizData.questions.find((old: any) => old.id === questionId);
+          if (oldQ && oldQ.answers) {
+            const currentAnswerIds = q.answers.map((a: any) => a.id);
+            for (const oldA of oldQ.answers) {
+              if (!currentAnswerIds.includes(oldA.id)) {
+                await answerStore.delete(oldA.id);
+              }
+            }
+          }
+        }
+
+        // 🔥 Nếu có file mới đang chờ -> upload ngay sau khi có ID câu hỏi
+        if (q.pendingFile) {
+          await questionStore.uploadImage(questionId, q.pendingFile);
+        }
+
+        for (const a of q.answers) {
+          if (a.id.startsWith("a-") || a.id.startsWith("a1-") || a.id.startsWith("a2-")) {
+            await answerStore.create({
+              questionId,
+              content: a.content,
+              isCorrect: a.isCorrect
+            });
+          } else {
+            await answerStore.update(a.id, {
+              content: a.content,
+              isCorrect: a.isCorrect
+            });
+          }
         }
       }
 
@@ -239,6 +318,7 @@ export default function EditQuizPage() {
       router.push("/quiz");
     } catch (error) {
       toast.error("Có lỗi xảy ra khi lưu thay đổi");
+      console.error(error);
     } finally {
       setSaving(false);
     }

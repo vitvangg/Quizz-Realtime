@@ -10,6 +10,7 @@ interface QuestionState {
   getByQuizId: (quizId: string) => Promise<void>;
   create: (data: any) => Promise<any>;
   update: (id: string, data: any) => Promise<void>;
+  uploadImage: (id: string, file: File) => Promise<void>;
   delete: (id: string) => Promise<void>;
 }
 
@@ -63,6 +64,27 @@ export const useQuestionStore = create<QuestionState>((set) => ({
       }));
     } catch (error) {
       toast.error(getErrorMessage(error, "Update thất bại"));
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  uploadImage: async (id, file) => {
+    try {
+      set({ loading: true });
+      console.log("step 1");
+
+      const updated = await questionService.uploadImage(id, file);
+      console.log("step 2", updated);
+
+      set((state) => ({
+        questions: state.questions.map((q) =>
+          q.id === id ? updated : q
+        ),
+      }));
+      toast.success("Upload ảnh thành công!");
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Upload ảnh thất bại"));
     } finally {
       set({ loading: false });
     }
