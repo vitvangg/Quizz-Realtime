@@ -8,7 +8,7 @@ import { useAuthStore } from './auth.store';
 interface PlayerStatus {
   playerId: string;
   nickname: string;
-  connection: 'CONNECTED' | 'DISCONNECTED';
+  connection: 'CONNECTED' | 'DISCONNECTED' | 'LEFT';
   isHost: boolean;
   lastSeen: number;
 }
@@ -42,6 +42,7 @@ interface GameStore {
   questionIndex: number;
   totalQuestions: number;
   questionStartTime: number;
+  serverTime: number; // Server timestamp when question started (for latency compensation)
 
   timeRemaining: number;
   hasAnswered: boolean;
@@ -103,6 +104,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   questionIndex: 0,
   totalQuestions: 0,
   questionStartTime: 0,
+  serverTime: 0,
 
   timeRemaining: 0,
   hasAnswered: false,
@@ -310,7 +312,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       isHost: false, isFrozen: false, freezeMessage: '',
       isMaintenance: false, maintenanceMessage: '',
       currentQuestion: null, questionIndex: 0, totalQuestions: 0,
-      questionStartTime: 0, timeRemaining: 0, hasAnswered: false,
+      questionStartTime: 0,
+  serverTime: 0, timeRemaining: 0, hasAnswered: false,
       selectedAnswerId: null, leaderboard: [], myPlayerId: null,
       myNickname: null, myScore: 0, myRank: null, countdown: 0,
       correctAnswerId: null, _pendingRedirect: null,

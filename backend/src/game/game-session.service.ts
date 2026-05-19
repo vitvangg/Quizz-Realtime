@@ -9,6 +9,7 @@ import {
 import { PrismaService } from 'src/prisma/prisma.service';
 import { RedisService } from 'src/redis/redis.service';
 import { PlayerCacheService } from './player-cache.service';
+import { PlayerPresenceService } from './player-presence.service';
 import { AnswerQueueService, QueuedAnswer } from './answer-queue.service';
 import { GAME_CONSTANTS } from 'src/common/constants';
 
@@ -68,6 +69,7 @@ export class GameSessionService {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly playerCache: PlayerCacheService,
+    private readonly presenceService: PlayerPresenceService,
     private readonly answerQueue: AnswerQueueService,
   ) {}
 
@@ -857,12 +859,70 @@ export class GameSessionService {
   }
 
   /**
+   * Ensure player is in leaderboard with score 0 (used when player joins game)
+   */
+  async ensurePlayerInLeaderboard(sessionId: string, playerId: string, nickname: string) {
+    const key = `leaderboard:${sessionId}`;
+    const currentScore = await this.redis.zscore(key, playerId);
+    if (currentScore === null) {
+      // Player not in leaderboard yet - add with score 0
+      await this.redis.zadd(key, 0, playerId);
+      // Also cache the nickname for lookups
+      await this.playerCache.setPlayerName(playerId, nickname);
+      this.logger.debug(`[ensurePlayerInLeaderboard] Added player ${playerId} to leaderboard with score 0`);
+    }
+  }
+
+  /**
    * Remove player from leaderboard (when they disconnect)
+   * NOTE: Prefer markPlayerLeft() for explicit leave - player stays in leaderboard
    */
   async removePlayerFromLeaderboard(sessionId: string, playerId: string) {
     const key = `leaderboard:${sessionId}`;
     await this.redis.zrem(key, playerId);
     this.logger.debug(`[removePlayerFromLeaderboard] Removed player ${playerId} from session ${sessionId}`);
+  }
+
+  /**
+   * Mark player as LEFT (explicit leave) - player stays in leaderboard
+   * Uses Redis SET to track LEFT players per session
+   */
+  async markPlayerLeft(sessionId: string, playerId: string) {
+    const key = `left:players:${sessionId}`;
+    await this.redis.sadd(key, playerId);
+    this.logger.debug(`[markPlayerLeft] Player ${playerId} marked as LEFT in session ${sessionId}`);
+  }
+
+  /**
+   * Get all LEFT players for a session
+   */
+  async getLeftPlayers(sessionId: string): Promise<string[]> {
+    const key = `left:players:${sessionId}`;
+    return await this.redis.smembers(key);
+  }
+
+  /**
+   * Mark player as having answered current question
+   */
+  async markPlayerAnswered(sessionId: string, playerId: string) {
+    const key = `answered:${sessionId}`;
+    await this.redis.sadd(key, playerId);
+  }
+
+  /**
+   * Get all players who answered current question
+   */
+  async getAnsweredPlayers(sessionId: string): Promise<string[]> {
+    const key = `answered:${sessionId}`;
+    return await this.redis.smembers(key);
+  }
+
+  /**
+   * Clear answered status for new question
+   */
+  async clearAnsweredPlayers(sessionId: string) {
+    const key = `answered:${sessionId}`;
+    await this.redis.del(key);
   }
 
   async getLeaderboard(sessionId: string, limit = 100) {
@@ -882,12 +942,31 @@ export class GameSessionService {
     // Use PlayerCacheService for efficient name lookups
     const names = await this.playerCache.getPlayerNames(playerIds);
 
-    return leaderboard.map((l, index) => ({
-      rank: index + 1,
-      playerId: l.playerId,
-      nickname: names.get(l.playerId) || 'Unknown',
-      score: l.score,
-    }));
+    // Get LEFT players for this session
+    const leftPlayers = await this.getLeftPlayers(sessionId);
+    const leftSet = new Set(leftPlayers);
+
+    // Get online players from presence
+    const sessionPlayers = await this.presenceService.getSessionPlayers(sessionId);
+    const presenceMap = new Map(sessionPlayers.map(p => [p.playerId, p.connection]));
+
+    // Get answered players for current question
+    const answeredPlayers = await this.getAnsweredPlayers(sessionId);
+    const answeredSet = new Set(answeredPlayers);
+
+    return leaderboard.map((l, index) => {
+      const isLeft = leftSet.has(l.playerId);
+      const connection = isLeft ? 'LEFT' : (presenceMap.get(l.playerId) || 'DISCONNECTED');
+
+      return {
+        rank: index + 1,
+        playerId: l.playerId,
+        nickname: names.get(l.playerId) || 'Unknown',
+        score: l.score,
+        connection,
+        hasAnswered: answeredSet.has(l.playerId),
+      };
+    });
   }
 
   async getPlayerScore(sessionId: string, playerId: string) {
@@ -1010,6 +1089,9 @@ export class GameSessionService {
         sessionId,
       };
       await this.answerQueue.queueAnswer(queuedAnswer);
+
+      // Mark player as answered for this question
+      await this.markPlayerAnswered(sessionId, playerId);
 
       // Get leaderboard AFTER all writes complete
       const leaderboard = await this.getLeaderboard(sessionId);

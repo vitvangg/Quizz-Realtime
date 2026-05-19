@@ -21,9 +21,10 @@ export const GAME_CONSTANTS = {
   // ============================================================
 
   /** Buffer time (ms) after game_redirect before question_start
-   * Allows players to navigate from lobby to game page and join socket
+   * MUST be large enough for full redirect cycle: receive redirect → navigate → mount → connect → join
+   * 3000ms accounts for slow devices/networks (~550-1700ms + overhead)
    */
-  GAME_REDIRECT_BUFFER_MS: 1500,
+  GAME_REDIRECT_BUFFER_MS: 3000,
 
   // ============================================================
   // REDIS TTL (seconds)

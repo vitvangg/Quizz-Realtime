@@ -116,6 +116,7 @@ export default function GamePage() {
     countdown,
     correctAnswerId,
     timeRemaining,
+    questionStartTime,
     connectSocket,
     reset,
   } = useGameStore();
@@ -211,12 +212,18 @@ export default function GamePage() {
 
       console.log('[GamePage] question_start: isNewQuestion=', isNewQuestion, 'shouldResetAnswer=', shouldResetAnswer);
 
-      let newTimeRemaining = data.question.timeLimit || 20;
-      if (data.timeRemaining !== undefined && data.timeRemaining !== null) {
-        if (shouldResetAnswer) {
-          newTimeRemaining = data.timeRemaining;
-        }
-      }
+      // Calculate timeRemaining based on server time (server is source of truth)
+      // Account for network latency to sync host and player timers
+      const clientReceiveTime = Date.now();
+      const serverToClientLatencyMs = Math.max(0, clientReceiveTime - data.serverTime);
+      const latencyCompensationMs = Math.floor(serverToClientLatencyMs / 2);
+      const adjustedQuestionStartTime = data.questionStartTime + latencyCompensationMs;
+      const elapsedMs = clientReceiveTime - adjustedQuestionStartTime;
+      const elapsedSec = Math.floor(elapsedMs / 1000);
+      const timeLimit = data.timeLimit || 20;
+      const newTimeRemaining = Math.max(0, timeLimit - elapsedSec);
+
+      console.log(`[GamePage] question_start: serverTime=${data.serverTime}, questionStartTime=${data.questionStartTime}, latency=${serverToClientLatencyMs}ms, elapsed=${elapsedSec}s, timeRemaining=${newTimeRemaining}s`);
 
       useGameStore.setState({
         gameStatus: GameState.QUESTION_ACTIVE,
@@ -228,10 +235,20 @@ export default function GamePage() {
         selectedAnswerId: shouldResetAnswer ? null : state.selectedAnswerId,
         correctAnswerId: shouldResetAnswer ? null : state.correctAnswerId,
       });
-      
+
+      // Reset hasAnswered for all players in leaderboard when new question starts
+      if (shouldResetAnswer && Array.isArray(state.leaderboard)) {
+        const resetLeaderboard = state.leaderboard.map((entry: any) => ({
+          ...entry,
+          hasAnswered: false,
+        }));
+        useGameStore.setState({ leaderboard: resetLeaderboard });
+      }
+
       useGameStore.setState({
         timeRemaining: newTimeRemaining,
-        questionStartTime: data.serverTime || Date.now(),
+        questionStartTime: data.questionStartTime,
+        serverTime: data.serverTime,
       });
     };
 
@@ -449,6 +466,33 @@ export default function GamePage() {
     const handleSessionStarted = handleSessionTransition;
     const handleSessionSwitched = handleSessionTransition;
 
+    // Handle player joined - update leaderboard with new player
+    const handlePlayerJoined = (data: { playerId: string; nickname: string; timestamp: number }) => {
+      console.log('[GamePage] player_joined:', data);
+
+      const state = useGameStore.getState();
+
+      // Add new player to leaderboard if not exists, or update connection
+      if (Array.isArray(state.leaderboard)) {
+        const existingEntry = state.leaderboard.find(e => e.playerId === data.playerId);
+        if (!existingEntry) {
+          // New player - will be added when leaderboard_update comes
+          console.log('[GamePage] New player joined, waiting for leaderboard_update');
+        } else {
+          // Player reconnecting - update connection status
+          const updatedLeaderboard = state.leaderboard.map((entry) => {
+            if (entry?.playerId === data.playerId) {
+              return { ...entry, connection: 'CONNECTED' as const };
+            }
+            return entry;
+          });
+          useGameStore.setState({ leaderboard: updatedLeaderboard });
+        }
+      }
+
+      // Toast handled by backend
+    };
+
     // Handle player connection status changes
     // NOTE: player_status only updates connection state, NO toasts for reload/reconnect
     // Toast for join/leave comes from player_joined/player_left events only
@@ -457,7 +501,7 @@ export default function GamePage() {
 
       const state = useGameStore.getState();
 
-      // Update player status in store - NO toasts
+      // Update player status in store
       state.setPlayerStatus({
         playerId: data.playerId,
         nickname: data.nickname,
@@ -465,6 +509,17 @@ export default function GamePage() {
         isHost: data.isHost,
         lastSeen: data.timestamp,
       });
+
+      // FIX: Also update leaderboard entry with connection status
+      if (Array.isArray(state.leaderboard)) {
+        const updatedLeaderboard = state.leaderboard.map((entry) => {
+          if (entry?.playerId === data.playerId) {
+            return { ...entry, connection: data.connection as 'CONNECTED' | 'DISCONNECTED' };
+          }
+          return entry;
+        });
+        useGameStore.setState({ leaderboard: updatedLeaderboard });
+      }
 
       // NO toasts here - connection status updates silently
       // Toast for actual join/leave is handled by player_joined/player_left events
@@ -491,9 +546,13 @@ export default function GamePage() {
         return;
       }
 
-      const newLeaderboard = state.leaderboard.filter(
-        (entry) => entry?.playerId !== data.playerId
-      );
+      // FIX: Update player connection to LEFT instead of removing from leaderboard
+      const newLeaderboard = state.leaderboard.map((entry) => {
+        if (entry?.playerId === data.playerId) {
+          return { ...entry, connection: 'LEFT' as const };
+        }
+        return entry;
+      });
 
       useGameStore.setState({ leaderboard: newLeaderboard });
 
@@ -525,12 +584,14 @@ export default function GamePage() {
         return;
       }
 
-      if (state.gameStatus === GameState.QUESTION_ACTIVE) {
-        console.log('[GamePage] Skipping score_update during QUESTION_ACTIVE to prevent cheating');
+      // Skip for non-host players during QUESTION_ACTIVE (anti-cheat)
+      if (state.gameStatus === GameState.QUESTION_ACTIVE && !state.isHost) {
+        console.log('[GamePage] Skipping score_update during QUESTION_ACTIVE for non-host');
         return;
       }
 
-      if (!state.hasAnswered) {
+      // Only non-host players need to have answered
+      if (!state.isHost && !state.hasAnswered) {
         console.log('[GamePage] Skipping score_update: player has not answered this question');
         return;
       }
@@ -577,6 +638,29 @@ export default function GamePage() {
       }
     };
 
+    // Handle leaderboard_update event - merges with existing leaderboard preserving connection/hasAnswered
+    const handleLeaderboardUpdate = (data: { leaderboard: any[] }) => {
+      if (!data?.leaderboard || !Array.isArray(data.leaderboard)) {
+        return;
+      }
+
+      const state = useGameStore.getState();
+      const existingMap = new Map(
+        (state.leaderboard || []).map((e: any) => [e.playerId, e])
+      );
+
+      const mergedLeaderboard = data.leaderboard.map((entry: any) => {
+        const existing = existingMap.get(entry.playerId);
+        return {
+          ...entry,
+          connection: entry.connection || existing?.connection || 'DISCONNECTED',
+          hasAnswered: entry.hasAnswered ?? existing?.hasAnswered ?? false,
+        };
+      });
+
+      useGameStore.setState({ leaderboard: mergedLeaderboard });
+    };
+
     socket.on('game_starting', handleGameStarting);
     socket.on('countdown_tick', handleCountdownTick);
     socket.on('question_start', handleQuestionStart);
@@ -591,7 +675,9 @@ export default function GamePage() {
     socket.on('session_started', handleSessionTransition);
     socket.on('session_switched', handleSessionTransition);
     socket.on('player_left', handlePlayerLeft);
+    socket.on('player_joined', handlePlayerJoined);
     socket.on('player_status', handlePlayerStatus);
+    socket.on('leaderboard_update', handleLeaderboardUpdate);
 
     return () => {
       socket.off('game_starting', handleGameStarting);
@@ -604,11 +690,13 @@ export default function GamePage() {
       socket.off('room_closed', handleRoomClosed);
       socket.off('host_disconnected', handleHostDisconnected);
       socket.off('host_reconnected', handleHostReconnected);
-    socket.off('session_closed', handleSessionClosed);
-    socket.off('session_started', handleSessionTransition);
-    socket.off('session_switched', handleSessionTransition);
-    socket.off('player_left', handlePlayerLeft);
+      socket.off('session_closed', handleSessionClosed);
+      socket.off('session_started', handleSessionTransition);
+      socket.off('session_switched', handleSessionTransition);
+      socket.off('player_left', handlePlayerLeft);
+      socket.off('player_joined', handlePlayerJoined);
       socket.off('player_status', handlePlayerStatus);
+      socket.off('leaderboard_update', handleLeaderboardUpdate);
     };
   }, [sessionId, router]);
 
@@ -1117,27 +1205,46 @@ export default function GamePage() {
 
   }, [sessionId, authReady]);
 
+  // Server-driven timer: recalculate from questionStartTime + serverTime instead of local countdown
+  // This ensures host and player timers stay in sync
   useEffect(() => {
-    if (gameStatus === GameState.QUESTION_ACTIVE && currentQuestion) {
-      const startTime = timeRemaining > 0 ? timeRemaining : currentQuestion.timeLimit;
-      setLocalTimeRemaining(startTime);
+    if (gameStatus === GameState.QUESTION_ACTIVE && currentQuestion && questionStartTime) {
+      const calculateRemaining = () => {
+        const serverTime = useGameStore.getState().serverTime || questionStartTime;
+        const timeLimit = currentQuestion.timeLimit || 20;
+        const elapsedMs = Date.now() - questionStartTime;
+        const elapsedSec = Math.floor(elapsedMs / 1000);
+        return Math.max(0, timeLimit - elapsedSec);
+      };
+
+      setLocalTimeRemaining(calculateRemaining());
       const interval = setInterval(() => {
-        setLocalTimeRemaining((prev) => Math.max(0, prev - 1));
-      }, 1000);
+        const remaining = calculateRemaining();
+        setLocalTimeRemaining(remaining);
+        if (remaining <= 0) {
+          clearInterval(interval);
+        }
+      }, 100);
       return () => clearInterval(interval);
+    } else if (gameStatus !== GameState.QUESTION_ACTIVE) {
+      setLocalTimeRemaining(0);
     }
-  }, [gameStatus, currentQuestion, timeRemaining]);
+  }, [gameStatus, currentQuestion, questionStartTime]);
 
   const handleNextQuestion = () => {
     const gameStore = useGameStore.getState();
-    if (!gameStore.socket || !sessionId) return;
-    
+    // FIX: Dùng sessionId từ store (đáng tin cậy) thay vì từ params (có thể stale sau router.replace)
+    const currentSessionId = gameStore.sessionId || sessionId;
+    if (!gameStore.socket || !currentSessionId) return;
+
     if (!gameStore.isHost) {
       console.warn('[GamePage] handleNextQuestion called by non-host, ignoring');
       return;
     }
-    
-    gameStore.socket.emit('host_next_question', { sessionId }, (response: any) => {
+
+    console.log('[GamePage] handleNextQuestion: params.sessionId=', sessionId, ', store.sessionId=', gameStore.sessionId, ', emit sessionId=', currentSessionId);
+
+    gameStore.socket.emit('host_next_question', { sessionId: currentSessionId }, (response: any) => {
       if (!response.success) {
         console.error('[GamePage] next_question error:', response.error);
         if (response.error === 'Game already finished') {
@@ -1331,7 +1438,54 @@ export default function GamePage() {
 
     return (
       <div className="min-h-screen bg-neon-yellow p-4">
-        <div className="max-w-4xl mx-auto">
+        {/* Host Player List Panel */}
+        {isHost && (
+          <div className="max-w-6xl mx-auto mb-4">
+            <Card className="bg-white border-4 border-black shadow-brutal">
+              <CardHeader className="bg-neon-green border-b-4 border-black pb-3">
+                <div className="flex justify-between items-center">
+                  <CardTitle className="text-xl font-black text-black">Người chơi</CardTitle>
+                  <span className="text-sm font-bold text-black/70">
+                    {leaderboard.filter(e => e.connection !== 'LEFT').length} active
+                  </span>
+                </div>
+              </CardHeader>
+              <CardContent className="p-3">
+                <div className="max-h-48 overflow-y-auto space-y-2">
+                  {leaderboard.map((entry) => (
+                    <div key={entry.playerId} className="flex items-center justify-between p-2 bg-gray-100 rounded-lg border-2 border-black">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-sm text-black/50 w-6">#{entry.rank}</span>
+                        <span className="font-bold text-black">{entry.nickname}</span>
+                        <span className={`
+                          text-xs font-bold px-2 py-0.5 rounded border
+                          ${entry.connection === 'CONNECTED' ? 'bg-green-400 text-black border-black' : ''}
+                          ${entry.connection === 'LEFT' ? 'bg-gray-400 text-black border-black line-through' : ''}
+                          ${entry.connection === 'DISCONNECTED' ? 'bg-orange-400 text-black border-black' : ''}
+                          ${!entry.connection ? 'bg-gray-300 text-black border-black' : ''}
+                        `}>
+                          {entry.connection === 'CONNECTED' ? 'Online' : entry.connection === 'LEFT' ? 'Đã rời' : entry.connection === 'DISCONNECTED' ? 'Mất kết nối' : 'Offline'}
+                        </span>
+                        <span className={`
+                          text-xs font-bold px-2 py-0.5 rounded border
+                          ${entry.hasAnswered ? 'bg-neon-green text-black border-black' : 'bg-gray-300 text-black border-black'}
+                        `}>
+                          {entry.hasAnswered ? 'Đã trả lời' : 'Chưa trả lời'}
+                        </span>
+                      </div>
+                      <span className="font-black text-neon-blue">{entry.score} pts</span>
+                    </div>
+                  ))}
+                  {leaderboard.length === 0 && (
+                    <p className="text-center text-black/50 font-bold">Chưa có người chơi</p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        <div className={isHost ? 'max-w-3xl mx-auto' : 'max-w-4xl mx-auto'}>
           {/* Header */}
           <div className="flex justify-between items-center mb-6 bg-white rounded-2xl p-4 border-4 border-black shadow-brutal">
             <div className="bg-black border-4 border-black shadow-brutal-sm px-4 py-2">
@@ -1537,7 +1691,18 @@ export default function GamePage() {
                         }`}>
                           {entry.rank === 1 ? '👑' : entry.rank === 2 ? '🥈' : entry.rank === 3 ? '🥉' : entry.rank}
                         </span>
+                        <div className="flex items-center gap-2">
                         <span className="font-bold text-lg text-black">{entry.nickname}</span>
+                        <span className={`
+                          text-xs font-bold px-2 py-0.5 rounded border-2 border-black
+                          ${entry.connection === 'CONNECTED' ? 'bg-green-400 text-black' : ''}
+                          ${entry.connection === 'LEFT' ? 'bg-gray-400 text-black line-through' : ''}
+                          ${entry.connection === 'DISCONNECTED' ? 'bg-orange-400 text-black' : ''}
+                          ${!entry.connection ? 'bg-gray-300 text-black' : ''}
+                        `}>
+                          {entry.connection === 'CONNECTED' ? 'Online' : entry.connection === 'LEFT' ? 'Đã rời' : entry.connection === 'DISCONNECTED' ? 'Mất kết nối' : 'Offline'}
+                        </span>
+                      </div>
                       </div>
                       <span className="font-black text-xl text-black">{entry.score} pts</span>
                     </div>
@@ -1621,6 +1786,15 @@ export default function GamePage() {
                           {idx === 0 ? '👑' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : entry.rank}
                         </span>
                         <span className="font-black text-xl text-black">{entry.nickname}</span>
+                        <span className={`
+                          text-xs font-bold px-2 py-0.5 rounded border-2 border-black
+                          ${entry.connection === 'CONNECTED' ? 'bg-green-400 text-black' : ''}
+                          ${entry.connection === 'LEFT' ? 'bg-gray-400 text-black line-through' : ''}
+                          ${entry.connection === 'DISCONNECTED' ? 'bg-orange-400 text-black' : ''}
+                          ${!entry.connection ? 'bg-gray-300 text-black' : ''}
+                        `}>
+                          {entry.connection === 'CONNECTED' ? 'Online' : entry.connection === 'LEFT' ? 'Đã rời' : entry.connection === 'DISCONNECTED' ? 'Mất kết nối' : 'Offline'}
+                        </span>
                       </div>
                       <span className="font-black text-2xl text-black">{entry.score} pts</span>
                     </div>

@@ -88,6 +88,12 @@ export class PlayerCacheService {
   /**
    * Cache player name with TTL
    */
+  async setPlayerName(playerId: string, nickname: string): Promise<void> {
+    const expiresAt = Date.now() + this.DEFAULT_TTL_MS;
+    await this.redis.hset(this.NAMES_KEY, playerId, nickname);
+    await this.redis.hset(this.TTL_KEY, playerId, String(expiresAt));
+  }
+
   private async cachePlayerName(playerId: string, nickname: string, sessionId?: string): Promise<void> {
     const expiresAt = Date.now() + this.DEFAULT_TTL_MS;
     
