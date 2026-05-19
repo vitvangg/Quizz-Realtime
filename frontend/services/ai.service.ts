@@ -5,6 +5,8 @@ export const generateQuizAI = async (topic: string, amount: number = 5, requirem
         topic,
         amount,
         requirements
+    }, {
+        timeout: 60000 // 60 seconds for AI generation
     });
 
     return response.data;

@@ -6,12 +6,15 @@ export class AiService {
     private genAI: GoogleGenerativeAI;
 
     constructor() {
-        this.genAI = new GoogleGenerativeAI(
-            process.env.GEMINI_API_KEY!,
-        );
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (!apiKey) {
+            console.warn("WARNING: GEMINI_API_KEY is not defined in environment variables!");
+        }
+        this.genAI = new GoogleGenerativeAI(apiKey || "");
     }
 
     async generateQuiz(topic: string, amount: number = 5, requirements?: string) {
+        console.log(`Generating quiz for topic: ${topic}, amount: ${amount}`);
         const model = this.genAI.getGenerativeModel({
             model: 'gemini-2.5-flash',
             generationConfig: {
@@ -44,18 +47,25 @@ export class AiService {
     }
     `;
 
-        const result = await model.generateContent(prompt);
-        const text = result.response.text();
-
         try {
-            return JSON.parse(text);
-        } catch (e) {
-            // Fallback: cố gắng trích xuất JSON nếu AI vẫn trả về markdown
-            const jsonMatch = text.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-                return JSON.parse(jsonMatch[0]);
+            const result = await model.generateContent(prompt);
+            const text = result.response.text();
+            console.log("AI Response text length:", text.length);
+
+            try {
+                return JSON.parse(text);
+            } catch (e) {
+                // Fallback: cố gắng trích xuất JSON nếu AI vẫn trả về markdown
+                const jsonMatch = text.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                    return JSON.parse(jsonMatch[0]);
+                }
+                console.error("Failed to parse AI response as JSON:", text);
+                throw new Error("AI trả về định dạng không hợp lệ");
             }
-            throw new Error("AI trả về định dạng không hợp lệ");
+        } catch (error) {
+            console.error("Gemini AI Error:", error);
+            throw error;
         }
     }
 }
