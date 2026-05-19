@@ -7,21 +7,37 @@ import {
   Param,
   Delete,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
 import { QuestionsService } from './questions.service';
 import { CreateQuestionDto } from './dto/create-question.dto';
 import { UpdateQuestionDto } from './dto/update-question.dto';
 import { AuthGuard } from 'src/auth/guards/auth.guard';
 import { CurrentUser } from 'src/user/decorators/user.decorator';
+import { FileInterceptor } from '@nestjs/platform-express';
 
 @Controller('questions')
 @UseGuards(AuthGuard)
 export class QuestionsController {
-  constructor(private readonly questionsService: QuestionsService) {}
+  constructor(private readonly questionsService: QuestionsService) { }
 
   @Post()
   create(@Body() createQuestionDto: CreateQuestionDto, @CurrentUser() user) {
-    return this.questionsService.create(createQuestionDto, user.id );
+    return this.questionsService.create(createQuestionDto, user.id);
+  }
+
+  @Post(':id/upload-image')
+  @UseInterceptors(FileInterceptor('file'))
+  uploadImage(
+    @Param('id') id: string,
+    @CurrentUser() user,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    console.log(id);
+    console.log(user);
+    console.log(file);
+    return this.questionsService.uploadImage(id, user.id, file);
   }
 
   @Get()

@@ -9,6 +9,11 @@ interface GameStore {
   socket: Socket | null;
   isConnected: boolean;
   _pendingRedirect: string | null;
+  // Flag to indicate HTTP state recovery is in progress
+  _isRecovering: boolean;
+
+  // Track players in reconnecting state (grace period)
+  reconnectingPlayers: Set<string>;
 
   sessionId: string | null;
   roomId: string | null;
@@ -45,6 +50,11 @@ interface GameStore {
   connectSocket: () => void;
   disconnectSocket: () => void;
 
+  // Player reconnect tracking
+  setPlayerReconnecting: (playerId: string, nickname: string, gracePeriodMs: number) => void;
+  clearPlayerReconnecting: (playerId: string) => void;
+  clearAllReconnectingPlayers: () => void;
+
   joinGame: (sessionId: string, roomId: string, playerId: string, nickname: string, isHost: boolean) => void;
 
   startGame: (roomId: string) => Promise<string | null>;
@@ -62,6 +72,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
   socket: null,
   isConnected: false,
   _pendingRedirect: null,
+  _isRecovering: false,
+
+  // Track players in reconnecting state
+  reconnectingPlayers: new Set<string>(),
 
   sessionId: null,
   roomId: null,
@@ -92,9 +106,37 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   countdown: 0,
   correctAnswerId: null,
+
+  // Player reconnect tracking methods
+  setPlayerReconnecting: (playerId: string, nickname: string, gracePeriodMs: number) => {
+    const newSet = new Set(get().reconnectingPlayers);
+    newSet.add(playerId);
+    set({ reconnectingPlayers: newSet });
+    
+    // Auto-clear after grace period expires
+    setTimeout(() => {
+      const current = get().reconnectingPlayers;
+      if (current.has(playerId)) {
+        const updated = new Set(current);
+        updated.delete(playerId);
+        set({ reconnectingPlayers: updated });
+      }
+    }, gracePeriodMs + 500); // Add 500ms buffer
+  },
+
+  clearPlayerReconnecting: (playerId: string) => {
+    const newSet = new Set(get().reconnectingPlayers);
+    newSet.delete(playerId);
+    set({ reconnectingPlayers: newSet });
+  },
+
+  clearAllReconnectingPlayers: () => {
+    set({ reconnectingPlayers: new Set() });
+  },
+
   connectSocket: () => {
     const { socket } = get();
-    if (socket) return; // already initialized
+    if (socket) return; // already initialized with shared socket
 
     // Register this store as the handler for socket events.
     // Listeners are managed at the module level in lib/socket.ts.
@@ -103,6 +145,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
     });
 
     const newSocket = getSocket();
+    
+    // CRITICAL: Actually connect the socket (autoConnect: false in socket.ts)
+    if (!newSocket.connected) {
+      console.log('[GameStore] Connecting socket...');
+      newSocket.connect();
+    }
+    
     set({ socket: newSocket });
   },
   disconnectSocket: () => {
@@ -219,15 +268,22 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const { socket, sessionId } = get();
       if (!socket || !sessionId) return reject(new Error('Not in game'));
       socket.emit('get_game_state', { sessionId }, (res: any) => {
+        console.log('[game.store.ts] getGameState response:', JSON.stringify(res));
         if (res.success) {
+          // Defensive: ensure leaderboard is an array
+          const safeLeaderboard = Array.isArray(res.leaderboard) ? res.leaderboard : [];
+          console.log('[game.store.ts] Setting leaderboard:', JSON.stringify(safeLeaderboard));
           set({
             gameStatus: res.state.status,
-            leaderboard: res.leaderboard,
+            leaderboard: safeLeaderboard,
             sessionId: res.state.sessionId,
             roomId: res.state.roomId,
           });
           resolve();
-        } else reject(new Error(res.error));
+        } else {
+          console.error('[game.store.ts] getGameState failed:', res.error);
+          reject(new Error(res.error));
+        }
       });
     });
   },
@@ -267,6 +323,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       selectedAnswerId: null, leaderboard: [], myPlayerId: null,
       myNickname: null, myScore: 0, myRank: null, countdown: 0,
       correctAnswerId: null, _pendingRedirect: null,
+      _isRecovering: false,
+      reconnectingPlayers: new Set(),
     });
   },
 }));

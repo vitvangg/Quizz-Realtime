@@ -51,9 +51,20 @@ export const useRoomStore = create<RoomState>((set, get) => ({
 
   connectSocket: () => {
     const { socket } = get();
-    if (socket) return; // already initialized with shared socket
+    if (socket) {
+      console.log('[RoomStore] connectSocket: socket already exists, skipping listener registration');
+      return; // already initialized with shared socket
+    }
 
     const newSocket = getSocket();
+    
+    // Track listener count for debugging
+    let listenerCount = 0;
+    const registerListener = (event: string, handler: (...args: any[]) => void) => {
+      listenerCount++;
+      console.log(`[RoomStore] Registering listener #${listenerCount}: ${event}`);
+      newSocket.on(event, handler);
+    };
 
     newSocket.on('connect', () => {
       console.log('[Socket] Connected:', newSocket.id);
@@ -63,7 +74,6 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     newSocket.on('disconnect', (reason) => {
       console.log('[Socket] Disconnected:', reason);
       set({ isConnected: false });
-      // Don't clear other state - we might reconnect
     });
 
     newSocket.on('reconnect', (attemptNumber) => {
@@ -76,52 +86,152 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       set({ error: 'Không thể kết nối server', isConnected: false });
     });
 
-    newSocket.on('room_joined', (data: RoomJoinedPayload) => {
-      console.log('[Socket] Room joined:', data);
+    // CRITICAL: Actually connect the socket (autoConnect: false in socket.ts)
+    if (!newSocket.connected) {
+      console.log('[RoomStore] Connecting socket...');
+      newSocket.connect();
+    }
+
+    // DEBUG: Log socket id and listener count before registering
+    console.log('[RoomStore] About to register listeners, socket.id:', newSocket.id);
+
+    registerListener('room_joined', (data: RoomJoinedPayload) => {
+      console.log('[Socket] room_joined received:', JSON.stringify(data));
+      
+      // DEBUG: Validate entire payload
+      if (!data) {
+        console.error('[Socket] room_joined: data is null/undefined!');
+        return;
+      }
+      if (!data.room) {
+        console.error('[Socket] room_joined: data.room is undefined!');
+        return;
+      }
+      if (!data.player) {
+        console.error('[Socket] room_joined: data.player is undefined!');
+        return;
+      }
+      if (!data.players) {
+        console.error('[Socket] room_joined: data.players is undefined!');
+        return;
+      }
+      
       set({
         currentRoom: data.room,
         currentPlayer: data.player,
-        players: data.players,
-        isHost: data.player.isHost,
+        players: Array.isArray(data.players) ? data.players : [],
+        isHost: data.player?.isHost ?? false,
         error: null,
       });
     });
 
-    newSocket.on('player_joined', (data: PlayerJoinedPayload) => {
-      console.log('[Socket] Player joined:', data);
-      set((state) => ({
-        players: [
-          ...state.players.filter(p => p.id !== data.player.id),
-          data.player,
-        ],
-      }));
-      toast.success(`${data.player.nickname} đã tham gia!`);
+    registerListener('player_joined', (data: any) => {
+      console.log('[Socket] player_joined received:', JSON.stringify(data));
+      
+      // CRITICAL: Handle TWO different payload shapes from different gateways:
+      // - RoomGateway: { player: { id, nickname }, playerCount, joinedBy }
+      // - GameGateway: { playerId, nickname, timestamp }
+      
+      // Normalize payload to consistent format
+      let playerId: string | undefined;
+      let playerNickname: string | undefined;
+      
+      if (data.player) {
+        // RoomGateway format
+        playerId = data.player.id;
+        playerNickname = data.player.nickname;
+      } else if (data.playerId) {
+        // GameGateway format
+        playerId = data.playerId;
+        playerNickname = data.nickname;
+      }
+      
+      // DEBUG: Validate normalized payload
+      if (!playerId) {
+        console.error('[Socket] player_joined: playerId is undefined! Raw data:', JSON.stringify(data));
+        return;
+      }
+      
+      set((state) => {
+        console.log('[Socket] player_joined: current players state:', JSON.stringify(state.players));
+        
+        // Defensive: ensure players is an array
+        const safePlayers = Array.isArray(state.players) ? state.players : [];
+        
+        // Filter with safety check
+        const filtered = safePlayers.filter(p => p && p.id && p.id !== playerId);
+        console.log('[Socket] player_joined: after filter:', JSON.stringify(filtered));
+        
+        return {
+          players: [...filtered, { id: playerId!, nickname: playerNickname || 'Unknown', isHost: false }]
+        };
+      });
+      toast.success(`${playerNickname || 'Player'} đã tham gia!`);
     });
 
-    newSocket.on('player_left', (data: PlayerLeftPayload) => {
-      console.log('[Socket] Player left:', data);
-      set((state) => ({
-        players: state.players.filter(p => p.id !== data.playerId),
-      }));
-      toast.info(`${data.nickname} đã rời phòng`);
+    registerListener('player_left', (data: any) => {
+      console.log('[Socket] player_left received:', JSON.stringify(data));
+      
+      // CRITICAL: Handle TWO different payload shapes from different gateways:
+      // - RoomGateway: { playerId, nickname, playerCount, isHost }
+      // - GameGateway: { playerId, nickname, timestamp }
+      
+      // Normalize payload - extract playerId
+      const playerId = data.playerId;
+      
+      // DEBUG: Validate payload
+      if (!playerId) {
+        console.error('[Socket] player_left: playerId is undefined! Raw data:', JSON.stringify(data));
+        return;
+      }
+      
+      set((state) => {
+        console.log('[Socket] player_left: current players state:', JSON.stringify(state.players));
+        
+        // Defensive: ensure players is an array
+        const safePlayers = Array.isArray(state.players) ? state.players : [];
+        
+        // Filter with safety check
+        const filtered = safePlayers.filter(p => p && p.id && p.id !== playerId);
+        console.log('[Socket] player_left: after filter:', JSON.stringify(filtered));
+        
+        return {
+          players: filtered
+        };
+      });
+      
+      if (data.nickname) {
+        toast.info(`${data.nickname} đã rời phòng`);
+      }
     });
 
-    newSocket.on('host_left', (data: { roomId: string }) => {
-      console.log('[Socket] Host left:', data);
-      // This will be handled by the WaitingScreen component for redirect
+    registerListener('player_reconnecting', (data: { playerId: string; nickname: string; gracePeriodMs: number }) => {
+      console.log('[Socket] player_reconnecting received:', JSON.stringify(data));
+      toast.warning(`${data.nickname} đang kết nối lại...`, {
+        duration: Math.min(data.gracePeriodMs, 5000),
+      });
     });
 
-    newSocket.on('room_left', (data: { roomId: string; message: string; isHost?: boolean }) => {
-      console.log('[Socket] Room left:', data);
-      // Don't clear state here - let the page handle redirect
+    registerListener('player_reconnected', (data: { playerId: string; nickname: string; timestamp: number }) => {
+      console.log('[Socket] player_reconnected received:', JSON.stringify(data));
+      toast.success(`${data.nickname} đã quay lại!`);
     });
 
-    newSocket.on('error', (error: { message: string }) => {
-      console.error('[Socket] Error:', error);
+    registerListener('host_left', (data: { roomId: string }) => {
+      console.log('[Socket] host_left received:', JSON.stringify(data));
+    });
+
+    registerListener('room_left', (data: { roomId: string; message: string; isHost?: boolean }) => {
+      console.log('[Socket] room_left received:', JSON.stringify(data));
+    });
+
+    registerListener('error', (error: { message: string }) => {
+      console.error('[Socket] error received:', JSON.stringify(error));
       set({ error: error.message });
       toast.error(error.message);
     });
 
+    console.log('[RoomStore] connectSocket: registered', listenerCount, 'listeners, socket.id:', newSocket.id);
     set({ socket: newSocket });
   },
 
