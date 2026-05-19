@@ -39,32 +39,82 @@ export const options = {
 
 // We need a known valid PIN to join a room. 
 // Pass it via environment variable: k6 run -e ROOM_PIN=123456 load-test.js
-const ROOM_PIN = __ENV.ROOM_PIN || '577605';
+const ROOM_PIN = __ENV.ROOM_PIN || '872884';
 
 export default function () {
   const nickname = `Player_${__VU}_${__ITER}`;
   const res = ws.connect(SOCKET_IO_URL, function (socket) {
+    console.log("step 0");
     socket.on('open', () => {
       // Wait for Engine.IO open packet before sending Socket.IO connect
     });
 
     socket.on('message', (msg) => {
-      // Engine.IO open packet
-      if (msg.startsWith('0')) {
-        // Send Socket.IO connect packet for /game namespace
-        socket.send('40/game,');
+      // Handle Engine.IO ping/pong heartbeat
+      if (msg === '2') {
+        socket.send('3');
+        return;
       }
 
-      // Socket.IO connected packet for /game
-      if (msg.startsWith('40/game')) {
+      // Engine.IO open packet
+      if (msg.startsWith('0')) {
+        console.log("step 1: Connected to Engine.IO, sending Socket.IO connect for /lobby");
+        // Connect to /lobby namespace first
+        socket.send('40/lobby,');
+      }
+
+      // Socket.IO connected packet for /lobby
+      if (msg.startsWith('40/lobby')) {
+        console.log("Connected to /lobby, emitting join_room...");
         // Connected! Now emit join_room event
         const joinPayload = {
           pin: ROOM_PIN,
           nickname: nickname,
         };
         // 42 indicates a Socket.IO EVENT message
-        // Format for namespace: 42/game,["event_name", payload]
-        socket.send(`42/game,["join_room", ${JSON.stringify(joinPayload)}]`);
+        // Format for namespace: 42/lobby,["event_name", payload]
+        socket.send(`42/lobby,["join_room", ${JSON.stringify(joinPayload)}]`);
+      }
+
+      // Handle Socket.IO EVENT messages for /lobby
+      if (msg.startsWith('42/lobby')) {
+        try {
+          // Extract the array part after the comma
+          const eventDataString = msg.substring(msg.indexOf('['));
+          const data = JSON.parse(eventDataString);
+          const eventName = data[0];
+          const eventPayload = data[1];
+
+          if (eventName === 'room_joined') {
+            joinRoomSuccess.add(1);
+            socket.playerId = eventPayload.player.id; // SAVE playerId
+            console.log(`[VU ${__VU}] Joined lobby successfully, waiting for game_redirect...`);
+          }
+
+          if (eventName === 'game_redirect') {
+            console.log("step 2: Received game_redirect, switching to /game namespace");
+            const sessionId = eventPayload.sessionId;
+            socket.sessionId = sessionId; // Save to socket for later use
+
+            // Connect to /game namespace now
+            socket.send('40/game,');
+          }
+        } catch (e) {
+          console.error('Error parsing lobby message:', e);
+        }
+      }
+
+      // Socket.IO connected packet for /game
+      if (msg.startsWith('40/game')) {
+        console.log(`[VU ${__VU}] Connected to /game namespace. Emitting join_game...`);
+        // Join the game session
+        const joinGamePayload = {
+          sessionId: socket.sessionId,
+          playerId: socket.playerId,
+          nickname: nickname
+        };
+        // Join the game session immediately to avoid missing question_start
+        socket.send(`42/game,["join_game", ${JSON.stringify(joinGamePayload)}]`);
       }
 
       // Handle Socket.IO EVENT messages for /game
@@ -76,29 +126,7 @@ export default function () {
           const eventName = data[0];
           const eventPayload = data[1];
 
-          if (eventName === 'room_joined') {
-            joinRoomSuccess.add(1);
-            // Save playerId for later game phase
-            socket.playerId = eventPayload.player.id;
-            // Now we wait in the room until the Host starts the game.
-          }
-
-          if (eventName === 'game_redirect') {
-            const sessionId = eventPayload.sessionId;
-            socket.sessionId = sessionId; // Save to socket for later use
-            // Join the game session
-            const joinGamePayload = {
-              sessionId: sessionId,
-              playerId: socket.playerId,
-              nickname: nickname
-            };
-            // Emulate navigation delay (Thundering Herd prevention)
-            // Real users take 1-3 seconds to load the new page and reconnect
-            const navDelay = Math.random() * 3000;
-            socket.setTimeout(() => {
-              socket.send(`42/game,["join_game", ${JSON.stringify(joinGamePayload)}]`);
-            }, navDelay);
-          }
+          // Room joined and game_redirect are now handled in /lobby
 
           if (eventName === 'question_start') {
             console.log(`[VU ${__VU}] Received question_start. Waiting to answer...`);
@@ -156,12 +184,12 @@ export default function () {
     });
 
     socket.on('close', () => {
-      // Connection closed
+      console.log(`[VU ${__VU}] Socket CLOSED!`);
     });
 
     socket.on('error', (e) => {
       if (e.error() != 'websocket: close sent') {
-        console.error('WebSocket connection error:', e.error());
+        console.error(`[VU ${__VU}] WebSocket error:`, e.error());
         connectionErrors.add(1);
       }
     });

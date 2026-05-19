@@ -23,8 +23,9 @@ export const GAME_CONSTANTS = {
   /** Buffer time (ms) after game_redirect before question_start
    * MUST be large enough for full redirect cycle: receive redirect → navigate → mount → connect → join
    * 3000ms accounts for slow devices/networks (~550-1700ms + overhead)
+   * Increase this value when running load tests with 100+ bots
    */
-  GAME_REDIRECT_BUFFER_MS: 3000,
+  GAME_REDIRECT_BUFFER_MS: 5000,
 
   // ============================================================
   // REDIS TTL (seconds)

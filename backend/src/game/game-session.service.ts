@@ -162,8 +162,10 @@ export class GameSessionService {
     // Add regular players to leaderboard (their player.id values)
     await this.initLeaderboard(session.id, room.players.map((p) => p.id));
 
-    // Warm up player name cache for fast leaderboard lookups
-    await this.playerCache.warmupSessionCache(session.id);
+    // Warm up player name cache in BACKGROUND - don't block game start!
+    this.playerCache.warmupSessionCache(session.id).catch((e) =>
+      this.logger.warn(`Cache warmup failed (non-critical): ${e.message}`),
+    );
 
     this.logger.log(
       `Game session ${session.id} started for room ${roomId} | ${room.players.length} players`,
