@@ -34,6 +34,7 @@ export const questionService = {
       headers: {
         "Content-Type": "multipart/form-data",
       },
+      timeout: 60000, // 60 seconds for image upload
     });
     return res.data;
   },

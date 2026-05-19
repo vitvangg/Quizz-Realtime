@@ -101,7 +101,8 @@ const CATEGORY_THEMES: Record<string, {
 
 export function QuizCard({ quiz, roomLoading, onDelete, onStartGame }: QuizCardProps) {
   const router = useRouter();
-  const theme = CATEGORY_THEMES[quiz.category as QuizCategory] || CATEGORY_THEMES[QuizCategory.KHAC];
+  const categoryKey = (quiz.category || "").toUpperCase() as QuizCategory;
+  const theme = CATEGORY_THEMES[categoryKey] || CATEGORY_THEMES[QuizCategory.KHAC];
   const CategoryIcon = theme.icon;
 
   return (
@@ -113,9 +114,9 @@ export function QuizCard({ quiz, roomLoading, onDelete, onStartGame }: QuizCardP
       <div className={`${theme.bg} ${theme.text} px-4 py-3 flex items-center justify-between border-b-4 border-black`}>
         <div className="flex items-center gap-2">
           <div className="bg-white border-2 border-black p-1.5 shadow-brutal-sm">
-            <CategoryIcon className="h-5 w-5" />
+            <CategoryIcon className="h-5 w-5 text-black" />
           </div>
-          <span className="font-black uppercase tracking-wide text-sm">{CATEGORY_LABELS[quiz.category as keyof typeof CATEGORY_LABELS] || "Khác"}</span>
+          <span className="font-black uppercase tracking-wide text-sm">{CATEGORY_LABELS[categoryKey] || "Khác"}</span>
         </div>
         <Badge variant="outline" className="bg-white border-2 border-black font-bold text-xs">
           {new Date(quiz.createdAt).toLocaleDateString('vi-VN')}

@@ -1,13 +1,29 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuizStore } from "@/stores/quiz.store";
 import { useRoomStore } from "@/stores/room.store";
 import { useAuthStore } from "@/stores/auth.store";
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
-import { PlusCircle, BookOpen, AlertTriangle, Search } from "lucide-react";
+import { 
+  PlusCircle, 
+  BookOpen, 
+  AlertTriangle, 
+  Search,
+  Calculator,
+  Atom,
+  FlaskConical,
+  Leaf,
+  PenTool,
+  History,
+  Globe,
+  Languages,
+  Cpu,
+  HelpCircle,
+  LayoutGrid
+} from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { QuizCard } from "@/components/quiz/quiz-card";
@@ -29,8 +45,22 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
+const CATEGORY_ICONS: Record<string, any> = {
+  [QuizCategory.TOAN]: Calculator,
+  [QuizCategory.VAT_LI]: Atom,
+  [QuizCategory.HOA_HOC]: FlaskConical,
+  [QuizCategory.SINH_HOC]: Leaf,
+  [QuizCategory.VAN_HOC]: PenTool,
+  [QuizCategory.LICH_SU]: History,
+  [QuizCategory.DIA_LY]: Globe,
+  [QuizCategory.TIENG_ANH]: Languages,
+  [QuizCategory.CONG_NGHE]: Cpu,
+  [QuizCategory.KHAC]: HelpCircle,
+};
+
 export default function MyQuizzesPage() {
   const router = useRouter();
+  const [activeQuizId, setActiveQuizId] = useState<string | null>(null);
   const { 
     quizzes, 
     loading, 
@@ -44,12 +74,12 @@ export default function MyQuizzesPage() {
   const { createRoom, loading: roomLoading, currentRoom, reset } = useRoomStore();
   const { user } = useAuthStore();
 
-  const quizToDelete = useQuizStore((state) => state.currentQuiz?.id || null);
-  const setQuizToDelete = (id: string | null) => {
+  const quizToDeleteId = useQuizStore((state) => state.currentQuiz?.id || null);
+  const setQuizToDeleteId = (id: string | null) => {
     useQuizStore.setState({ currentQuiz: id ? { id } : null });
   };
   
-  const isDeleting = loading && !!quizToDelete;
+  const isDeleting = loading && !!quizToDeleteId;
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -73,14 +103,14 @@ export default function MyQuizzesPage() {
   }, [currentRoom, router]);
 
   const handleDeleteClick = (id: string) => {
-    setQuizToDelete(id);
+    setQuizToDeleteId(id);
   };
 
   const handleConfirmDelete = async () => {
-    if (!quizToDelete) return;
+    if (!quizToDeleteId) return;
     try {
-      await deleteQuiz(quizToDelete);
-      setQuizToDelete(null);
+      await deleteQuiz(quizToDeleteId);
+      setQuizToDeleteId(null);
     } catch (error) {
       console.error(error);
     }
@@ -93,9 +123,12 @@ export default function MyQuizzesPage() {
       return;
     }
     try {
+      setActiveQuizId(quizId);
       await createRoom(quizId);
     } catch (error) {
       toast.error("Không thể tạo phòng");
+    } finally {
+      setActiveQuizId(null);
     }
   };
 
@@ -141,12 +174,23 @@ export default function MyQuizzesPage() {
                 <SelectValue placeholder="Danh mục" />
               </SelectTrigger>
               <SelectContent className="rounded-xl border-4 border-black">
-                <SelectItem value="ALL" className="font-black py-3 uppercase">Tất cả danh mục</SelectItem>
-                {Object.entries(CATEGORY_LABELS).map(([value, label]) => (
-                  <SelectItem key={value} value={value} className="font-bold py-3">
-                    {label}
-                  </SelectItem>
-                ))}
+                <SelectItem value="ALL" className="font-black py-3 uppercase">
+                  <div className="flex items-center gap-2">
+                    <LayoutGrid className="h-4 w-4" />
+                    Tất cả danh mục
+                  </div>
+                </SelectItem>
+                {Object.entries(CATEGORY_LABELS).map(([value, label]) => {
+                  const Icon = CATEGORY_ICONS[value as QuizCategory] || HelpCircle;
+                  return (
+                    <SelectItem key={value} value={value} className="font-bold py-3">
+                      <div className="flex items-center gap-2">
+                        <Icon className="h-4 w-4" />
+                        {label}
+                      </div>
+                    </SelectItem>
+                  );
+                })}
               </SelectContent>
             </Select>
           </div>
@@ -181,7 +225,7 @@ export default function MyQuizzesPage() {
               <QuizCard
                 key={quiz.id}
                 quiz={quiz}
-                roomLoading={roomLoading}
+                roomLoading={roomLoading && activeQuizId === quiz.id}
                 onDelete={handleDeleteClick}
                 onStartGame={handleStartGame}
               />
@@ -190,7 +234,7 @@ export default function MyQuizzesPage() {
         )}
 
         {/* Delete Dialog */}
-        <Dialog open={!!quizToDelete} onOpenChange={(open) => !open && setQuizToDelete(null)}>
+        <Dialog open={!!quizToDeleteId} onOpenChange={(open) => !open && setQuizToDeleteId(null)}>
           <DialogContent className="sm:max-w-md border-4 border-black shadow-brutal-xl rounded-xl">
             <DialogHeader className="flex flex-col items-center pt-4">
               <div className="bg-white border-4 border-black shadow-brutal p-5 mb-4">
@@ -204,7 +248,7 @@ export default function MyQuizzesPage() {
             <DialogFooter className="flex gap-4 mt-6 sm:justify-center p-2">
               <Button
                 variant="outline"
-                onClick={() => setQuizToDelete(null)}
+                onClick={() => setQuizToDeleteId(null)}
                 className="flex-1 rounded-xl h-14 font-black border-4 border-black shadow-brutal-sm hover:shadow-none hover:translate-x-0.5 hover:translate-y-0.5"
                 disabled={isDeleting}
               >

@@ -251,14 +251,7 @@ export function QuestionCard({
                     />
                     {!readOnly && (
                       <div className="absolute inset-0 bg-black/40 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                        <Button
-                          variant="secondary"
-                          size="icon"
-                          className="rounded-full h-9 w-9"
-                          onClick={() => fileInputRef.current?.click()}
-                        >
-                          <Camera className="h-4 w-4" />
-                        </Button>
+
                         <Button
                           variant="destructive"
                           size="icon"
