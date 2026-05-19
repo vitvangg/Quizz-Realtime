@@ -88,13 +88,13 @@ export default function WatchQuizPage() {
   return (
     <div className="max-w-4xl mx-auto py-12 px-4 space-y-12 pb-32">
       {/* HEADER */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 sticky top-16 z-40 bg-background/90 backdrop-blur-xl py-6 border-b transition-all duration-300">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 sticky top-16 z-40 bg-background/90 backdrop-blur-xl py-6 px-4 md:px-8 border-b transition-all duration-300 rounded-b-3xl">
         <div className="flex items-center gap-5">
           <Link href="/quiz">
             <Button
               variant="ghost"
               size="icon"
-              className="rounded-2xl bg-muted hover:bg-primary hover:text-white transition-all"
+              className="rounded-full bg-muted hover:bg-primary hover:text-white transition-all border shadow-sm"
             >
               <ArrowLeft className="h-5 w-5" />
             </Button>
