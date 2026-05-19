@@ -8,10 +8,9 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   PlusCircle,
-  Save,
+
   ArrowLeft,
-  LayoutGrid,
-  Loader2,
+
   Info,
   FileText
 } from "lucide-react";
@@ -259,7 +258,7 @@ export default function EditQuizPage() {
       for (let i = 0; i < questions.length; i++) {
         const q = questions[i];
         let questionId = q.id;
-        
+
         if (q.id.startsWith("q-")) {
           // Tạo câu hỏi mới
           const newQuestion = await questionStore.create({
@@ -336,7 +335,7 @@ export default function EditQuizPage() {
   return (
     <div className="max-w-4xl mx-auto py-12 px-4 space-y-12 pb-32">
       {/* HEADER */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 sticky top-16 z-40 bg-background/90 backdrop-blur-xl py-6 px-4 md:px-8 border-b transition-all duration-300 rounded-b-3xl">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 sticky top-16 z-40 bg-background/90 backdrop-blur-xl py-6 px-4 md:px-8 border-b transition-all duration-300 rounded-3xl">
         <div className="flex items-center gap-5">
           <Link href="/quiz">
             <Button
@@ -387,7 +386,7 @@ export default function EditQuizPage() {
                   placeholder="Tên Quiz..."
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  className="text-2xl font-black py-8 border-2 border-transparent bg-background focus:border-primary/50 transition-all rounded-2xl"
+                  className="text-2xl font-black py-8 border-2 border-transparent bg-white focus:border-primary/50 transition-all rounded-2xl"
                 />
               </div>
 
@@ -396,7 +395,7 @@ export default function EditQuizPage() {
                   Danh mục
                 </Label>
                 <Select value={category} onValueChange={(value) => setCategory(value as QuizCategory)}>
-                  <SelectTrigger className="text-xl font-black py-8 border-2 border-transparent bg-background focus:border-primary/50 transition-all rounded-2xl h-auto">
+                  <SelectTrigger className="text-xl font-black py-8 border-2 border-transparent bg-white focus:border-primary/50 transition-all rounded-2xl h-8">
                     <SelectValue placeholder="Chọn danh mục" />
                   </SelectTrigger>
                   <SelectContent className="rounded-2xl border-2">

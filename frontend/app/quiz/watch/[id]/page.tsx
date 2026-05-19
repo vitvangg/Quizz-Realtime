@@ -4,33 +4,18 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { 
-  ArrowLeft, 
-  LayoutGrid, 
-  Eye,
+import {
+  ArrowLeft,
   Info,
-  FileText 
+  FileText
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { QuestionCard } from "@/components/quiz/question-card";
 import { quizService } from "@/services/quiz.service";
-import { CATEGORY_LABELS } from "@/types/quiz.type";
+import { CATEGORY_LABELS, Question } from "@/types/quiz.type";
 
-interface Answer {
-  id: string;
-  content: string;
-  isCorrect: boolean;
-}
 
-interface Question {
-  id: string;
-  content: string;
-  imageUrl?: string;
-  imageId?: string;
-  timeLimit: number;
-  answers: Answer[];
-}
 
 export default function WatchQuizPage() {
   const router = useRouter();
@@ -88,7 +73,7 @@ export default function WatchQuizPage() {
   return (
     <div className="max-w-4xl mx-auto py-12 px-4 space-y-12 pb-32">
       {/* HEADER */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 sticky top-16 z-40 bg-background/90 backdrop-blur-xl py-6 px-4 md:px-8 border-b transition-all duration-300 rounded-b-3xl">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 sticky top-16 z-40 bg-background/90 backdrop-blur-xl py-6 px-4 md:px-8 border-b transition-all duration-300 rounded-3xl">
         <div className="flex items-center gap-5">
           <Link href="/quiz">
             <Button
@@ -105,7 +90,7 @@ export default function WatchQuizPage() {
               Chi tiết Quiz
             </h1>
             <p className="text-sm text-muted-foreground font-medium flex items-center gap-1.5">
-              <Eye className="h-3 w-3" /> Chế độ chỉ xem
+              Chế độ chỉ xem
             </p>
           </div>
         </div>

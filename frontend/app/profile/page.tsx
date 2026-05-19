@@ -7,14 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { 
-  User, 
+import {
+  User,
   Loader2,
   Camera,
   Phone,
   UserCircle,
   FileText,
-  Upload
 } from "lucide-react";
 import Image from "next/image";
 
@@ -22,7 +21,7 @@ export default function ProfileInfoPage() {
   const { user } = useAuthStore();
   const { updateProfile, uploadAvatar, loading } = useUserStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
+
   const [isEditing, setIsEditing] = useState(false);
   const [profile, setProfile] = useState({
     fullName: user?.fullName || "",
@@ -103,8 +102,8 @@ export default function ProfileInfoPage() {
           </div>
 
           {!isEditing && (
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={() => setIsEditing(true)}
               className="rounded-xl font-bold border-2 border-primary/20 hover:bg-primary hover:text-white transition-all"
             >
@@ -120,17 +119,17 @@ export default function ProfileInfoPage() {
             <div className="relative group">
               <div className="w-32 h-32 rounded-3xl overflow-hidden border-4 border-background shadow-xl bg-muted flex items-center justify-center">
                 {user?.avatar ? (
-                  <Image 
-                    src={user.avatar} 
-                    alt="Avatar" 
-                    fill 
+                  <Image
+                    src={user.avatar}
+                    alt="Avatar"
+                    fill
                     className="object-cover"
                   />
                 ) : (
                   <UserCircle className="w-16 h-16 text-muted-foreground" />
                 )}
               </div>
-              
+
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
@@ -139,7 +138,7 @@ export default function ProfileInfoPage() {
               >
                 {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Camera className="w-5 h-5" />}
               </button>
-              
+
               <input
                 type="file"
                 ref={fileInputRef}

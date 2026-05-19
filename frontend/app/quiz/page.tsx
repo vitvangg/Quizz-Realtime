@@ -7,10 +7,10 @@ import { useRoomStore } from "@/stores/room.store";
 import { useAuthStore } from "@/stores/auth.store";
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
-import { 
-  PlusCircle, 
-  BookOpen, 
-  AlertTriangle, 
+import {
+  PlusCircle,
+  BookOpen,
+  AlertTriangle,
   Search,
   Calculator,
   Atom,
@@ -22,7 +22,6 @@ import {
   Languages,
   Cpu,
   HelpCircle,
-  LayoutGrid
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -61,16 +60,16 @@ const CATEGORY_ICONS: Record<string, any> = {
 export default function MyQuizzesPage() {
   const router = useRouter();
   const [activeQuizId, setActiveQuizId] = useState<string | null>(null);
-  const { 
-    quizzes, 
-    loading, 
-    delete: deleteQuiz, 
-    search, 
-    searchKeyword, 
-    selectedCategory, 
-    setFilters 
+  const {
+    quizzes,
+    loading,
+    delete: deleteQuiz,
+    search,
+    searchKeyword,
+    selectedCategory,
+    setFilters
   } = useQuizStore();
-  
+
   const { createRoom, loading: roomLoading, currentRoom, reset } = useRoomStore();
   const { user } = useAuthStore();
 
@@ -78,7 +77,7 @@ export default function MyQuizzesPage() {
   const setQuizToDeleteId = (id: string | null) => {
     useQuizStore.setState({ currentQuiz: id ? { id } : null });
   };
-  
+
   const isDeleting = loading && !!quizToDeleteId;
 
   useEffect(() => {
@@ -166,8 +165,8 @@ export default function MyQuizzesPage() {
             />
           </div>
           <div className="w-full md:w-72">
-            <Select 
-              value={selectedCategory} 
+            <Select
+              value={selectedCategory}
               onValueChange={(val) => setFilters(searchKeyword, val)}
             >
               <SelectTrigger className="h-14 rounded-xl border-4 border-black font-black text-lg bg-white">
@@ -176,7 +175,7 @@ export default function MyQuizzesPage() {
               <SelectContent className="rounded-xl border-4 border-black">
                 <SelectItem value="ALL" className="font-black py-3 uppercase">
                   <div className="flex items-center gap-2">
-                    <LayoutGrid className="h-4 w-4" />
+
                     Tất cả danh mục
                   </div>
                 </SelectItem>
