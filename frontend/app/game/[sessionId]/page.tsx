@@ -12,7 +12,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { apiClient } from '@/lib/apiClient';
 import { registerStoreUpdater } from '@/lib/socket';
 import { getGameSocket, connectGameSocket } from '@/lib/game-socket';
-import { Zap, Trophy, Crown, Clock, Target, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
+import { usePagination } from '@/hooks/usePagination';
+import { PaginationControls } from '@/components/common/PaginationControls';
+import { Zap, Trophy, Crown, Clock, Target, CheckCircle, XCircle, AlertTriangle, Users } from 'lucide-react';
 
 // ============================================================================
 // FREEZE OVERLAY COMPONENT - Neo-Brutalism Style
@@ -131,6 +133,43 @@ export default function GamePage() {
   const hasRecoveredRef = useRef(false);
   const joinedSessionRef = useRef<string | null>(null);
   const lastJoinedTimeRef = useRef<number>(0);
+
+  // Pagination for host player panel during game - 15 players per page
+  const hostPlayerPageSize = 15;
+  const {
+    page: hostPlayerPage,
+    totalPages: hostPlayerTotalPages,
+    totalItems: hostPlayerTotalItems,
+    startIndex: hostPlayerStartIndex,
+    endIndex: hostPlayerEndIndex,
+    hasNextPage: hostPlayerHasNextPage,
+    hasPrevPage: hostPlayerHasPrevPage,
+    nextPage: hostPlayerNextPage,
+    prevPage: hostPlayerPrevPage,
+    paginatedItems: paginatedHostPlayers,
+    shouldShowPagination: hostPlayerShouldShowPagination,
+    resetPage: resetHostPlayerPage,
+  } = usePagination(leaderboard, { pageSize: hostPlayerPageSize });
+
+  // Pagination for host leaderboard in result/finished - 20 players per page
+  const hostLeaderboardPageSize = 20;
+  const {
+    page: leaderboardPage,
+    totalPages: leaderboardTotalPages,
+    totalItems: leaderboardTotalItems,
+    startIndex: leaderboardStartIndex,
+    endIndex: leaderboardEndIndex,
+    hasNextPage: leaderboardHasNextPage,
+    hasPrevPage: leaderboardHasPrevPage,
+    nextPage: leaderboardNextPage,
+    prevPage: leaderboardPrevPage,
+    paginatedItems: paginatedLeaderboard,
+    shouldShowPagination: leaderboardShouldShowPagination,
+    resetPage: resetLeaderboardPage,
+  } = usePagination(leaderboard, { pageSize: hostLeaderboardPageSize });
+
+  // Player count for non-host players
+  const activePlayerCount = leaderboard.filter(e => e.connection !== 'LEFT').length;
 
   useEffect(() => {
     hasRecoveredRef.current = false;
@@ -404,6 +443,18 @@ export default function GamePage() {
       console.log('[GamePage] session_transition:', { resolvedNewSessionId, resolvedOldSessionId, data });
 
       const state = useGameStore.getState();
+      console.log('[GamePage] BEFORE reset: leaderboard.length=', state.leaderboard?.length, 'myScore=', state.myScore);
+
+      // CRITICAL: Reset leaderboard AND scores IMMEDIATELY in store for new game
+      // This ensures UI updates right away, before router.replace completes
+      // Also update sessionId to prevent old session events from affecting new session
+      useGameStore.setState({
+        leaderboard: [],
+        myScore: 0,
+        myRank: null,
+        sessionId: resolvedNewSessionId  // Update sessionId immediately
+      });
+      console.log('[GamePage] AFTER reset: leaderboard=[], myScore=0, myRank=null, sessionId=', resolvedNewSessionId);
 
       // GUARD: Ignore if we're already handling this new session (duplicate event)
       // Use sessionStorage to survive page remount attempts
@@ -430,13 +481,14 @@ export default function GamePage() {
 
       // Store embedded state for recovery after page remount.
       // This is the SOLE source of truth after remount — HTTP fetch is SKIPPED.
+      // CRITICAL: leaderboard MUST be reset to empty for new game
       sessionStorage.setItem('playAgainState', JSON.stringify({
         sessionId: resolvedNewSessionId,
         gameStatus: GameState.STARTING,
         currentQuestion: null,
         questionIndex: 0,
         totalQuestions: data.state?.totalQuestions ?? 0,
-        leaderboard: data.state?.leaderboard || [],
+        leaderboard: [],  // Reset leaderboard for new game
         correctAnswerId: null,
         hasAnswered: false,
         selectedAnswerId: null,
@@ -491,6 +543,27 @@ export default function GamePage() {
       }
 
       // Toast handled by backend
+    };
+
+    // Handle player answer - immediate UI update for host
+    // Updates hasAnswered status as soon as player submits, before leaderboard_update
+    const handlePlayerAnswered = (data: { sessionId: string; playerId: string; questionId: string; hasAnswered: boolean; answeredAt: number }) => {
+      console.log('[GamePage] player_answered:', data);
+
+      const state = useGameStore.getState();
+
+      // Immediately update hasAnswered in leaderboard (optimistic update)
+      if (Array.isArray(state.leaderboard)) {
+        const updatedLeaderboard = state.leaderboard.map((entry) => {
+          if (entry?.playerId === data.playerId) {
+            return { ...entry, hasAnswered: data.hasAnswered };
+          }
+          return entry;
+        });
+        useGameStore.setState({ leaderboard: updatedLeaderboard });
+      }
+
+      // No toast for answer - just silent UI update
     };
 
     // Handle player connection status changes
@@ -639,8 +712,25 @@ export default function GamePage() {
     };
 
     // Handle leaderboard_update event - merges with existing leaderboard preserving connection/hasAnswered
-    const handleLeaderboardUpdate = (data: { leaderboard: any[] }) => {
+    const handleLeaderboardUpdate = (data: { leaderboard: any[]; sessionId?: string }) => {
       if (!data?.leaderboard || !Array.isArray(data.leaderboard)) {
+        return;
+      }
+
+      // CRITICAL: Validate sessionId matches current session
+      // This prevents old session leaderboard data from overriding new session
+      const currentSessionId = useGameStore.getState().sessionId;
+      const incomingSessionId = data.sessionId;
+      console.log('[GamePage] leaderboard_update:', {
+        incomingSessionId,
+        currentSessionId,
+        leaderboardLength: data.leaderboard?.length
+      });
+      if (incomingSessionId && incomingSessionId !== currentSessionId) {
+        console.warn('[GamePage] leaderboard_update: sessionId mismatch, ignoring', {
+          incoming: incomingSessionId,
+          current: currentSessionId
+        });
         return;
       }
 
@@ -658,6 +748,7 @@ export default function GamePage() {
         };
       });
 
+      console.log('[GamePage] leaderboard_update: setting leaderboard with', mergedLeaderboard.length, 'entries, first entry score:', mergedLeaderboard[0]?.score);
       useGameStore.setState({ leaderboard: mergedLeaderboard });
     };
 
@@ -676,6 +767,7 @@ export default function GamePage() {
     socket.on('session_switched', handleSessionTransition);
     socket.on('player_left', handlePlayerLeft);
     socket.on('player_joined', handlePlayerJoined);
+    socket.on('player_answered', handlePlayerAnswered);
     socket.on('player_status', handlePlayerStatus);
     socket.on('leaderboard_update', handleLeaderboardUpdate);
 
@@ -695,6 +787,7 @@ export default function GamePage() {
       socket.off('session_switched', handleSessionTransition);
       socket.off('player_left', handlePlayerLeft);
       socket.off('player_joined', handlePlayerJoined);
+      socket.off('player_answered', handlePlayerAnswered);
       socket.off('player_status', handlePlayerStatus);
       socket.off('leaderboard_update', handleLeaderboardUpdate);
     };
@@ -712,6 +805,16 @@ export default function GamePage() {
 
   useEffect(() => {
     if (!sessionId || sessionId === 'undefined') return;
+
+    // CRITICAL: Reset game store for new session
+    // This ensures complete cleanup when navigating to a new game session
+    console.log('[GamePage] New session detected, resetting store for:', sessionId);
+    useGameStore.getState().reset();
+    console.log('[GamePage] After reset, store state:', {
+      leaderboard: useGameStore.getState().leaderboard,
+      myScore: useGameStore.getState().myScore,
+      myRank: useGameStore.getState().myRank
+    });
 
     if (!authReady) {
       console.log('[GamePage] Waiting for auth to hydrate...');
@@ -825,6 +928,8 @@ export default function GamePage() {
             hasAnswered: false,
             selectedAnswerId: null,
             countdown: playAgain.countdown ?? 5,
+            myScore: 0,      // Reset for new game
+            myRank: null,    // Reset for new game
             _isRecovering: false,
           });
 
@@ -920,6 +1025,7 @@ export default function GamePage() {
           countdown: 0,
           correctAnswerId: null,
         });
+        console.log('[GamePage] recoverState: set leaderboard=[]');
 
         let playerHasAnswered = false;
 
@@ -1041,10 +1147,19 @@ export default function GamePage() {
               ? (response.state.correctAnswerId || httpData?.correctAnswerId || null)
               : null;
             
+            // CRITICAL: If game is WAITING (new game after play_again), reset leaderboard
+            // Backend may return leaderboard from old session
+            const isNewGame = response.state.status === GameState.WAITING;
+            
             // Defensive: ensure leaderboard is an array
-            const safeLeaderboard = Array.isArray(response.state.leaderboard) 
-              ? response.state.leaderboard 
-              : (Array.isArray(httpData?.leaderboard) ? httpData.leaderboard : []);
+            // Only use response leaderboard if game is NOT in WAITING state
+            const safeLeaderboard = isNewGame 
+              ? []  // Reset leaderboard for new game
+              : (Array.isArray(response.state.leaderboard) 
+                  ? response.state.leaderboard 
+                  : (Array.isArray(httpData?.leaderboard) ? httpData.leaderboard : []));
+            
+            console.log('[GamePage] host_join_game: isNewGame=', isNewGame, 'leaderboard length=', safeLeaderboard.length);
             
             useGameStore.setState({
               sessionId,
@@ -1061,6 +1176,8 @@ export default function GamePage() {
               leaderboard: safeLeaderboard,
               timeRemaining: response.state.remainingTime ?? response.state.currentQuestion?.timeLimit ?? 0,
               correctAnswerId,
+              myScore: 0,       // Reset for new game session
+              myRank: null,     // Reset for new game session
               _isRecovering: false,
             });
             if (!actualIsHost) {
@@ -1091,6 +1208,8 @@ export default function GamePage() {
                   totalQuestions: playerResponse.state.totalQuestions ?? 0,
                   leaderboard: safeLeaderboard,
                   timeRemaining: playerResponse.state.remainingTime ?? playerResponse.state.currentQuestion?.timeLimit ?? 0,
+                  myScore: 0,       // Reset for new game session
+                  myRank: null,     // Reset for new game session
                   _isRecovering: false,
                 });
               } else {
@@ -1127,10 +1246,19 @@ export default function GamePage() {
           if (response.success && response.state) {
             console.log('[GamePage] join_game success');
             
+            // CRITICAL: If game is WAITING (new game after play_again), reset leaderboard
+            // Backend may return leaderboard from old session
+            const isNewGame = response.state.status === GameState.WAITING;
+            
             // Defensive: ensure leaderboard is an array
-            const safeLeaderboard = Array.isArray(response.state.leaderboard)
-              ? response.state.leaderboard
-              : (Array.isArray(httpData?.leaderboard) ? httpData.leaderboard : []);
+            // Only use response leaderboard if game is NOT in WAITING state
+            const safeLeaderboard = isNewGame
+              ? []
+              : (Array.isArray(response.state.leaderboard)
+                  ? response.state.leaderboard
+                  : (Array.isArray(httpData?.leaderboard) ? httpData.leaderboard : []));
+            
+            console.log('[GamePage] join_game: isNewGame=', isNewGame, 'leaderboard length=', safeLeaderboard.length);
             
             const myEntry = safeLeaderboard.find((e: any) => e?.playerId === storedPlayerId);
             const showLeaderboard = response.state.status !== GameState.QUESTION_ACTIVE;
@@ -1142,6 +1270,8 @@ export default function GamePage() {
             const finalLeaderboard = showLeaderboard ? safeLeaderboard : useGameStore.getState().leaderboard;
             const safeFinalLeaderboard = Array.isArray(finalLeaderboard) ? finalLeaderboard : [];
             
+            // CRITICAL: Always reset scores for new game session
+            // Do NOT use old myScore/myRank from store
             const myEntryFromFinal = safeFinalLeaderboard.find((e: any) => e?.playerId === storedPlayerId);
             
             useGameStore.setState({
@@ -1157,8 +1287,10 @@ export default function GamePage() {
               leaderboard: safeFinalLeaderboard,
               timeRemaining: response.state.remainingTime ?? response.state.currentQuestion?.timeLimit ?? 0,
               correctAnswerId,
-              myScore: myEntryFromFinal?.score ?? useGameStore.getState().myScore ?? 0,
-              myRank: myEntryFromFinal?.rank ?? useGameStore.getState().myRank ?? null,
+              // Reset scores - get from leaderboard or default to 0
+              // Do NOT fallback to old store values
+              myScore: myEntryFromFinal?.score ?? 0,
+              myRank: myEntryFromFinal?.rank ?? null,
               _isRecovering: false,
             });
           } else {
@@ -1438,21 +1570,49 @@ export default function GamePage() {
 
     return (
       <div className="min-h-screen bg-neon-yellow p-4">
-        {/* Host Player List Panel */}
+        {/* Player count for non-host players */}
+        {!isHost && (
+          <div className="max-w-4xl mx-auto mb-4">
+            <Card className="bg-white border-4 border-black shadow-brutal">
+              <CardContent className="py-3 px-4 flex items-center gap-2">
+                <Users className="w-5 h-5 text-black/50" />
+                <span className="font-bold text-black/70">
+                  {activePlayerCount} người đang chơi
+                </span>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* Host Player List Panel with Pagination */}
         {isHost && (
           <div className="max-w-6xl mx-auto mb-4">
             <Card className="bg-white border-4 border-black shadow-brutal">
               <CardHeader className="bg-neon-green border-b-4 border-black pb-3">
-                <div className="flex justify-between items-center">
-                  <CardTitle className="text-xl font-black text-black">Người chơi</CardTitle>
+                <div className="flex justify-between items-center gap-4">
+                  <CardTitle className="text-xl font-black text-black">Người chơi ({hostPlayerTotalItems})</CardTitle>
                   <span className="text-sm font-bold text-black/70">
                     {leaderboard.filter(e => e.connection !== 'LEFT').length} active
                   </span>
                 </div>
               </CardHeader>
               <CardContent className="p-3">
-                <div className="max-h-48 overflow-y-auto space-y-2">
-                  {leaderboard.map((entry) => (
+                {/* Pagination controls */}
+                {hostPlayerShouldShowPagination && (
+                  <div className="mb-3">
+                    <PaginationControls
+                      page={hostPlayerPage}
+                      totalPages={hostPlayerTotalPages}
+                      totalItems={hostPlayerTotalItems}
+                      startIndex={hostPlayerStartIndex}
+                      endIndex={hostPlayerEndIndex}
+                      onPrev={hostPlayerPrevPage}
+                      onNext={hostPlayerNextPage}
+                    />
+                  </div>
+                )}
+                <div className="max-h-64 overflow-y-auto space-y-2">
+                  {paginatedHostPlayers.map((entry) => (
                     <div key={entry.playerId} className="flex items-center justify-between p-2 bg-gray-100 rounded-lg border-2 border-black">
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-sm text-black/50 w-6">#{entry.rank}</span>
@@ -1473,7 +1633,6 @@ export default function GamePage() {
                           {entry.hasAnswered ? 'Đã trả lời' : 'Chưa trả lời'}
                         </span>
                       </div>
-                      <span className="font-black text-neon-blue">{entry.score} pts</span>
                     </div>
                   ))}
                   {leaderboard.length === 0 && (
@@ -1675,12 +1834,26 @@ export default function GamePage() {
               <CardHeader className="bg-neon-yellow border-b-4 border-black pb-4">
                 <CardTitle className="text-xl font-black uppercase flex items-center gap-2">
                   <Trophy className="w-6 h-6 text-black" />
-                  Bảng xếp hạng
+                  Bảng xếp hạng ({leaderboardTotalItems})
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-3">
-                  {leaderboard.slice(0, 5).map((entry, idx) => (
+                {/* Pagination controls */}
+                {leaderboardShouldShowPagination && (
+                  <div className="mb-4">
+                    <PaginationControls
+                      page={leaderboardPage}
+                      totalPages={leaderboardTotalPages}
+                      totalItems={leaderboardTotalItems}
+                      startIndex={leaderboardStartIndex}
+                      endIndex={leaderboardEndIndex}
+                      onPrev={leaderboardPrevPage}
+                      onNext={leaderboardNextPage}
+                    />
+                  </div>
+                )}
+                <div className="space-y-3 max-h-80 overflow-y-auto">
+                  {paginatedLeaderboard.map((entry, idx) => (
                     <div key={entry.playerId} className={`
                       flex justify-between items-center p-4 rounded-xl border-4 border-black
                       ${entry.rank === 1 ? 'bg-neon-yellow shadow-brutal' : entry.rank === 2 ? 'bg-gray-300 shadow-brutal-sm' : entry.rank === 3 ? 'bg-orange-400 shadow-brutal-sm' : 'bg-white shadow-brutal-sm'}
@@ -1769,21 +1942,35 @@ export default function GamePage() {
               <CardHeader className="bg-neon-green border-b-4 border-black pb-4">
                 <CardTitle className="text-xl font-black uppercase flex items-center gap-2">
                   <Crown className="w-6 h-6 text-black" />
-                  Bảng xếp hạng
+                  Bảng xếp hạng ({leaderboardTotalItems})
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-3">
-                  {leaderboard.map((entry, idx) => (
+                {/* Pagination controls */}
+                {leaderboardShouldShowPagination && (
+                  <div className="mb-4">
+                    <PaginationControls
+                      page={leaderboardPage}
+                      totalPages={leaderboardTotalPages}
+                      totalItems={leaderboardTotalItems}
+                      startIndex={leaderboardStartIndex}
+                      endIndex={leaderboardEndIndex}
+                      onPrev={leaderboardPrevPage}
+                      onNext={leaderboardNextPage}
+                    />
+                  </div>
+                )}
+                <div className="space-y-3 max-h-96 overflow-y-auto">
+                  {paginatedLeaderboard.map((entry, idx) => (
                     <div key={entry.playerId} className={`
                       flex justify-between items-center p-4 rounded-xl border-4 border-black
-                      ${idx === 0 ? 'bg-neon-yellow shadow-brutal' : idx === 1 ? 'bg-gray-300 shadow-brutal-sm' : idx === 2 ? 'bg-orange-400 shadow-brutal-sm' : 'bg-white shadow-brutal-sm'}
+                      ${entry.rank === 1 ? 'bg-neon-yellow shadow-brutal' : entry.rank === 2 ? 'bg-gray-300 shadow-brutal-sm' : entry.rank === 3 ? 'bg-orange-400 shadow-brutal-sm' : 'bg-white shadow-brutal-sm'}
                     `}>
                       <div className="flex items-center gap-3">
                         <span className={`w-12 h-12 rounded-xl border-4 border-black flex items-center justify-center text-2xl ${
-                          idx === 0 ? 'bg-black text-neon-yellow' : idx === 1 ? 'bg-black text-gray-300' : idx === 2 ? 'bg-black text-orange-400' : 'bg-black/20 text-black'
+                          entry.rank === 1 ? 'bg-black text-neon-yellow' : entry.rank === 2 ? 'bg-black text-gray-300' : entry.rank === 3 ? 'bg-black text-orange-400' : 'bg-black/20 text-black'
                         }`}>
-                          {idx === 0 ? '👑' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : entry.rank}
+                          {entry.rank === 1 ? '👑' : entry.rank === 2 ? '🥈' : entry.rank === 3 ? '🥉' : entry.rank}
                         </span>
                         <span className="font-black text-xl text-black">{entry.nickname}</span>
                         <span className={`

@@ -6,6 +6,8 @@ import { Play, Copy, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PlayerList } from './player-list';
+import { PaginationControls } from '@/components/common/PaginationControls';
+import { usePagination } from '@/hooks/usePagination';
 import { useRoomStore } from '@/stores/room.store';
 import { useGameStore } from '@/stores/game.store';
 import { useAuthStore } from '@/stores/auth.store';
@@ -28,6 +30,22 @@ export function WaitingScreen({ roomId }: WaitingScreenProps) {
     reset: resetRoomStore,
   } = useRoomStore();
   const [copied, setCopied] = useState(false);
+
+  // Pagination for lobby player list - 20 players per page
+  const lobbyPageSize = 20;
+  const {
+    page: lobbyPage,
+    totalPages: lobbyTotalPages,
+    totalItems: lobbyTotalItems,
+    startIndex: lobbyStartIndex,
+    endIndex: lobbyEndIndex,
+    hasNextPage: lobbyHasNextPage,
+    hasPrevPage: lobbyHasPrevPage,
+    nextPage: lobbyNextPage,
+    prevPage: lobbyPrevPage,
+    paginatedItems: paginatedPlayers,
+    shouldShowPagination: lobbyShouldShowPagination,
+  } = usePagination(players, { pageSize: lobbyPageSize });
 
   const isHost = !!(
     currentPlayer?.isHost ||
@@ -271,11 +289,24 @@ export function WaitingScreen({ roomId }: WaitingScreenProps) {
 
           {/* Right Column - Player List */}
           <div>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-black text-lg uppercase tracking-wide">
+                Người chơi ({lobbyTotalItems})
+              </h3>
+            </div>
             <PlayerList
-              players={players}
+              players={paginatedPlayers}
               isHost={isHost}
               currentPlayerId={currentPlayer?.id}
               hostId={currentRoom.hostId}
+              page={lobbyPage}
+              totalPages={lobbyTotalPages}
+              totalItems={lobbyTotalItems}
+              startIndex={lobbyStartIndex}
+              endIndex={lobbyEndIndex}
+              onPrev={lobbyPrevPage}
+              onNext={lobbyNextPage}
+              showPagination={lobbyShouldShowPagination}
             />
           </div>
         </div>

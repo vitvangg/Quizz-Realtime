@@ -11,7 +11,7 @@ export const GAME_CONSTANTS = {
   // ============================================================
   
   /** Countdown seconds before game starts */
-  COUNTDOWN_SECONDS: 5,
+  COUNTDOWN_SECONDS: 3,
 
   /** Delay between countdown ticks (ms) */
   COUNTDOWN_TICK_DELAY: 1000,

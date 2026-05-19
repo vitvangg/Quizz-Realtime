@@ -21,6 +21,7 @@ import { setupRedisAdapter } from './redis-adapter.setup';
 import {
   PlayerJoinedEvent,
   PlayerLeftEvent,
+  PlayerAnsweredEvent,
 } from '../common/socket/socket-events.interface';
 import { GAME_CONSTANTS } from '../common/constants';
 
@@ -487,7 +488,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
       // Emit leaderboard_update for host to populate player list
       const leaderboard = await this.gameSessionService.getLeaderboard(result.session.id);
-      this.server.to(result.session.id).emit('leaderboard_update', { leaderboard });
+      this.server.to(result.session.id).emit('leaderboard_update', { sessionId: result.session.id, leaderboard });
 
       return { success: true, sessionId: result.session.id };
     } catch (error) {
@@ -558,7 +559,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
       // Emit leaderboard_update for host to update player list
       const leaderboard = await this.gameSessionService.getLeaderboard(payload.sessionId);
-      this.server.to(payload.sessionId).emit('leaderboard_update', { leaderboard });
+      this.server.to(payload.sessionId).emit('leaderboard_update', { sessionId: payload.sessionId, leaderboard });
 
       // Schedule question end timer (server-driven)
       const nextCallback = (data: any) => this.handleQuestionEnd(payload.sessionId, data);
@@ -695,27 +696,41 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         this.roomGateway.server.to(payload.roomId).emit('countdown_tick', { remaining: i - 1 });
       }
 
+      // Emit redirect to players in room
+      this.server.to(payload.roomId).emit('game_redirect', { url: `/game/${result.session.id}`, sessionId: result.session.id });
+      this.roomGateway.server.to(payload.roomId).emit('game_redirect', { url: `/game/${result.session.id}`, sessionId: result.session.id });
+
       // Buffer time for players to navigate and join the new game session
       await this.delay(GAME_CONSTANTS.GAME_REDIRECT_BUFFER_MS);
 
-      const questionEndCallback = (data: any) => this.handleQuestionEnd(result.session.id, data);
-      this.sessionCallbacks.set(result.session.id, questionEndCallback);
-      this.gameSessionService.scheduleQuestionEnd(result.session.id, result.firstQuestion.timeLimit, questionEndCallback);
+      // Create questionStartTime at the EXACT moment question begins (server is source of truth)
+      const questionStartTime = Date.now();
 
-      await this.gameSessionService.updateQuestionStartTime(result.session.id, Date.now());
+      // Clear answered status for new question
+      await this.gameSessionService.clearAnsweredPlayers(result.session.id);
 
       const questionStartPayload = {
         sessionId: result.session.id,
         questionIndex: 0,
         question: result.firstQuestion,
         totalQuestions: result.totalQuestions,
-        timeRemaining: result.firstQuestion.timeLimit,
-        serverTime: Date.now(),
+        questionStartTime,
+        serverTime: questionStartTime,
+        timeLimit: result.firstQuestion.timeLimit,
         questionVersion: 1,
       };
 
-      // Only emit to /game namespace - players must be on game page to receive
+      // Emit question_start BEFORE updating questionStartTime in cache
+      // This ensures the server and client have the same reference point
       this.server.to(result.session.id).emit('question_start', questionStartPayload);
+
+      // Update questionStartTime in cache AFTER emitting (for scoring calculations)
+      await this.gameSessionService.updateQuestionStartTime(result.session.id, questionStartTime);
+
+      // Schedule question end timer (server-driven)
+      const questionEndCallback = (data: any) => this.handleQuestionEnd(result.session.id, data);
+      this.sessionCallbacks.set(result.session.id, questionEndCallback);
+      this.gameSessionService.scheduleQuestionEnd(result.session.id, result.firstQuestion.timeLimit, questionEndCallback);
 
       return { success: true, sessionId: result.session.id };
     } catch (error) {
@@ -841,6 +856,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     },
   ) {
     try {
+      // [T2] Backend received submit_answer
+      this.logger.debug(`[T2] submit_answer received player=${payload.playerId} ts=${payload.clientTimestamp}`);
+
       const result = await this.gameSessionService.submitAnswer(
         payload.sessionId,
         payload.playerId,
@@ -849,24 +867,27 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         payload.clientTimestamp,
       );
 
-      const cached = await this.gameSessionService.getSessionState(payload.sessionId);
-      if (cached?.status === GameState.QUESTION_ACTIVE) {
-        client.emit('answer_received', {
-          success: true,
-          isCorrect: result.isCorrect,
-          scoreEarned: result.scoreEarned,
-        });
+      // [T3] submitAnswer success - immediately emit player_answered for host to see
+      // This is the key fix: host sees "Đã trả lời" before leaderboard update
+      const answeredEvent: PlayerAnsweredEvent = {
+        sessionId: payload.sessionId,
+        playerId: payload.playerId,
+        questionId: payload.questionId,
+        hasAnswered: true,
+        answeredAt: Date.now(),
+      };
+      this.server.to(payload.sessionId).emit('player_answered', answeredEvent);
 
-        // Emit leaderboard_update to ALL players in session so host sees the update
-        const leaderboard = await this.gameSessionService.getLeaderboard(payload.sessionId);
-        this.server.to(payload.sessionId).emit('leaderboard_update', { leaderboard });
-      } else {
-        this.server.to(payload.sessionId).emit('score_update', {
-          playerId: payload.playerId,
-          score: result.scoreEarned,
-          leaderboard: result.leaderboard,
-        });
-      }
+      // Emit answer_received to the submitting player
+      client.emit('answer_received', {
+        success: true,
+        isCorrect: result.isCorrect,
+        scoreEarned: result.scoreEarned,
+      });
+
+      // [T4] Emit leaderboard_update using leaderboard from submitAnswer (already fetched)
+      // No need to call getLeaderboard again - result.leaderboard already contains it
+      this.server.to(payload.sessionId).emit('leaderboard_update', { sessionId: payload.sessionId, leaderboard: result.leaderboard });
 
       return {
         success: true,
@@ -907,7 +928,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
     // Broadcast updated leaderboard with LEFT status
     const leaderboard = await this.gameSessionService.getLeaderboard(payload.sessionId);
-    this.server.to(payload.sessionId).emit('leaderboard_update', { leaderboard });
+    this.server.to(payload.sessionId).emit('leaderboard_update', { sessionId: payload.sessionId, leaderboard });
 
     return { success: true };
   }

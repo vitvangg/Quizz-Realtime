@@ -242,3 +242,11 @@ export interface PlayerStatusEvent {
   isHost: boolean;
   timestamp: number;
 }
+
+export interface PlayerAnsweredEvent {
+  sessionId: string;
+  playerId: string;
+  questionId: string;
+  hasAnswered: boolean;
+  answeredAt: number;
+}
