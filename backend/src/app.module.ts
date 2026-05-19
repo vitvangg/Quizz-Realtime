@@ -27,6 +27,7 @@ import { AnswersModule } from './answers/answers.module';
 import { RedisModule } from './redis/redis.module';
 import { DashboardModule } from './admin/system/dashboard/dashboard.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { CloudinaryModule } from './common/cloudinary/cloudinary.module';
 
 @Module({
   imports: [
@@ -57,6 +58,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
     GameModule,
     RedisModule,
     DashboardModule,
+    CloudinaryModule,
   ],
   controllers: [AppController],
   providers: [

@@ -4,6 +4,11 @@ export class UpdateUserDto {
   @IsOptional()
   @IsString()
   avatar?: string;
+
+  @IsOptional()
+  @IsString()
+  avatarId?: string;
+
   @IsNotEmpty()
   @IsString()
   fullName?: string;

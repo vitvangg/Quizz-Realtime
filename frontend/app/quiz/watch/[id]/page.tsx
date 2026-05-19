@@ -26,6 +26,8 @@ interface Answer {
 interface Question {
   id: string;
   content: string;
+  imageUrl?: string;
+  imageId?: string;
   timeLimit: number;
   answers: Answer[];
 }
@@ -51,6 +53,8 @@ export default function WatchQuizPage() {
         const formattedQuestions = quiz.questions.map((q: any) => ({
           id: q.id,
           content: q.content,
+          imageUrl: q.imageUrl,
+          imageId: q.imageId,
           timeLimit: q.timeLimit,
           answers: q.answers.map((a: any) => ({
             id: a.id,

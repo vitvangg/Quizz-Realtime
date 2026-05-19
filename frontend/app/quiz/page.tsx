@@ -7,7 +7,7 @@ import { useRoomStore } from "@/stores/room.store";
 import { useAuthStore } from "@/stores/auth.store";
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
-import { PlusCircle, BookOpen, AlertTriangle, Trash2, Search } from "lucide-react";
+import { PlusCircle, BookOpen, AlertTriangle, Search } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { QuizCard } from "@/components/quiz/quiz-card";
@@ -51,7 +51,6 @@ export default function MyQuizzesPage() {
   
   const isDeleting = loading && !!quizToDelete;
 
-  // Sync search logic
   useEffect(() => {
     const timer = setTimeout(() => {
       const query = selectedCategory !== "ALL" ? selectedCategory : searchKeyword;
@@ -101,122 +100,128 @@ export default function MyQuizzesPage() {
   };
 
   return (
-    <div className="container mx-auto py-8 px-4 max-w-6xl">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
-        <div>
-          <h1 className="text-3xl font-extrabold tracking-tight mb-2 uppercase tracking-tighter">
-            Bộ sưu tập của tôi
-          </h1>
-          <p className="text-muted-foreground font-medium italic">
-            Quản lý và tổ chức các bộ câu hỏi của bạn một cách chuyên nghiệp.
-          </p>
-        </div>
-        <div className="flex items-center gap-4">
-          <Link href="/quiz/builder">
-            <Button className="gap-2 shadow-xl shadow-primary/20 hover:scale-105 transition-all px-8 py-7 text-lg rounded-2xl font-black">
-              <PlusCircle className="h-6 w-6" />
-              TẠO QUIZ MỚI
-            </Button>
-          </Link>
-        </div>
-      </div>
-
-      <div className="flex flex-col md:flex-row gap-4 mb-10">
-        <div className="relative flex-grow">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-          <Input
-            placeholder="Tìm kiếm bộ câu hỏi..."
-            className="pl-12 h-14 rounded-2xl border-2 focus-visible:ring-primary shadow-sm font-bold text-lg"
-            value={searchKeyword}
-            onChange={(e) => setFilters(e.target.value, selectedCategory)}
-          />
-        </div>
-        <div className="w-full md:w-72">
-          <Select 
-            value={selectedCategory} 
-            onValueChange={(val) => setFilters(searchKeyword, val)}
-          >
-            <SelectTrigger className="h-14 rounded-2xl border-2 focus:ring-primary shadow-sm font-black text-lg">
-              <SelectValue placeholder="Danh mục" />
-            </SelectTrigger>
-            <SelectContent className="rounded-2xl border-2">
-              <SelectItem value="ALL" className="font-black py-3 uppercase">Tất cả danh mục</SelectItem>
-              {Object.entries(CATEGORY_LABELS).map(([value, label]) => (
-                <SelectItem key={value} value={value} className="font-bold py-3">
-                  {label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      {loading && quizzes.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-32 gap-6">
-          <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-muted-foreground font-black animate-pulse uppercase tracking-widest">Đang tải danh sách...</p>
-        </div>
-      ) : quizzes.length === 0 ? (
-        <Card className="border-dashed border-4 bg-muted/5 py-24 flex flex-col items-center justify-center text-center rounded-3xl">
-          <div className="bg-primary/10 p-8 rounded-full mb-6">
-            <BookOpen className="h-16 w-16 text-primary opacity-50" />
-          </div>
-          <CardTitle className="text-3xl font-black mb-2 uppercase">Trống rỗng</CardTitle>
-          <p className="text-muted-foreground max-w-sm mb-10 font-medium">
-            Bắt đầu tạo bộ câu hỏi đầu tiên để chia sẻ kiến thức!
-          </p>
-          <Link href="/quiz/builder">
-            <Button variant="outline" className="border-2 border-primary/20 hover:bg-primary/5 py-6 px-10 rounded-2xl font-black">
-              TẠO QUIZ NGAY
-            </Button>
-          </Link>
-        </Card>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-          {quizzes.map((quiz) => (
-            <QuizCard
-              key={quiz.id}
-              quiz={quiz}
-              roomLoading={roomLoading}
-              onDelete={handleDeleteClick}
-              onStartGame={handleStartGame}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Delete Dialog */}
-      <Dialog open={!!quizToDelete} onOpenChange={(open) => !open && setQuizToDelete(null)}>
-        <DialogContent className="sm:max-w-md border-2 rounded-3xl">
-          <DialogHeader className="flex flex-col items-center pt-6">
-            <div className="bg-destructive/10 p-5 rounded-full mb-4">
-              <AlertTriangle className="h-12 w-12 text-destructive" />
+    <div className="min-h-screen bg-white">
+      {/* Header Banner */}
+      <div className="bg-neon-yellow border-b-4 border-black">
+        <div className="container mx-auto px-4 py-8">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div>
+              <h1 className="text-4xl font-black uppercase tracking-tight mb-2">BỘ SƯU TẬP</h1>
+              <p className="font-bold text-black/70">Quản lý và tổ chức các bộ câu hỏi của bạn</p>
             </div>
-            <DialogTitle className="text-2xl font-black text-center uppercase">Xác nhận xóa?</DialogTitle>
-            <DialogDescription className="text-center text-base font-medium">
-              Hành động này không thể hoàn tác. Dữ liệu sẽ bị mất vĩnh viễn.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="flex gap-4 mt-6 sm:justify-center p-2">
-            <Button
-              variant="outline"
-              onClick={() => setQuizToDelete(null)}
-              className="flex-1 rounded-2xl h-14 font-black"
-              disabled={isDeleting}
+            <Link href="/quiz/builder">
+              <Button className="gap-2 bg-black text-white border-4 border-black shadow-brutal hover:shadow-none hover:translate-x-1 hover:translate-y-1 transition-all px-8 py-6 text-lg font-black rounded-xl">
+                <PlusCircle className="h-6 w-6" />
+                TẠO QUIZ MỚI
+              </Button>
+            </Link>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="container mx-auto px-4 py-8 max-w-6xl">
+        {/* Search & Filter */}
+        <div className="flex flex-col md:flex-row gap-4 mb-8">
+          <div className="relative flex-grow">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-black/50" />
+            <Input
+              placeholder="Tìm kiếm bộ câu hỏi..."
+              className="pl-12 h-14 rounded-xl border-4 border-black bg-neon-yellow/20 font-bold text-lg focus:border-neon-pink focus:bg-white"
+              value={searchKeyword}
+              onChange={(e) => setFilters(e.target.value, selectedCategory)}
+            />
+          </div>
+          <div className="w-full md:w-72">
+            <Select 
+              value={selectedCategory} 
+              onValueChange={(val) => setFilters(searchKeyword, val)}
             >
-              HỦY
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleConfirmDelete}
-              className="flex-1 rounded-2xl h-14 font-black shadow-xl shadow-destructive/20"
-              disabled={isDeleting}
-            >
-              {isDeleting ? "ĐANG XÓA..." : "XÓA NGAY"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              <SelectTrigger className="h-14 rounded-xl border-4 border-black font-black text-lg bg-white">
+                <SelectValue placeholder="Danh mục" />
+              </SelectTrigger>
+              <SelectContent className="rounded-xl border-4 border-black">
+                <SelectItem value="ALL" className="font-black py-3 uppercase">Tất cả danh mục</SelectItem>
+                {Object.entries(CATEGORY_LABELS).map(([value, label]) => (
+                  <SelectItem key={value} value={value} className="font-bold py-3">
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        {/* Loading State */}
+        {loading && quizzes.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-32 gap-6">
+            <div className="w-16 h-16 border-4 border-black border-t-transparent rounded-full animate-spin bg-neon-pink"></div>
+            <p className="font-black uppercase tracking-widest animate-pulse">Đang tải danh sách...</p>
+          </div>
+        ) : quizzes.length === 0 ? (
+          /* Empty State */
+          <Card className="border-4 border-dashed border-black py-24 flex flex-col items-center justify-center text-center rounded-2xl bg-neon-blue/10">
+            <div className="bg-neon-yellow border-4 border-black shadow-brutal p-8 mb-6">
+              <BookOpen className="h-16 w-16 text-black" />
+            </div>
+            <CardTitle className="text-3xl font-black mb-2 uppercase">TRỐNG RỖNG</CardTitle>
+            <p className="max-w-sm mb-10 font-medium text-black/70">
+              Bắt đầu tạo bộ câu hỏi đầu tiên để chia sẻ kiến thức!
+            </p>
+            <Link href="/quiz/builder">
+              <Button className="bg-black text-white border-4 border-black shadow-brutal hover:shadow-none hover:translate-x-1 hover:translate-y-1 font-black text-lg px-8 py-6 rounded-xl">
+                TẠO QUIZ NGAY
+              </Button>
+            </Link>
+          </Card>
+        ) : (
+          /* Quiz Grid */
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {quizzes.map((quiz) => (
+              <QuizCard
+                key={quiz.id}
+                quiz={quiz}
+                roomLoading={roomLoading}
+                onDelete={handleDeleteClick}
+                onStartGame={handleStartGame}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Delete Dialog */}
+        <Dialog open={!!quizToDelete} onOpenChange={(open) => !open && setQuizToDelete(null)}>
+          <DialogContent className="sm:max-w-md border-4 border-black shadow-brutal-xl rounded-xl">
+            <DialogHeader className="flex flex-col items-center pt-4">
+              <div className="bg-white border-4 border-black shadow-brutal p-5 mb-4">
+                <AlertTriangle className="h-14 w-14 text-red-500" />
+              </div>
+              <DialogTitle className="text-2xl font-black text-center uppercase">XÁC NHẬN XÓA?</DialogTitle>
+              <DialogDescription className="text-center text-base font-medium">
+                Hành động này không thể hoàn tác. Dữ liệu sẽ bị mất vĩnh viễn.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="flex gap-4 mt-6 sm:justify-center p-2">
+              <Button
+                variant="outline"
+                onClick={() => setQuizToDelete(null)}
+                className="flex-1 rounded-xl h-14 font-black border-4 border-black shadow-brutal-sm hover:shadow-none hover:translate-x-0.5 hover:translate-y-0.5"
+                disabled={isDeleting}
+              >
+                HỦY
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={handleConfirmDelete}
+                className="flex-1 rounded-xl h-14 font-black border-4 border-black shadow-brutal-sm hover:shadow-none hover:translate-x-0.5 hover:translate-y-0.5 bg-red-500"
+                disabled={isDeleting}
+              >
+                {isDeleting ? "ĐANG XÓA..." : "XÓA NGAY"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
     </div>
   );
 }
