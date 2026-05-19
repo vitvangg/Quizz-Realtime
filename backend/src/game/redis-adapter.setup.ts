@@ -5,9 +5,28 @@ import { Logger } from '@nestjs/common';
 
 const logger = new Logger('RedisAdapter');
 
-let pubClient: RedisClientType;
-let subClient: RedisClientType;
+// Singleton state - shared across all gateways
+let pubClient: RedisClientType | null = null;
+let subClient: RedisClientType | null = null;
+let isInitialized = false;
+let initPromise: Promise<void> | null = null;
 
+function getRedisUrl(config: { host: string; port: number; password?: string }): string {
+  if (config.password) {
+    return `redis://:${config.password}@${config.host}:${config.port}`;
+  }
+  return `redis://${config.host}:${config.port}`;
+}
+
+/**
+ * Setup Redis Adapter for Socket.IO server.
+ * This is a singleton - calling multiple times will skip re-initialization.
+ * The adapter is applied globally to the server, which means all namespaces
+ * (/lobby, /game, etc.) will share the same Redis adapter for cross-namespace messaging.
+ * 
+ * @param io - The NestJS Socket.IO server instance
+ * @param redisConfig - Redis connection configuration
+ */
 export async function setupRedisAdapter(
   io: Server,
   redisConfig: {
@@ -16,46 +35,68 @@ export async function setupRedisAdapter(
     password?: string;
   }
 ): Promise<void> {
-  const { host, port, password } = redisConfig;
-
-  // Build Redis URL
-  let url: string;
-  if (password) {
-    url = `redis://:${password}@${host}:${port}`;
-  } else {
-    url = `redis://${host}:${port}`;
+  // If already initialized, skip
+  if (isInitialized && pubClient && subClient) {
+    logger.log('Redis Adapter already initialized, skipping');
+    return;
   }
 
-  // Create two Redis clients: one for publishing, one for subscribing
-  pubClient = createClient({ url });
-  subClient = pubClient.duplicate();
+  // If initialization is in progress, wait for it
+  if (initPromise) {
+    logger.log('Redis Adapter initialization in progress, waiting...');
+    await initPromise;
+    return;
+  }
 
-  // Handle errors
-  pubClient.on('error', (err) => logger.error('Redis Pub Client Error', err));
-  subClient.on('error', (err) => logger.error('Redis Sub Client Error', err));
+  // Start initialization
+  initPromise = (async () => {
+    const url = getRedisUrl(redisConfig);
 
-  // Connect both clients
-  await Promise.all([
-    pubClient.connect(),
-    subClient.connect(),
-  ]);
+    // Create two Redis clients: one for publishing, one for subscribing
+    pubClient = createClient({ url });
+    subClient = pubClient.duplicate();
 
-  // Get raw Socket.IO server from NestJS wrapper
-  const rawIo = (io as unknown as { server: Server }).server;
+    // Handle errors
+    pubClient.on('error', (err) => logger.error('Redis Pub Client Error', err));
+    subClient.on('error', (err) => logger.error('Redis Sub Client Error', err));
 
-  // Setup Redis Adapter on raw Socket.IO server
-  rawIo.adapter(createAdapter(pubClient, subClient));
+    // Connect both clients
+    await Promise.all([
+      pubClient.connect(),
+      subClient.connect(),
+    ]);
 
-  logger.log('Socket.IO Redis Adapter initialized');
-  logger.log(`Connected to Redis at ${host}:${port}`);
+    // Get raw Socket.IO server and set adapter globally
+    // This applies to ALL namespaces including /lobby and /game
+    const rawIo = (io as unknown as { server: Server }).server;
+    rawIo.adapter(createAdapter(pubClient, subClient));
+
+    isInitialized = true;
+    logger.log('Socket.IO Redis Adapter initialized');
+    logger.log(`Connected to Redis at ${redisConfig.host}:${redisConfig.port}`);
+  })();
+
+  await initPromise;
 }
 
+/**
+ * Teardown Redis Adapter connections.
+ * Should be called on application shutdown.
+ */
 export async function teardownRedisAdapter(): Promise<void> {
-  if (pubClient) await pubClient.quit();
-  if (subClient) await subClient.quit();
+  if (pubClient) {
+    await pubClient.quit();
+    pubClient = null;
+  }
+  if (subClient) {
+    await subClient.quit();
+    subClient = null;
+  }
+  isInitialized = false;
+  initPromise = null;
   logger.log('Redis Adapter connections closed');
 }
 
-export function getPubClient(): RedisClientType {
-  return pubClient;
+export function isRedisAdapterInitialized(): boolean {
+  return isInitialized;
 }

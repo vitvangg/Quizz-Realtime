@@ -3,6 +3,7 @@
 import { User, Crown, X } from 'lucide-react';
 import { Player } from '@/types/room.type';
 import { Button } from '@/components/ui/button';
+import { PaginationControls } from '@/components/common/PaginationControls';
 
 interface PlayerListProps {
   players: Player[];
@@ -10,6 +11,15 @@ interface PlayerListProps {
   currentPlayerId?: string;
   hostId?: string;
   onKickPlayer?: (playerId: string) => void;
+  // Pagination props (optional - if not provided, no pagination)
+  page?: number;
+  totalPages?: number;
+  totalItems?: number;
+  startIndex?: number;
+  endIndex?: number;
+  onPrev?: () => void;
+  onNext?: () => void;
+  showPagination?: boolean;
 }
 
 export function PlayerList({ 
@@ -17,15 +27,32 @@ export function PlayerList({
   isHost, 
   currentPlayerId,
   hostId,
-  onKickPlayer 
+  onKickPlayer,
+  page = 1,
+  totalPages = 1,
+  totalItems = 0,
+  startIndex = 1,
+  endIndex = 0,
+  onPrev,
+  onNext,
+  showPagination = false,
 }: PlayerListProps) {
   return (
     <div className="w-full">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="font-black text-lg uppercase tracking-wide">
-          Người chơi ({players.length})
-        </h3>
-      </div>
+      {/* Pagination controls - only show when enabled and has multiple pages */}
+      {showPagination && totalPages > 1 && onPrev && onNext && (
+        <div className="mb-4">
+          <PaginationControls
+            page={page}
+            totalPages={totalPages}
+            totalItems={totalItems}
+            startIndex={startIndex}
+            endIndex={endIndex}
+            onPrev={onPrev}
+            onNext={onNext}
+          />
+        </div>
+      )}
       
       <div className="space-y-2">
         {players.map((player, index) => {
@@ -53,7 +80,8 @@ export function PlayerList({
                   {isPlayerHost ? (
                     <Crown className="w-5 h-5" />
                   ) : (
-                    index + 1
+                    // Show actual position in the full list, not index in current page
+                    startIndex + index
                   )}
                 </div>
                 <div className="flex items-center gap-2">

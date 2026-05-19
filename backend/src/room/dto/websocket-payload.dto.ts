@@ -37,6 +37,9 @@ export class JoinByIdPayload {
 
   @IsString()
   jwt?: string;
+
+  @IsString()
+  playerId?: string;  // For guest reconnect: playerId from sessionStorage
 }
 
 export class StartGamePayload {
