@@ -26,7 +26,7 @@ WORKDIR /app
 
 # Copy package files and install production only dependencies
 COPY package*.json ./
-RUN npm install --omit=dev
+RUN npm install --omit=dev && npm install prisma@5.8.0
 
 # Copy built files and prisma from builder
 COPY --from=builder /app/dist ./dist
@@ -40,4 +40,4 @@ ENV PORT=5000
 EXPOSE 5000
 
 # Start the application
-CMD ["node", "dist/main"]
+CMD npx prisma migrate deploy && node dist/main

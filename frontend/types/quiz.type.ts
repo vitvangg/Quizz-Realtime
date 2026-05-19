@@ -35,21 +35,25 @@ export interface Quiz {
   questions?: Question[];
 }
 
-export interface Question {
-  id: string;
-  quizId: string;
-  content: string;
-  timeLimit: number;
-  orderIndex: number;
-  answers?: Answer[];
-}
-
 export interface Answer {
   id: string;
-  questionId: string;
   content: string;
   isCorrect: boolean;
 }
+
+export interface Question {
+  id: string;
+  content: string;
+  timeLimit: number;
+  imageUrl?: string;
+  imageId?: string;
+  pendingFile?: File;
+  previewUrl?: string;
+  answers: Answer[];
+}
+
+
+
 
 export interface CreateQuizDto {
   title: string;
