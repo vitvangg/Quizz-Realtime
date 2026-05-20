@@ -520,6 +520,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
       // Create questionStartTime at the EXACT moment question begins (server is source of truth)
       const questionStartTime = Date.now();
+      const timeLimit = result.firstQuestion.timeLimit || 20;
+      const questionEndTime = questionStartTime + (timeLimit * 1000);
 
       // Clear answered status for new question
       await this.gameSessionService.clearAnsweredPlayers(result.session.id);
@@ -530,8 +532,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         question: result.firstQuestion,
         totalQuestions: result.totalQuestions,
         questionStartTime,
+        questionEndTime, // Absolute end time for client timer sync
         serverTime: questionStartTime,
-        timeLimit: result.firstQuestion.timeLimit,
+        timeLimit,
         questionVersion: 1,
       };
 
@@ -545,7 +548,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       // Schedule question end timer (server-driven)
       const questionEndCallback = (data: any) => this.handleQuestionEnd(result.session.id, data);
       this.sessionCallbacks.set(result.session.id, questionEndCallback);
-      this.gameSessionService.scheduleQuestionEnd(result.session.id, result.firstQuestion.timeLimit, questionEndCallback);
+      this.gameSessionService.scheduleQuestionEnd(result.session.id, timeLimit, questionEndCallback);
 
       // Emit leaderboard_update for host to populate player list
       const leaderboard = await this.gameSessionService.getLeaderboard(result.session.id);
@@ -596,6 +599,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
       // Create questionStartTime at the EXACT moment question begins (server is source of truth)
       const questionStartTime = Date.now();
+      const timeLimit = result.question.timeLimit || 20;
+      const questionEndTime = questionStartTime + (timeLimit * 1000);
 
       // Clear answered status for new question
       await this.gameSessionService.clearAnsweredPlayers(payload.sessionId);
@@ -606,8 +611,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         question: result.question,
         totalQuestions: result.totalQuestions,
         questionStartTime,
+        questionEndTime, // Absolute end time for client timer sync
         serverTime: questionStartTime,
-        timeLimit: result.question.timeLimit,
+        timeLimit,
         questionVersion: result.questionIndex + 1,
       };
 
@@ -625,7 +631,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       // Schedule question end timer (server-driven)
       const nextCallback = (data: any) => this.handleQuestionEnd(payload.sessionId, data);
       this.sessionCallbacks.set(payload.sessionId, nextCallback);
-      this.gameSessionService.scheduleQuestionEnd(payload.sessionId, result.question.timeLimit, nextCallback);
+      this.gameSessionService.scheduleQuestionEnd(payload.sessionId, timeLimit, nextCallback);
 
       return { success: true, gameEnded: false };
     } catch (error) {
@@ -766,6 +772,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
       // Create questionStartTime at the EXACT moment question begins (server is source of truth)
       const questionStartTime = Date.now();
+      const timeLimit = result.firstQuestion.timeLimit || 20;
+      const questionEndTime = questionStartTime + (timeLimit * 1000);
 
       // Clear answered status for new question
       await this.gameSessionService.clearAnsweredPlayers(result.session.id);
@@ -776,8 +784,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         question: result.firstQuestion,
         totalQuestions: result.totalQuestions,
         questionStartTime,
+        questionEndTime, // Absolute end time for client timer sync
         serverTime: questionStartTime,
-        timeLimit: result.firstQuestion.timeLimit,
+        timeLimit,
         questionVersion: 1,
       };
 
@@ -791,7 +800,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       // Schedule question end timer (server-driven)
       const questionEndCallback = (data: any) => this.handleQuestionEnd(result.session.id, data);
       this.sessionCallbacks.set(result.session.id, questionEndCallback);
-      this.gameSessionService.scheduleQuestionEnd(result.session.id, result.firstQuestion.timeLimit, questionEndCallback);
+      this.gameSessionService.scheduleQuestionEnd(result.session.id, timeLimit, questionEndCallback);
 
       return { success: true, sessionId: result.session.id };
     } catch (error) {

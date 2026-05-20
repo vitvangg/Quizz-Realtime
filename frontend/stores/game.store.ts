@@ -41,8 +41,10 @@ interface GameStore {
   currentQuestion: Question | null;
   questionIndex: number;
   totalQuestions: number;
-  questionStartTime: number;
-  serverTime: number; // Server timestamp when question started (for latency compensation)
+  // Timer state - Single source of truth: questionEndTime (absolute timestamp)
+  questionStartTime: number;   // For scoring reference
+  questionEndTime: number;     // Absolute end time for timer display
+  serverTime: number;          // Server timestamp when event was sent
 
   timeRemaining: number;
   hasAnswered: boolean;
@@ -104,6 +106,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   questionIndex: 0,
   totalQuestions: 0,
   questionStartTime: 0,
+  questionEndTime: 0, // Absolute end time for timer display
   serverTime: 0,
 
   timeRemaining: 0,
@@ -313,7 +316,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       isMaintenance: false, maintenanceMessage: '',
       currentQuestion: null, questionIndex: 0, totalQuestions: 0,
       questionStartTime: 0,
-  serverTime: 0, timeRemaining: 0, hasAnswered: false,
+      questionEndTime: 0,
+      serverTime: 0, timeRemaining: 0, hasAnswered: false,
       selectedAnswerId: null, leaderboard: [], myPlayerId: null,
       myNickname: null, myScore: 0, myRank: null, countdown: 0,
       correctAnswerId: null, _pendingRedirect: null,

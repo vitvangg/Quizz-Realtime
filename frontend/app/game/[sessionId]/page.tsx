@@ -121,6 +121,7 @@ export default function GamePage() {
     correctAnswerId,
     timeRemaining,
     questionStartTime,
+    questionEndTime,
     serverTime,
     connectSocket,
     reset,
@@ -264,6 +265,7 @@ export default function GamePage() {
         timeLimit: data.timeLimit,
         serverTime: data.serverTime,
         questionStartTime: data.questionStartTime,
+        questionEndTime: data.questionEndTime,
       });
       console.log('[GamePage] ========================================');
       const state = useGameStore.getState();
@@ -292,18 +294,17 @@ export default function GamePage() {
 
       console.log('[GamePage] question_start: isNewQuestion=', isNewQuestion, 'shouldResetAnswer=', shouldResetAnswer);
 
-      // Calculate timeRemaining based on server time (server is source of truth)
-      // Account for network latency to sync host and player timers
-      const clientReceiveTime = Date.now();
-      const serverToClientLatencyMs = Math.max(0, clientReceiveTime - data.serverTime);
-      const latencyCompensationMs = Math.floor(serverToClientLatencyMs / 2);
-      const adjustedQuestionStartTime = data.questionStartTime + latencyCompensationMs;
-      const elapsedMs = clientReceiveTime - adjustedQuestionStartTime;
-      const elapsedSec = Math.floor(elapsedMs / 1000);
-      const timeLimit = data.timeLimit || 20;
-      const newTimeRemaining = Math.max(0, timeLimit - elapsedSec);
+      // Client-End-Time Architecture:
+      // - questionEndTime is an absolute timestamp from server
+      // - Timer interval calculates: remaining = questionEndTime - Date.now()
+      // - This ensures perfect sync between host and players regardless of latency
 
-      console.log(`[GamePage] question_start: serverTime=${data.serverTime}, questionStartTime=${data.questionStartTime}, latency=${serverToClientLatencyMs}ms, elapsed=${elapsedSec}s, timeRemaining=${newTimeRemaining}s`);
+      // Initial timeRemaining calculation (for display)
+      const initialRemaining = data.questionEndTime 
+        ? Math.max(0, Math.floor((data.questionEndTime - Date.now()) / 1000))
+        : (data.timeLimit || 20);
+
+      console.log(`[GamePage] question_start: questionEndTime=${data.questionEndTime}, initialRemaining=${initialRemaining}s`);
 
       useGameStore.setState({
         gameStatus: GameState.QUESTION_ACTIVE,
@@ -325,9 +326,11 @@ export default function GamePage() {
         useGameStore.setState({ leaderboard: resetLeaderboard });
       }
 
+      // Store timer state - questionEndTime is the single source of truth
       useGameStore.setState({
-        timeRemaining: newTimeRemaining,
+        timeRemaining: initialRemaining,
         questionStartTime: data.questionStartTime,
+        questionEndTime: data.questionEndTime,
         serverTime: data.serverTime,
       });
     };
@@ -1311,37 +1314,21 @@ export default function GamePage() {
         let playerHasAnswered = false;
 
         if (httpData.status === 'QUESTION_ACTIVE' && httpData.currentQuestion) {
-          // Calculate time remaining using server's timestamps
-          // serverTime is current server time, questionStartedAt is when question started
-          let adjustedRemainingTime: number;
-          let adjustedServerTime: number;
-          
-          if (httpData.questionStartedAt && httpData.serverTime) {
-            // Server provided both timestamps - use them
-            const elapsedSeconds = (httpData.serverTime - httpData.questionStartedAt) / 1000;
-            adjustedRemainingTime = Math.max(0, Math.ceil((httpData.currentQuestion.timeLimit || 20) - elapsedSeconds));
-            adjustedServerTime = httpData.serverTime;
-          } else if (httpData.remainingTime !== null && httpData.remainingTime !== undefined) {
-            // Fallback: use remainingTime from server (if provided)
-            adjustedRemainingTime = Math.max(0, httpData.remainingTime - 1);
-            adjustedServerTime = Date.now();
-          } else {
-            // Last resort: assume full time limit
-            adjustedRemainingTime = httpData.currentQuestion.timeLimit || 20;
-            adjustedServerTime = Date.now();
-          }
+          // Client-End-Time: Use questionEndTime for timer sync
+          // Backend provides questionEndTime = questionStartedAt + timeLimit * 1000
+          const questionEndTime = httpData.questionEndTime 
+            || ((httpData.questionStartedAt || Date.now()) + (httpData.currentQuestion.timeLimit || 20) * 1000);
+          const initialRemaining = Math.max(0, Math.floor((questionEndTime - Date.now()) / 1000));
 
           useGameStore.setState({
             gameStatus: GameState.QUESTION_ACTIVE,
             currentQuestion: httpData.currentQuestion,
             questionIndex: httpData.currentQuestionIndex,
             totalQuestions: httpData.totalQuestions,
-            timeRemaining: adjustedRemainingTime,
-            // CRITICAL: Use server's questionStartedAt as questionStartTime
-            // Timer interval uses this to calculate elapsed time
-            questionStartTime: httpData.questionStartedAt || httpData.serverTime || Date.now(),
-            // Also set serverTime for consistency with question_start handler
-            serverTime: adjustedServerTime,
+            timeRemaining: initialRemaining,
+            questionStartTime: httpData.questionStartedAt || 0,
+            questionEndTime: questionEndTime,
+            serverTime: httpData.serverTime || Date.now(),
             leaderboard: [],
           });
         } else if (httpData.status === 'QUESTION_RESULT') {
@@ -1491,28 +1478,26 @@ export default function GamePage() {
             console.log('[GamePage] host_join_game: isNewGame=', isNewGame, 'leaderboard length=', safeLeaderboard.length);
             
             // Calculate remaining time for QUESTION_ACTIVE state
-            // Need to recalculate because remainingTime from server might be stale
+            // Client-End-Time: Use questionEndTime for timer sync
             let finalTimeRemaining: number;
-            let finalQuestionStartTime: number | undefined = undefined;
-            let finalServerTime: number | undefined = undefined;
             
             if (response.state.status === GameState.QUESTION_ACTIVE) {
-              if (response.state.questionStartedAt && response.state.serverTime) {
-                // Use server timestamps to calculate accurate remaining time
-                const elapsedSeconds = (response.state.serverTime - response.state.questionStartedAt) / 1000;
+              // Use questionEndTime from server for accurate timer sync
+              if (response.state.questionEndTime) {
+                finalTimeRemaining = Math.max(0, Math.floor((response.state.questionEndTime - Date.now()) / 1000));
+              } else if (response.state.questionStartedAt) {
+                // Fallback: calculate questionEndTime from questionStartedAt
                 const timeLimit = response.state.currentQuestion?.timeLimit || 20;
-                finalTimeRemaining = Math.max(0, Math.ceil(timeLimit - elapsedSeconds));
-                finalQuestionStartTime = response.state.questionStartedAt;
-                finalServerTime = response.state.serverTime;
+                finalTimeRemaining = Math.max(0, Math.floor(((response.state.questionStartedAt + timeLimit * 1000) - Date.now()) / 1000));
               } else {
-                // Fallback to server's remainingTime (might be slightly stale)
+                // Fallback to server's remainingTime
                 finalTimeRemaining = response.state.remainingTime ?? response.state.currentQuestion?.timeLimit ?? 20;
               }
             } else {
               finalTimeRemaining = response.state.remainingTime ?? 0;
             }
             
-            console.log('[GamePage] host_join_game: calculated remainingTime=', finalTimeRemaining, 'questionStartedAt=', finalQuestionStartTime);
+            console.log('[GamePage] host_join_game: remaining=', finalTimeRemaining);
             
             useGameStore.setState({
               sessionId,
@@ -1528,8 +1513,9 @@ export default function GamePage() {
               totalQuestions: response.state.totalQuestions ?? 0,
               leaderboard: safeLeaderboard,
               timeRemaining: finalTimeRemaining,
-              questionStartTime: finalQuestionStartTime,
-              serverTime: finalServerTime,
+              questionStartTime: response.state.questionStartedAt || 0,
+              questionEndTime: response.state.questionEndTime || (response.state.questionStartedAt ? response.state.questionStartedAt + ((response.state.currentQuestion?.timeLimit || 20) * 1000) : 0),
+              serverTime: response.state.serverTime || Date.now(),
               correctAnswerId,
               myScore: 0,       // Reset for new game session
               myRank: null,     // Reset for new game session
@@ -1560,18 +1546,17 @@ export default function GamePage() {
                   ? playerResponse.state.leaderboard
                   : (Array.isArray(httpData?.leaderboard) ? httpData.leaderboard : []);
                 
-                // Calculate remaining time for QUESTION_ACTIVE state
+                // Client-End-Time: Use questionEndTime for timer sync
                 let finalTimeRemaining: number;
-                let finalQuestionStartTime: number | undefined = undefined;
-                let finalServerTime: number | undefined = undefined;
                 
                 if (playerResponse.state.status === GameState.QUESTION_ACTIVE) {
-                  if (playerResponse.state.questionStartedAt && playerResponse.state.serverTime) {
-                    const elapsedSeconds = (playerResponse.state.serverTime - playerResponse.state.questionStartedAt) / 1000;
+                  // Use questionEndTime from server for accurate timer sync
+                  if (playerResponse.state.questionEndTime) {
+                    finalTimeRemaining = Math.max(0, Math.floor((playerResponse.state.questionEndTime - Date.now()) / 1000));
+                  } else if (playerResponse.state.questionStartedAt) {
+                    // Fallback: calculate questionEndTime from questionStartedAt
                     const timeLimit = playerResponse.state.currentQuestion?.timeLimit || 20;
-                    finalTimeRemaining = Math.max(0, Math.ceil(timeLimit - elapsedSeconds));
-                    finalQuestionStartTime = playerResponse.state.questionStartedAt;
-                    finalServerTime = playerResponse.state.serverTime;
+                    finalTimeRemaining = Math.max(0, Math.floor(((playerResponse.state.questionStartedAt + timeLimit * 1000) - Date.now()) / 1000));
                   } else {
                     finalTimeRemaining = playerResponse.state.remainingTime ?? playerResponse.state.currentQuestion?.timeLimit ?? 20;
                   }
@@ -1591,8 +1576,9 @@ export default function GamePage() {
                   totalQuestions: playerResponse.state.totalQuestions ?? 0,
                   leaderboard: safeLeaderboard,
                   timeRemaining: finalTimeRemaining,
-                  questionStartTime: finalQuestionStartTime,
-                  serverTime: finalServerTime,
+                  questionStartTime: playerResponse.state.questionStartedAt || 0,
+                  questionEndTime: playerResponse.state.questionEndTime || (playerResponse.state.questionStartedAt ? playerResponse.state.questionStartedAt + ((playerResponse.state.currentQuestion?.timeLimit || 20) * 1000) : 0),
+                  serverTime: playerResponse.state.serverTime || Date.now(),
                   myScore: 0,       // Reset for new game session
                   myRank: null,     // Reset for new game session
                   _isRecovering: false,
@@ -1659,18 +1645,17 @@ export default function GamePage() {
             // Do NOT use old myScore/myRank from store
             const myEntryFromFinal = safeFinalLeaderboard.find((e: any) => e?.playerId === storedPlayerId);
             
-            // Calculate remaining time for QUESTION_ACTIVE state
+            // Client-End-Time: Use questionEndTime for timer sync
             let finalTimeRemaining: number;
-            let finalQuestionStartTime: number | undefined = undefined;
-            let finalServerTime: number | undefined = undefined;
             
             if (response.state.status === GameState.QUESTION_ACTIVE) {
-              if (response.state.questionStartedAt && response.state.serverTime) {
-                const elapsedSeconds = (response.state.serverTime - response.state.questionStartedAt) / 1000;
+              // Use questionEndTime from server for accurate timer sync
+              if (response.state.questionEndTime) {
+                finalTimeRemaining = Math.max(0, Math.floor((response.state.questionEndTime - Date.now()) / 1000));
+              } else if (response.state.questionStartedAt) {
+                // Fallback: calculate questionEndTime from questionStartedAt
                 const timeLimit = response.state.currentQuestion?.timeLimit || 20;
-                finalTimeRemaining = Math.max(0, Math.ceil(timeLimit - elapsedSeconds));
-                finalQuestionStartTime = response.state.questionStartedAt;
-                finalServerTime = response.state.serverTime;
+                finalTimeRemaining = Math.max(0, Math.floor(((response.state.questionStartedAt + timeLimit * 1000) - Date.now()) / 1000));
               } else {
                 finalTimeRemaining = response.state.remainingTime ?? response.state.currentQuestion?.timeLimit ?? 20;
               }
@@ -1690,8 +1675,9 @@ export default function GamePage() {
               totalQuestions: response.state.totalQuestions ?? 0,
               leaderboard: safeFinalLeaderboard,
               timeRemaining: finalTimeRemaining,
-              questionStartTime: finalQuestionStartTime,
-              serverTime: finalServerTime,
+              questionStartTime: response.state.questionStartedAt || 0,
+              questionEndTime: response.state.questionEndTime || (response.state.questionStartedAt ? response.state.questionStartedAt + ((response.state.currentQuestion?.timeLimit || 20) * 1000) : 0),
+              serverTime: response.state.serverTime || Date.now(),
               correctAnswerId,
               // Reset scores - get from leaderboard or default to 0
               // Do NOT fallback to old store values
@@ -1743,41 +1729,35 @@ export default function GamePage() {
 
   }, [sessionId, authReady]);
 
-  // Server-driven timer: recalculate from serverTime (source of truth)
-  // This ensures host and player timers stay in sync even after page reload
+  // Client-End-Time Timer Architecture:
+  // - questionEndTime is an absolute timestamp from server
+  // - Timer calculates: remaining = questionEndTime - Date.now()
+  // - This ensures perfect sync between host and players regardless of latency
+  // - NO distinction between live mode vs recovery mode - same logic applies
   useEffect(() => {
-    if (gameStatus === GameState.QUESTION_ACTIVE && currentQuestion) {
-      // CRITICAL: Detect recovery vs live mode
-      // Recovery: serverTime > questionStartTime (serverTime = Date.now() when response sent)
-      // Live: serverTime === questionStartTime (both set from same question_start event)
-      const isRecoveryMode = serverTime > questionStartTime && questionStartTime > 0;
-      
+    if (gameStatus === GameState.QUESTION_ACTIVE && questionEndTime > 0) {
       const calculateRemaining = () => {
-        const timeLimit = currentQuestion.timeLimit || 20;
-        
-        if (isRecoveryMode && timeRemaining !== null && timeRemaining !== undefined) {
-          // Recovery: backend already calculated remainingTime correctly
-          // Only subtract elapsed time since we received the response
-          const msSinceResponse = Date.now() - serverTime;
-          const secSinceResponse = Math.floor(msSinceResponse / 1000);
-          return Math.max(0, timeRemaining - secSinceResponse);
-        } else {
-          // Live: calculate from questionStartTime
-          const elapsed = questionStartTime > 0 ? Date.now() - questionStartTime : 0;
-          const elapsedSec = Math.floor(elapsed / 1000);
-          return Math.max(0, timeLimit - elapsedSec);
-        }
+        const remaining = questionEndTime - Date.now();
+        return Math.max(0, Math.floor(remaining / 1000));
       };
 
+      // Initial calculation
       setLocalTimeRemaining(calculateRemaining());
+
+      // Interval updates every 100ms for smooth display
       const interval = setInterval(() => {
-        setLocalTimeRemaining(calculateRemaining());
+        const remaining = calculateRemaining();
+        setLocalTimeRemaining(remaining);
+
+        // Timer ended - question_result event will handle state transition
+        // We don't change state here to avoid race conditions with server event
       }, 100);
+
       return () => clearInterval(interval);
     } else {
       setLocalTimeRemaining(0);
     }
-  }, [gameStatus, currentQuestion, questionStartTime, serverTime, timeRemaining]);
+  }, [gameStatus, questionEndTime]); // Simple dependencies - only re-run when these change
 
   const handleNextQuestion = () => {
     const gameStore = useGameStore.getState();
