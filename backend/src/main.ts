@@ -12,14 +12,16 @@ async function bootstrap() {
   app.useGlobalInterceptors(new ExcludePasswordInterceptor());
   app.use(cookieParser());
 
-  // Hỗ trợ nhiều origin cho phát triển
+  const corsOriginEnv = process.env.CORS_ORIGIN || '';
+  const parsedCorsOrigins = corsOriginEnv.split(',').map(o => o.trim()).filter(Boolean);
+
   const allowedOrigins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:3001",
     "http://127.0.0.1:3001",
-    process.env.CORS_ORIGIN,
-  ].filter(Boolean);
+    ...parsedCorsOrigins,
+  ];
 
   app.enableCors({
     origin: (origin, callback) => {
