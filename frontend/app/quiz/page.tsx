@@ -131,11 +131,7 @@ export default function MyQuizzesPage() {
     return () => clearTimeout(timer);
   }, [searchKeyword, selectedCategory, search, resetPage]);
 
-  useEffect(() => {
-    return () => {
-      reset();
-    };
-  }, [reset]);
+
 
   useEffect(() => {
     if (currentRoom) {
