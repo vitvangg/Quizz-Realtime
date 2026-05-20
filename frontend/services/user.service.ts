@@ -20,4 +20,28 @@ export const userService = {
         });
         return response.data;
     },
-};
+    create: async (data: any) => {
+        const response = await axiosInstance.post("/user", data);
+        return response.data;
+    },
+    getAll: async () => {
+        const response = await axiosInstance.get("/user");
+        return response.data;
+    },
+    getById: async (id: string) => {
+        const response = await axiosInstance.get(`/user/${id}`);
+        return response.data;
+    },
+    update: async (id: string, data: any) => {
+        const response = await axiosInstance.patch(`/user/${id}`, data);
+        return response.data;
+    },
+    delete: async (id: string) => {
+        const response = await axiosInstance.delete(`/user/${id}`);
+        return response.data;
+    },
+    getRoles: async () => {
+        const response = await axiosInstance.get("/admin/roles");
+        return response.data;
+    },
+    };
