@@ -21,10 +21,28 @@ export class UserController {
     return this.userService.getAll();
   }
 
+  @Get(':id')
+  @UseGuards(AuthGuard)
+  findOne(@Param('id') id: string) {
+    return this.userService.findById(id);
+  }
+
   @Patch('profile')
   @UseGuards(AuthGuard)
   updateProfile(@CurrentUser() user: any, @Body() updateUserDto: UpdateUserDto) {
     return this.userService.update(user.id, updateUserDto);
+  }
+
+  @Patch(':id')
+  @UseGuards(AuthGuard)
+  update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
+    return this.userService.update(id, updateUserDto);
+  }
+
+  @Delete(':id')
+  @UseGuards(AuthGuard)
+  remove(@Param('id') id: string) {
+    return this.userService.remove(id);
   }
 
   @Post('upload-avatar')

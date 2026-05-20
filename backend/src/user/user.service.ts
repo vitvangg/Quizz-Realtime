@@ -3,6 +3,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CloudinaryService } from 'src/common/cloudinary/cloudinary.service';
+import * as bcrypt from 'bcryptjs';
 // Import Prisma types for accurate data structure
 
 @Injectable()
@@ -12,8 +13,16 @@ export class UserService {
     private readonly cloudinaryService: CloudinaryService,
   ) { }
 
-  create(createUserDto: CreateUserDto) {
-    return this.prismaService.user.create({ data: createUserDto });
+  async create(createUserDto: CreateUserDto) {
+    const { password, ...data } = createUserDto;
+    const hashedPassword = await bcrypt.hash(password, 10);
+    return this.prismaService.user.create({
+      data: {
+        ...data,
+        passwordHash: hashedPassword,
+      },
+      include: { role: true }
+    });
   }
 
   findByEmail(email: string) {
@@ -21,19 +30,41 @@ export class UserService {
   }
 
   findById(id: string) {
-    return this.prismaService.user.findUnique({ where: { id } });
+    return this.prismaService.user.findUnique({
+      where: { id },
+      include: { role: true }
+    });
   }
 
   getAll() {
-    return this.prismaService.user.findMany();
+    return this.prismaService.user.findMany({
+      where: {
+        NOT: { status: 'DELETED' }
+      },
+      include: { role: true },
+      orderBy: { createdAt: 'desc' }
+    });
   }
 
-  update(id: string, updateUserDto: UpdateUserDto) {
+  async update(id: string, updateUserDto: UpdateUserDto) {
+    const { password, ...data } = updateUserDto;
+    const updateData: any = { ...data };
+
+    if (password) {
+      updateData.passwordHash = await bcrypt.hash(password, 10);
+    }
+
     return this.prismaService.user.update({
       where: { id },
-      data: {
-        ...updateUserDto,
-      },
+      data: updateData,
+      include: { role: true }
+    });
+  }
+
+  remove(id: string) {
+    return this.prismaService.user.update({
+      where: { id },
+      data: { status: 'DELETED' }
     });
   }
 

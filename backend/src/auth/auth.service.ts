@@ -30,13 +30,10 @@ export class AuthService {
       throw new ConflictException('Email đã tồn tại trong hệ thống');
     }
 
-    // mã hóa password
-    const hashedPassword = await bcrypt.hash(data.password, 10);
-
     // tạo user mới
     const newUser = await this.userService.create({
       email: data.email,
-      passwordHash: hashedPassword,
+      password: data.password,
     });
 
     // trả về user mới tạo
@@ -46,8 +43,8 @@ export class AuthService {
   async login(data: LoginDto) {
     // Tìm user theo email
     const user = await this.userService.findByEmail(data.email);
-    if (!user) {
-      throw new UnauthorizedException('User not found');
+    if (!user || user.status === 'DELETED') {
+      throw new UnauthorizedException('Tài khoản không tồn tại hoặc đã bị xóa');
     }
     
     // Kiểm tra password
@@ -150,8 +147,7 @@ export class AuthService {
       throw new UnauthorizedException('Mật khẩu cũ không chính xác');
     }
 
-    const hashedPassword = await bcrypt.hash(data.newPassword, 10);
-    await this.userService.update(userId, { passwordHash: hashedPassword });
+    await this.userService.update(userId, { password: data.newPassword });
 
     return { message: 'Đổi mật khẩu thành công' };
   }
