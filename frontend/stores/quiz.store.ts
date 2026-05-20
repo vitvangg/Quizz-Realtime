@@ -12,8 +12,10 @@ interface QuizState {
   // Lưu trữ bộ lọc toàn cục
   searchKeyword: string;
   selectedCategory: string;
+  sortOrder: "newest" | "oldest";
 
   setFilters: (keyword: string, category: string) => void;
+  setSortOrder: (order: "newest" | "oldest") => void;
   getAll: () => Promise<void>;
   getMyQuizzes: () => Promise<void>;
   getById: (id: string) => Promise<void>;
@@ -37,9 +39,14 @@ export const useQuizStore = create<QuizState>((set, get) => ({
   
   searchKeyword: "",
   selectedCategory: "ALL",
+  sortOrder: "newest",
 
   setFilters: (keyword, category) => {
     set({ searchKeyword: keyword, selectedCategory: category });
+  },
+
+  setSortOrder: (order) => {
+    set({ sortOrder: order });
   },
 
   getAll: async () => {
