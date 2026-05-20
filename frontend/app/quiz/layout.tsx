@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { useAuthStore } from "@/stores/auth.store";
 import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 import {
   LogOut,
   User,
@@ -16,12 +17,18 @@ export default function QuizLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { user, logout } = useAuthStore();
+  const { user, isHydrated, logout } = useAuthStore();
   const router = useRouter();
+
+  useEffect(() => {
+    if (isHydrated && !user) {
+      router.push('/');
+    }
+  }, [user, isHydrated, router]);
 
   const handleLogout = async () => {
     await logout();
-    router.push("/signin");
+    router.push("/");
   };
 
   return (

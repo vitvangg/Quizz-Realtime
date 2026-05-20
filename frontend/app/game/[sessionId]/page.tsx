@@ -1837,14 +1837,6 @@ export default function GamePage() {
     router.push('/');
   };
 
-  const handleEndGame = () => {
-    const gameStore = useGameStore.getState();
-    if (!gameStore.socket || !sessionId) return;
-    gameStore.socket.emit('host_end_game', { sessionId }, (response: any) => {
-      if (response.success) router.push('/quiz');
-    });
-  };
-
   const handleCloseRoom = () => {
     const gameStore = useGameStore.getState();
     const { roomId } = gameStore;
@@ -2056,7 +2048,7 @@ export default function GamePage() {
           timeRemaining={0}
           leaderboard={leaderboard}
           onPlayAgain={handlePlayAgain}
-          onEndGame={handleEndGame}
+          onEndGame={handleCloseRoom}
         />
       );
     }
@@ -2069,6 +2061,7 @@ export default function GamePage() {
         timeRemaining={0}
         myScore={myScore}
         myRank={myRank}
+        onLeaveRoom={handleLeaveRoom}
       />
     );
   }

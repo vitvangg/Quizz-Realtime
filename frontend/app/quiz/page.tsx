@@ -71,7 +71,7 @@ export default function MyQuizzesPage() {
   } = useQuizStore();
 
   const { createRoom, loading: roomLoading, currentRoom, reset } = useRoomStore();
-  const { user } = useAuthStore();
+  const { user, isHydrated } = useAuthStore();
 
   const quizToDeleteId = useQuizStore((state) => state.currentQuiz?.id || null);
   const setQuizToDeleteId = (id: string | null) => {

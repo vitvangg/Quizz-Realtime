@@ -30,6 +30,7 @@ interface PlayerGameViewProps {
   myRank?: number | null;
   // Actions
   onAnswerSelect?: (answerId: string) => void;
+  onLeaveRoom?: () => void;
 }
 
 export function PlayerGameView({
@@ -46,6 +47,7 @@ export function PlayerGameView({
   myScore,
   myRank,
   onAnswerSelect,
+  onLeaveRoom,
 }: PlayerGameViewProps) {
   // Waiting state
   if (gameStatus === 'WAITING') {
@@ -245,6 +247,14 @@ export function PlayerGameView({
               </div>
             </CardContent>
           </Card>
+
+          {/* Leave room button */}
+          <Button
+            onClick={onLeaveRoom}
+            className="w-full bg-neon-blue border-4 border-black shadow-brutal hover:shadow-none hover:translate-x-2 hover:translate-y-2 font-black text-xl py-6 uppercase"
+          >
+            Rời phòng
+          </Button>
         </div>
       </div>
     );
