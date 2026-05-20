@@ -38,6 +38,7 @@ export interface PlayerPresence {
   connection: ConnectionStatus;
   lastSeen: number;
   joinedAt: number;
+  ipAddress?: string;
 }
 
 export interface SessionPresence {
@@ -70,8 +71,9 @@ export class PlayerPresenceService {
     nickname: string;
     socketId: string;
     isHost: boolean;
+    ipAddress?: string;
   }): Promise<PlayerPresence> {
-    const { sessionId, playerId, nickname, socketId, isHost } = params;
+    const { sessionId, playerId, nickname, socketId, isHost, ipAddress } = params;
     const now = Date.now();
 
     const presence: PlayerPresence = {
@@ -82,7 +84,14 @@ export class PlayerPresenceService {
       connection: ConnectionStatus.CONNECTED,
       lastSeen: now,
       joinedAt: now,
+      ipAddress,
     };
+
+    const existing = await this.getPlayerPresence(sessionId, playerId);
+    if (!existing) {
+      // Increment active room player count for Admin Dashboard
+      await this.redis.incrementRoomPlayer(sessionId, 1);
+    }
 
     const pipeline = this.redis.pipeline();
 
@@ -110,6 +119,12 @@ export class PlayerPresenceService {
    * Call when player intentionally leaves or session ends
    */
   async detachPlayer(sessionId: string, playerId: string): Promise<void> {
+    const existing = await this.getPlayerPresence(sessionId, playerId);
+    if (existing) {
+      // Decrement active room player count for Admin Dashboard
+      await this.redis.incrementRoomPlayer(sessionId, -1);
+    }
+
     const pipeline = this.redis.pipeline();
 
     pipeline.hdel(this.sessionKey(sessionId), playerId);

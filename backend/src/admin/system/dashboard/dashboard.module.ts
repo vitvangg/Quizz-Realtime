@@ -1,4 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
+import { AuthModule } from '../../../auth/auth.module';
+
 import { DashboardGateway } from './dashboard.gateway';
 import { DashboardMetricsService } from './dashboard-metrics.service';
 import { IncidentController } from './incident.controller';
@@ -14,9 +16,10 @@ import { GameModule } from '../../../game/game.module';
     AuditLogModule,
     NotificationModule,
     forwardRef(() => GameModule),
+    AuthModule,
   ],
   providers: [DashboardGateway, DashboardMetricsService, DashboardService],
   controllers: [IncidentController],
   exports: [DashboardGateway, DashboardService],
 })
-export class DashboardModule {}
+export class DashboardModule { }

@@ -1,6 +1,5 @@
 /**
  * Game Constants - Centralized configuration for the quiz game
- * 
  * This file consolidates all magic numbers and hardcoded values
  * to improve maintainability and consistency.
  */
@@ -9,7 +8,7 @@ export const GAME_CONSTANTS = {
   // ============================================================
   // COUNTDOWN & TIMING
   // ============================================================
-  
+
   /** Countdown seconds before game starts */
   COUNTDOWN_SECONDS: 3,
 
@@ -30,62 +29,62 @@ export const GAME_CONSTANTS = {
   // ============================================================
   // REDIS TTL (seconds)
   // ============================================================
-  
+
   /** Game cache TTL - 2 hours */
   GAME_CACHE_TTL: 7200,
-  
+
   /** Player presence TTL - 24 hours */
   PLAYER_PRESENCE_TTL: 86400,
-  
+
   /** Lobby presence TTL - 1 hour */
   LOBBY_PRESENCE_TTL: 3600,
-  
+
   /** Answer lock TTL - 30 seconds */
   ANSWER_LOCK_TTL: 30,
-  
+
   /** Player name cache TTL - 24 hours (ms) */
   PLAYER_NAME_CACHE_TTL_MS: 24 * 60 * 60 * 1000,
 
   // ============================================================
   // SCORING
   // ============================================================
-  
+
   /** Base score for correct answer */
   BASE_SCORE: 1000,
-  
+
   /** Time bonus divisor (ms per point) */
   TIME_BONUS_DIVISOR: 10,
 
   // ============================================================
   // TIMER & BATCH
   // ============================================================
-  
+
   /** Timer check interval (ms) */
   TIMER_CHECK_INTERVAL: 100,
-  
+
   /** Answer batch size */
   ANSWER_BATCH_SIZE: 100,
-  
+
   /** Answer batch interval (ms) */
   ANSWER_BATCH_INTERVAL: 100,
 
   // ============================================================
   // SOCKET & NETWORK
   // ============================================================
-  
+
   /** Redis connection timeout (ms) */
   REDIS_CONNECT_TIMEOUT: 10000,
-  
+
   /** Rate limit window (ms) */
   RATE_LIMIT_WINDOW: 1000,
 
   // ============================================================
   // GRACE PERIODS
   // ============================================================
-  
+
   /** Player reconnect grace period (ms) */
   RECONNECT_GRACE_PERIOD: 30000,
-  
+
   /** Cleanup grace period for disconnect (ms) */
   DISCONNECT_GRACE_PERIOD: 5000,
 } as const;

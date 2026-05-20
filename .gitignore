@@ -1,71 +1,97 @@
-# =========================
-# Node modules
-# =========================
+# =============================================================================
+# ROOT .gitignore — Quizz-Realtime
+# =============================================================================
+
+# ─── Node ────────────────────────────────────────────────────────────────────
 node_modules/
 **/node_modules/
 
-# =========================
-# Build outputs
-# =========================
+# ─── Build outputs ───────────────────────────────────────────────────────────
 dist/
 build/
 .next/
 out/
+**/dist/
+**/build/
 
-# =========================
-# Logs
-# =========================
+# ─── Prisma generated client ─────────────────────────────────────────────────
+backend/generated/
+
+# ─── Logs ────────────────────────────────────────────────────────────────────
 logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+lerna-debug.log*
 
-# =========================
-# Environment variables
-# =========================
+# ─── Environment / secrets ───────────────────────────────────────────────────
 .env
-.env.local
-.env.development
-.env.test
-.env.production
+.env.*
+!.env.example          # Cho phép giữ file mẫu
+**/.env
+**/.env.*
+!**/.env.example
 
-# =========================
-# NestJS
-# =========================
-/coverage
+# ─── TypeScript caches ───────────────────────────────────────────────────────
 *.tsbuildinfo
+.tsbuildinfo
 
-# =========================
-# Next.js
-# =========================
-.next/cache
+# ─── Test coverage ───────────────────────────────────────────────────────────
+coverage/
+**/coverage/
+.nyc_output/
 
-# =========================
-# OS files
-# =========================
-.DS_Store
-Thumbs.db
+# ─── Next.js ─────────────────────────────────────────────────────────────────
+.next/
+frontend/.next/
 
-# =========================
-# IDE
-# =========================
-.vscode/
-.idea/
-
-# =========================
-# Prisma (nếu có dùng)
-# =========================
-prisma/migrations/
+# ─── Prisma database files ───────────────────────────────────────────────────
 *.db
 *.sqlite
+*.sqlite3
 
-# =========================
-# Misc
-# =========================
+# ─── OS ──────────────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ─── IDE ─────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ─── Misc / temp ─────────────────────────────────────────────────────────────
 tmp/
 temp/
+.tmp/
+.cache/
 
-# Docs
+# ─── Load test / scripts ─────────────────────────────────────────────────────
+bot-test.js
+selenium_testing.js
+load-tests/
+
+# ─── Backup files ────────────────────────────────────────────────────────────
+frontend/backup_pase_game
+
+# ─── Docs & AI config (không cần deploy) ─────────────────────────────────────
 docs/
+.docs/
+.agent/
+.cursorrules
+DEPLOYMENT_GUIDE.md
+GAME_ARCHITECTURE.md
+note.md
+frontend/docs/
+frontend/ADMIN_SYSTEM_README.md
+frontend/AGENTS.md
+frontend/CLAUDE.md

@@ -1,0 +1,82 @@
+# =============================================================================
+# ROOT .dockerignore — Quizz-Realtime
+# Áp dụng cho build context của docker-compose ở root level
+# =============================================================================
+
+# ─── Git ─────────────────────────────────────────────────────────────────────
+.git
+.gitignore
+.gitattributes
+
+# ─── Node modules (sẽ được cài bởi Dockerfile) ───────────────────────────────
+node_modules
+**/node_modules
+
+# ─── Build outputs (sẽ được build bởi Dockerfile) ────────────────────────────
+dist
+**/dist
+build
+**/build
+.next
+frontend/.next
+
+# ─── Prisma generated ────────────────────────────────────────────────────────
+backend/generated
+
+# ─── Environment (không copy .env vào image, dùng docker-compose env) ────────
+.env
+.env.*
+**/.env
+**/.env.*
+
+# ─── Logs ────────────────────────────────────────────────────────────────────
+*.log
+logs
+**/logs
+
+# ─── OS / IDE ─────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode
+.idea
+*.swp
+*.swo
+
+# ─── Test / Coverage ──────────────────────────────────────────────────────────
+coverage
+**/coverage
+.nyc_output
+test
+**/test
+**/*.spec.ts
+**/*.e2e-spec.ts
+
+# ─── TypeScript caches ────────────────────────────────────────────────────────
+*.tsbuildinfo
+
+# ─── Documentation / Misc (không cần trong image) ────────────────────────────
+docs
+.docs
+.agent
+.cursorrules
+DEPLOYMENT_GUIDE.md
+GAME_ARCHITECTURE.md
+note.md
+README.md
+**/README.md
+docker-compose*.yml
+Makefile
+
+# ─── Load tests & scripts ────────────────────────────────────────────────────
+bot-test.js
+selenium_testing.js
+load-tests
+fix.js
+backend/fix.js
+
+# ─── Frontend specific ───────────────────────────────────────────────────────
+frontend/docs
+frontend/ADMIN_SYSTEM_README.md
+frontend/AGENTS.md
+frontend/CLAUDE.md
+frontend/backup_pase_game

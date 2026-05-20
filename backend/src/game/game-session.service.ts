@@ -167,6 +167,14 @@ export class GameSessionService {
       this.logger.warn(`Cache warmup failed (non-critical): ${e.message}`),
     );
 
+    // Track active room for admin ops
+    await this.redis.setActiveRoom(session.id, {
+      roomId,
+      hostId,
+      status: 'PLAYING',
+      startedAt: Date.now(),
+    });
+
     this.logger.log(
       `Game session ${session.id} started for room ${roomId} | ${room.players.length} players`,
     );
@@ -479,6 +487,9 @@ export class GameSessionService {
     // Delete leaderboard
     await this.redis.del(`leaderboard:${sessionId}`);
 
+    // Track active room for admin ops
+    await this.redis.removeActiveRoom(sessionId);
+
     // Delete player in-game tracking keys
     // Note: We don't delete player names cache as it's shared across sessions
 
@@ -514,6 +525,9 @@ export class GameSessionService {
         });
       }
     });
+
+    // Track active room for admin ops
+    await this.redis.removeActiveRoom(sessionId);
 
     this.logger.log(`[GameSessionService] Session ${sessionId} closed in DB`);
   }

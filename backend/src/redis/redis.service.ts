@@ -108,6 +108,45 @@ export class RedisService extends Redis implements OnModuleDestroy {
   }
 
   // ============================================================================
+  // ACTIVE ROOMS TRACKING
+  // ============================================================================
+
+  async setActiveRoom(sessionId: string, data: any): Promise<void> {
+    await this.hset('admin:active_rooms', sessionId, JSON.stringify(data));
+  }
+
+  async removeActiveRoom(sessionId: string): Promise<void> {
+    await this.hdel('admin:active_rooms', sessionId);
+    await this.del(`admin:room_players:${sessionId}`);
+  }
+
+  async getActiveRooms(): Promise<Record<string, any>> {
+    const data = await this.hgetall('admin:active_rooms');
+    const rooms: Record<string, any> = {};
+    if (data) {
+      for (const [sessionId, infoStr] of Object.entries(data)) {
+        try {
+          const info = JSON.parse(infoStr);
+          const playersCount = await this.getRoomPlayerCount(sessionId);
+          rooms[sessionId] = { ...info, playersCount };
+        } catch (e) {
+          console.error(`Error parsing room data for ${sessionId}`, e);
+        }
+      }
+    }
+    return rooms;
+  }
+
+  async incrementRoomPlayer(sessionId: string, amount: number): Promise<void> {
+    await this.incrby(`admin:room_players:${sessionId}`, amount);
+  }
+
+  async getRoomPlayerCount(sessionId: string): Promise<number> {
+    const val = await this.get(`admin:room_players:${sessionId}`);
+    return val ? parseInt(val, 10) : 0;
+  }
+
+  // ============================================================================
   // RATE LIMITING (Sliding Window via Lua)
   // ============================================================================
 
