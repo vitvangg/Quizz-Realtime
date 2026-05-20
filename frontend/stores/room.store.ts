@@ -59,7 +59,12 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     const { socket } = get();
     
     // Guard: prevent duplicate listener registration
-    if (socket || listenersRegistered) {
+    if (socket && listenersRegistered) {
+      // Socket đã tồn tại và listeners đã đăng ký → sync state nếu cần
+      if (socket.connected && !get().isConnected) {
+        console.log('[RoomStore] connectSocket: socket already connected, syncing Zustand isConnected = true');
+        set({ isConnected: true });
+      }
       console.log('[RoomStore] connectSocket: skipping, socket exists:', !!socket, 'listenersRegistered:', listenersRegistered);
       return;
     }
@@ -70,6 +75,8 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     if (!newSocket.connected) {
       console.log('[RoomStore] Connecting lobby socket...');
       connectLobbySocket();
+    } else {
+      console.log('[RoomStore] Lobby socket already connected, socket.id:', newSocket.id);
     }
 
     // Track listener count for debugging
@@ -100,14 +107,10 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       set({ error: 'Không thể kết nối server', isConnected: false });
     });
 
-    // CRITICAL: Actually connect the socket (autoConnect: false in socket.ts)
-    if (!newSocket.connected) {
-      console.log('[RoomStore] Connecting socket...');
-      newSocket.connect();
-    }
-
-    // DEBUG: Log socket id and listener count before registering
+    // DEBUG: Log socket state before registering
     console.log('[RoomStore] About to register listeners, socket.id:', newSocket.id);
+    console.log('[RoomStore] socket.connected:', newSocket.connected);
+    console.log('[RoomStore] player_joined listeners before:', newSocket.listeners('player_joined').length);
 
     registerListener('room_joined', (data: RoomJoinedPayload) => {
       console.log('[Socket] room_joined received:', JSON.stringify(data));
@@ -141,6 +144,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
 
     registerListener('player_joined', (data: any) => {
       console.log('[Socket] player_joined received:', JSON.stringify(data));
+      console.log('[Socket] player_joined: listener count =', newSocket.listeners('player_joined').length);
       
       // Normalize payload using shared normalizer
       const player = normalizePlayerJoinedEvent(data);
@@ -236,8 +240,22 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   },
 
   disconnectSocket: () => {
-    // Socket is shared — never disconnect it here.
-    // Reset listener guard so next connectSocket() can re-register
+    const { socket } = get();
+    if (socket) {
+      const events = [
+        'room_joined', 'player_joined', 'player_left',
+        'player_reconnecting', 'player_reconnected', 'host_left',
+        'room_left', 'error',
+      ];
+      
+      console.log('[RoomStore] disconnectSocket: removing listeners for events:', events.join(', '));
+      console.log('[RoomStore] disconnectSocket: player_joined listeners before =', socket.listeners('player_joined').length);
+      
+      events.forEach(event => {
+        socket.removeAllListeners(event);
+      });
+    }
+    
     listenersRegistered = false;
     set({ socket: null, isConnected: false });
   },
@@ -384,7 +402,11 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     // Always call connectSocket — it no-ops if socket already exists.
     const { connectSocket } = get();
 
+    console.log('[RoomStore] joinRoomById called, roomId:', roomId);
+    console.log('[RoomStore] joinRoomById: socket =', !!get().socket, 'isConnected =', get().isConnected);
+
     if (!get().socket) {
+      console.log('[RoomStore] joinRoomById: socket not in store, calling connectSocket');
       connectSocket();
       // Wait for socket to connect
       await new Promise<void>((resolve) => {
@@ -399,6 +421,10 @@ export const useRoomStore = create<RoomState>((set, get) => ({
           resolve();
         }, 5000);
       });
+    } else if (get().socket?.connected && !get().isConnected) {
+      // Socket đã connected nhưng Zustand isConnected bị stale → sync
+      console.log('[RoomStore] joinRoomById: socket connected but Zustand isConnected is false, syncing');
+      set({ isConnected: true });
     }
 
     return new Promise<void>((resolve, reject) => {
@@ -436,8 +462,27 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   leaveRoom: async () => {
     const { socket, currentRoom, currentPlayer } = get();
     
-    if (socket && currentRoom) {
+    if (!socket || !currentRoom) {
+      set({
+        currentRoom: null,
+        currentPlayer: null,
+        players: [],
+        isHost: false,
+      });
+      return;
+    }
+
+    // Check if this is the host leaving
+    const isHost = currentPlayer?.isHost || currentPlayer?.id?.startsWith('host_');
+    
+    if (isHost) {
+      // Host leaving - emit host_leave_room to close the room
+      socket.emit('host_leave_room', { roomId: currentRoom.id });
+      console.log('[RoomStore] Host emitting host_leave_room for room:', currentRoom.id);
+    } else {
+      // Regular player leaving - emit leave_room
       socket.emit('leave_room', { roomId: currentRoom.id });
+      console.log('[RoomStore] Player emitting leave_room for room:', currentRoom.id);
     }
     
     set({
@@ -492,6 +537,8 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   reset: () => {
     const { disconnectSocket } = get();
     disconnectSocket();
+    // Reset listenersRegistered flag for next session
+    listenersRegistered = false;
     set({
       socket: null,
       isConnected: false,
