@@ -64,6 +64,8 @@ const CATEGORY_ICONS: Record<string, any> = {
 export default function MyQuizzesPage() {
   const router = useRouter();
   const [activeQuizId, setActiveQuizId] = useState<string | null>(null);
+  const [isFiltering, setIsFiltering] = useState(false);
+
   const {
     quizzes,
     loading,
@@ -108,10 +110,22 @@ export default function MyQuizzesPage() {
   const isDeleting = loading && !!quizToDeleteId;
 
   useEffect(() => {
-    const timer = setTimeout(() => {
+    setIsFiltering(true);
+    const timer = setTimeout(async () => {
       const query = selectedCategory !== "ALL" ? selectedCategory : searchKeyword;
-      search(query);
-      resetPage(); // Reset to page 1 when searching or filtering
+      
+      const startTime = Date.now();
+      await search(query);
+      const endTime = Date.now();
+      
+      const duration = endTime - startTime;
+      const minLoadingTime = 800; // Force loading for at least 800ms
+      const remainingTime = Math.max(0, minLoadingTime - duration);
+
+      setTimeout(() => {
+        setIsFiltering(false);
+        resetPage();
+      }, remainingTime);
     }, 400);
 
     return () => clearTimeout(timer);
@@ -247,17 +261,17 @@ export default function MyQuizzesPage() {
         </div>
 
         {/* Loading State */}
-        {loading && quizzes.length === 0 ? (
+        {(loading || isFiltering) ? (
           <div className="flex flex-col items-center justify-center py-32 gap-6">
-            <div className="w-16 h-16 border-4 border-black border-t-transparent rounded-full animate-spin bg-neon-pink"></div>
-            <p className="font-black uppercase tracking-widest animate-pulse">Đang tải danh sách...</p>
+            <div className="w-16 h-16 border-4 border-black border-t-transparent rounded-full animate-spin bg-neon-pink shadow-brutal-sm"></div>
+            <p className="font-black uppercase tracking-widest animate-pulse">Đang tìm kiếm...</p>
           </div>
         ) : quizzes.length === 0 ? (
           /* Empty State */
           <Card className="border-4 border-dashed border-black py-24 flex flex-col items-center justify-center text-center rounded-2xl bg-neon-blue/10">
             <div className="bg-neon-yellow border-4 border-black shadow-brutal p-8 mb-6">
               <BookOpen className="h-16 w-16 text-black" />
-            </div>
+            </div>s
             <CardTitle className="text-3xl font-black mb-2 uppercase">TRỐNG RỖNG</CardTitle>
             <p className="max-w-sm mb-10 font-medium text-black/70">
               Bắt đầu tạo bộ câu hỏi đầu tiên để chia sẻ kiến thức!
