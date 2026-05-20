@@ -13,7 +13,10 @@ import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
 import { OnEvent } from '@nestjs/event-emitter';
 import { GameSessionService, GameState } from './game-session.service';
-import { PlayerPresenceService, ConnectionStatus } from './player-presence.service';
+import {
+  PlayerPresenceService,
+  ConnectionStatus,
+} from './player-presence.service';
 import { RoomService } from '../room/room.service';
 import { RoomGateway } from '../room/room.gateway';
 import { RedisService } from '../redis/redis.service';
@@ -36,6 +39,7 @@ interface PlayerIdentity {
   sessionId?: string;
   nickname: string;
   isHost: boolean;
+  ipAddress?: string;
 }
 
 @WebSocketGateway({
@@ -45,7 +49,8 @@ interface PlayerIdentity {
   },
   namespace: '/game',
 })
-export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit {
+export class GameGateway
+  implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit {
   @WebSocketServer()
   server: Server;
 
@@ -65,10 +70,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     private readonly jwtService: JwtService,
     private readonly roomGateway: RoomGateway,
     private readonly redisService: RedisService,
-  ) {}
+  ) { }
 
   afterInit(server: Server) {
-    this.logger.log('[GameGateway] Initialized (Stateless Socket Architecture)');
+    this.logger.log(
+      '[GameGateway] Initialized (Stateless Socket Architecture)',
+    );
 
     // Setup Redis Adapter once (idempotent - safe to call from multiple gateways)
     setupRedisAdapter(server, {
@@ -88,16 +95,23 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     return this.socketMap.size;
   }
 
+  private getClientIp(client: Socket): string {
+    const forwardedFor = client.handshake.headers['x-forwarded-for'];
+    return typeof forwardedFor === 'string' ? forwardedFor.split(',')[0].trim() : client.handshake.address;
+  }
+
   // ============================================================================
   // CONNECTION HANDLING
   // ============================================================================
 
   async handleConnection(client: Socket) {
-    const ip = client.handshake.address;
+    const ip = this.getClientIp(client);
 
     const isBanned = await this.redisService.isIpBanned(ip);
     if (isBanned) {
-      this.logger.warn(`[GameGateway] Rejected BANNED IP: ${ip} (socket: ${client.id})`);
+      this.logger.warn(
+        `[GameGateway] Rejected BANNED IP: ${ip} (socket: ${client.id})`,
+      );
       client.disconnect(true);
       return;
     }
@@ -108,10 +122,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   async handleDisconnect(client: Socket) {
     const identity = this.socketMap.get(client.id);
     this.logger.log(
-      `[GameGateway] Client disconnected: ${client.id} | identity: ${
-        identity
-          ? JSON.stringify({ playerId: identity.playerId, isHost: identity.isHost, sessionId: identity.sessionId })
-          : 'none'
+      `[GameGateway] Client disconnected: ${client.id} | identity: ${identity
+        ? JSON.stringify({
+          playerId: identity.playerId,
+          isHost: identity.isHost,
+          sessionId: identity.sessionId,
+        })
+        : 'none'
       }`,
     );
 
@@ -138,7 +155,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       timestamp: Date.now(),
     });
 
-    this.logger.log(`[GameGateway] Player ${nickname} marked disconnected (session continues)`);
+    this.logger.log(
+      `[GameGateway] Player ${nickname} marked disconnected (session continues)`,
+    );
   }
 
   // ============================================================================
@@ -162,10 +181,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       this.logger.warn(`[FREEZE] Paused ${paused.size} session timers`);
     } else {
       for (const [sessionId, callback] of this.sessionCallbacks.entries()) {
-        const remainingMs = await this.gameSessionService.getTimerRemainingMs(sessionId);
+        const remainingMs =
+          await this.gameSessionService.getTimerRemainingMs(sessionId);
         if (remainingMs !== null && remainingMs > 0) {
           const remainingSec = Math.ceil(remainingMs / 1000);
-          this.logger.log(`[UNFREEZE] Resuming session ${sessionId} with ${remainingSec}s remaining`);
+          this.logger.log(
+            `[UNFREEZE] Resuming session ${sessionId} with ${remainingSec}s remaining`,
+          );
 
           this.server.to(sessionId).emit('timer_resume', {
             remainingSeconds: remainingSec,
@@ -193,7 +215,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   }
 
   @OnEvent('system.incident.maintenance')
-  handleMaintenance(payload: { enable: boolean; message?: string; scheduledFrom?: string; scheduledUntil?: string }) {
+  handleMaintenance(payload: {
+    enable: boolean;
+    message?: string;
+    scheduledFrom?: string;
+    scheduledUntil?: string;
+  }) {
     this.logger.warn(`[MAINTENANCE] ${payload.enable ? 'ON' : 'OFF'}`);
     if (this.server) {
       this.server.emit('system:maintenance', {
@@ -219,7 +246,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
   private buildReloadResponse(fullState: any, leaderboard: any[] = []) {
     let remainingTime = fullState?.remainingTime ?? null;
-    
+
     // Recalculate remainingTime for QUESTION_ACTIVE state
     // to account for time elapsed since the state was cached
     if (fullState?.status === GameState.QUESTION_ACTIVE && fullState?.questionStartedAt) {
@@ -227,7 +254,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       const timeLimit = fullState.currentQuestion?.timeLimit || 20;
       remainingTime = Math.max(0, Math.floor(timeLimit - elapsed));
     }
-    
+
     if (fullState?.status === GameState.QUESTION_RESULT) {
       remainingTime = 0;
     }
@@ -246,7 +273,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       currentQuestion: fullState?.currentQuestion || null,
       questionIndex: fullState?.currentQuestionIndex ?? 0,
       totalQuestions: fullState?.totalQuestions ?? 0,
-      leaderboard: leaderboard.length > 0 ? leaderboard : (fullState?.leaderboard || []),
+      leaderboard:
+        leaderboard.length > 0 ? leaderboard : fullState?.leaderboard || [],
       remainingTime,
       correctAnswerId: fullState?.correctAnswerId || null,
       questionStartedAt: fullState?.questionStartedAt || null,
@@ -272,37 +300,54 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
    * - Cases where socketMap was cleared/restored incorrectly
    * - Multi-instance race conditions
    */
-  private async verifyHost(client: Socket, sessionId: string): Promise<PlayerIdentity | null> {
+  private async verifyHost(
+    client: Socket,
+    sessionId: string,
+  ): Promise<PlayerIdentity | null> {
     const identity = this.socketMap.get(client.id);
-    
-    this.logger.log(`[verifyHost] Checking host for session=${sessionId}, socket=${client.id}, identity=${JSON.stringify(identity)}`);
-    
+
+    this.logger.log(
+      `[verifyHost] Checking host for session=${sessionId}, socket=${client.id}, identity=${JSON.stringify(identity)}`,
+    );
+
     if (!identity?.isHost) {
-      this.logger.warn(`[verifyHost] No host identity found for socket ${client.id}`);
+      this.logger.warn(
+        `[verifyHost] No host identity found for socket ${client.id}`,
+      );
       return null;
     }
 
     // Verify against Redis authoritative state
     const hostId = await this.presenceService.getHostId(sessionId);
-    this.logger.log(`[verifyHost] Redis hostId for session=${sessionId}: ${hostId}`);
-    
+    this.logger.log(
+      `[verifyHost] Redis hostId for session=${sessionId}: ${hostId}`,
+    );
+
     if (!hostId) {
-      this.logger.warn(`[verifyHost] No host found in Redis for session ${sessionId}`);
+      this.logger.warn(
+        `[verifyHost] No host found in Redis for session ${sessionId}`,
+      );
       return null;
     }
 
     // Compare playerId (which is in format host_{userId}) with Redis hostId
     // NOTE: identity.playerId is "host_{userId}" format, identity.userId is just userId
     const clientPlayerId = identity.playerId;
-    
-    this.logger.log(`[verifyHost] Comparing clientPlayerId=${clientPlayerId} with hostId=${hostId}`);
-    
+
+    this.logger.log(
+      `[verifyHost] Comparing clientPlayerId=${clientPlayerId} with hostId=${hostId}`,
+    );
+
     if (clientPlayerId !== hostId) {
-      this.logger.warn(`[verifyHost] Player ${clientPlayerId} is not the host (actual host: ${hostId})`);
+      this.logger.warn(
+        `[verifyHost] Player ${clientPlayerId} is not the host (actual host: ${hostId})`,
+      );
       return null;
     }
 
-    this.logger.log(`[verifyHost] Host verification passed for ${clientPlayerId}`);
+    this.logger.log(
+      `[verifyHost] Host verification passed for ${clientPlayerId}`,
+    );
     return identity;
   }
 
@@ -310,6 +355,26 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     const state = await this.gameSessionService.getSessionState(sessionId);
     return state.status !== GameState.FINISHED;
   }
+
+  // ============================================================================
+  // SYSTEM EVENTS (Admin Dashboard Integration)
+  // ============================================================================
+
+  @OnEvent('system.incident.lockdown')
+  handleSystemLockdown(payload: { enable: boolean; message: string }) {
+    this.logger.warn(`[GameGateway] Broadcasting system lockdown: ${payload.enable}`);
+    this.server.emit('system:freeze', payload);
+  }
+
+  @OnEvent('system.incident.maintenance')
+  handleSystemMaintenance(payload: { enable: boolean; message?: string }) {
+    this.logger.warn(`[GameGateway] Broadcasting system maintenance: ${payload.enable}`);
+    this.server.emit('system:maintenance', payload);
+  }
+
+  // ============================================================================
+  // BACKGROUND SYNC (Redis to DB)
+  // ============================================================================
 
   // ============================================================================
   // GAME EVENTS - HOST JOIN
@@ -337,7 +402,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         return { success: false, error: 'Invalid token: missing user ID' };
       }
 
-      const fullState = await this.gameSessionService.getFullSessionState(payload.sessionId);
+      const fullState = await this.gameSessionService.getFullSessionState(
+        payload.sessionId,
+      );
       if (!fullState) {
         return { success: false, error: 'Game session not found' };
       }
@@ -357,7 +424,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       let currentSessionId: string | undefined;
       console.log(`[HostJoinGame] Checking FINISHED redirect: status=${fullState.status}, roomId=${fullState.roomId}`);
       console.log(`[HostJoinGame] fullState.currentSessionId=${fullState.currentSessionId}, payload.sessionId=${payload.sessionId}`);
-      
+
       if (fullState.status === GameState.FINISHED && fullState.roomId) {
         // currentSessionId is already computed in getFullSessionState
         if (fullState.currentSessionId && fullState.currentSessionId !== payload.sessionId) {
@@ -379,12 +446,15 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       }
 
       const hostPlayerId = `host_${hostId}`;
-      
+
       // Check if host already exists in session (reconnect/refresh case)
       // This happens after host_play_again where host was already attached
-      const existingPresence = await this.presenceService.getPlayerPresence(payload.sessionId, hostPlayerId);
+      const existingPresence = await this.presenceService.getPlayerPresence(
+        payload.sessionId,
+        hostPlayerId,
+      );
       const isRejoin = !!existingPresence;
-      
+
       let rejoinReason: string | undefined;
       let isRefresh = false;
 
@@ -393,23 +463,34 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
           // Same socket - this is a session refresh (e.g., page re-render after play_again)
           isRefresh = true;
           rejoinReason = 'session_refresh';
-          this.logger.log(`[GameGateway] Host session refresh (same socket) for session=${payload.sessionId}`);
+          this.logger.log(
+            `[GameGateway] Host session refresh (same socket) for session=${payload.sessionId}`,
+          );
         } else {
           // Different socket - this is a reconnect (host disconnected and reconnected)
           rejoinReason = 'reconnect';
-          this.logger.log(`[GameGateway] Host reconnect detected, updating socketId: ${existingPresence.socketId} -> ${client.id}`);
-          await this.presenceService.updateSocketId(payload.sessionId, hostPlayerId, client.id);
+          this.logger.log(
+            `[GameGateway] Host reconnect detected, updating socketId: ${existingPresence.socketId} -> ${client.id}`,
+          );
+          await this.presenceService.updateSocketId(
+            payload.sessionId,
+            hostPlayerId,
+            client.id,
+          );
         }
       } else {
         // First time joining - attach as new host
-        this.logger.log(`[GameGateway] Host first join, attaching to session=${payload.sessionId}`);
-        
+        this.logger.log(
+          `[GameGateway] Host first join, attaching to session=${payload.sessionId}`,
+        );
+
         await this.presenceService.attachPlayer({
           sessionId: payload.sessionId,
           playerId: hostPlayerId,
           nickname: 'Host',
           socketId: client.id,
           isHost: true,
+          ipAddress: this.getClientIp(client),
         });
       }
 
@@ -420,14 +501,17 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         sessionId: payload.sessionId,
         nickname: 'Host',
         isHost: true,
+        ipAddress: this.getClientIp(client),
       };
       this.registerSocket(client, identity);
 
       // NOTE: Do NOT emit host_reconnected here!
       // host_join_game is called during game redirect (first join), NOT during actual host reconnect.
       // Real host reconnect detection happens in handleDisconnect/handleConnection lifecycle.
-      
-      this.logger.log(`[GameGateway] Host registered for session=${payload.sessionId}, userId=${hostId}, isRejoin=${isRejoin}, reason=${rejoinReason}`);
+
+      this.logger.log(
+        `[GameGateway] Host registered for session=${payload.sessionId}, userId=${hostId}, isRejoin=${isRejoin}, reason=${rejoinReason}`,
+      );
 
       return {
         success: true,
@@ -469,9 +553,15 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         return { success: false, error: 'Invalid token: missing user ID' };
       }
 
-      const result = await this.gameSessionService.startGame(payload.roomId, hostId);
+      const result = await this.gameSessionService.startGame(
+        payload.roomId,
+        hostId,
+      );
 
-      await this.roomService.updateCurrentSessionId(payload.roomId, result.session.id);
+      await this.roomService.updateCurrentSessionId(
+        payload.roomId,
+        result.session.id,
+      );
 
       // Attach host to new session
       await this.presenceService.attachPlayer({
@@ -480,6 +570,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         nickname: 'Host',
         socketId: client.id,
         isHost: true,
+        ipAddress: this.getClientIp(client),
       });
 
       const identity: PlayerIdentity = {
@@ -489,6 +580,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         sessionId: result.session.id,
         nickname: 'Host',
         isHost: true,
+        ipAddress: this.getClientIp(client),
       };
       this.registerSocket(client, identity);
 
@@ -505,15 +597,25 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
       for (let i = 5; i > 0; i--) {
         await this.delay(1000);
-        this.server.to(result.session.id).emit('countdown_tick', { remaining: i - 1 });
-        this.roomGateway.server.to(payload.roomId).emit('countdown_tick', { remaining: i - 1 });
+        this.server
+          .to(result.session.id)
+          .emit('countdown_tick', { remaining: i - 1 });
+        this.roomGateway.server
+          .to(payload.roomId)
+          .emit('countdown_tick', { remaining: i - 1 });
       }
 
       // Emit redirect to players in room
       // NOTE: GameGateway is on /game namespace, RoomGateway is on /lobby namespace
       // Emit on both namespaces so redirect works during lobby phase
-      this.server.to(payload.roomId).emit('game_redirect', { url: `/game/${result.session.id}`, sessionId: result.session.id });
-      this.roomGateway.server.to(payload.roomId).emit('game_redirect', { url: `/game/${result.session.id}`, sessionId: result.session.id });
+      this.server.to(payload.roomId).emit('game_redirect', {
+        url: `/game/${result.session.id}`,
+        sessionId: result.session.id,
+      });
+      this.roomGateway.server.to(payload.roomId).emit('game_redirect', {
+        url: `/game/${result.session.id}`,
+        sessionId: result.session.id,
+      });
 
       // Buffer time for players to navigate from lobby to game and join socket
       await this.delay(GAME_CONSTANTS.GAME_REDIRECT_BUFFER_MS);
@@ -537,19 +639,34 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
       // Emit question_start BEFORE updating questionStartTime in cache
       // This ensures the server and client have the same reference point
-      this.server.to(result.session.id).emit('question_start', questionStartPayload);
+      this.server
+        .to(result.session.id)
+        .emit('question_start', questionStartPayload);
 
       // Update questionStartTime in cache AFTER emitting (for scoring calculations)
-      await this.gameSessionService.updateQuestionStartTime(result.session.id, questionStartTime);
+      await this.gameSessionService.updateQuestionStartTime(
+        result.session.id,
+        questionStartTime,
+      );
 
       // Schedule question end timer (server-driven)
-      const questionEndCallback = (data: any) => this.handleQuestionEnd(result.session.id, data);
+      const questionEndCallback = (data: any) =>
+        this.handleQuestionEnd(result.session.id, data);
       this.sessionCallbacks.set(result.session.id, questionEndCallback);
-      this.gameSessionService.scheduleQuestionEnd(result.session.id, result.firstQuestion.timeLimit, questionEndCallback);
+      this.gameSessionService.scheduleQuestionEnd(
+        result.session.id,
+        result.firstQuestion.timeLimit,
+        questionEndCallback,
+      );
 
       // Emit leaderboard_update for host to populate player list
-      const leaderboard = await this.gameSessionService.getLeaderboard(result.session.id);
-      this.server.to(result.session.id).emit('leaderboard_update', { sessionId: result.session.id, leaderboard });
+      const leaderboard = await this.gameSessionService.getLeaderboard(
+        result.session.id,
+      );
+      this.server.to(result.session.id).emit('leaderboard_update', {
+        sessionId: result.session.id,
+        leaderboard,
+      });
 
       return { success: true, sessionId: result.session.id };
     } catch (error) {
@@ -565,7 +682,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   ) {
     try {
       const identity = await this.verifyHost(client, payload.sessionId);
-      if (!identity) return { success: false, error: 'Only host can advance question' };
+      if (!identity)
+        return { success: false, error: 'Only host can advance question' };
 
       if (identity.sessionId !== payload.sessionId) {
         identity.sessionId = payload.sessionId;
@@ -573,26 +691,30 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         this.registerSocket(client, identity);
       }
 
-      if (!await this.checkGameNotFinished(payload.sessionId)) {
+      if (!(await this.checkGameNotFinished(payload.sessionId))) {
         return { success: false, error: 'Game already finished' };
       }
 
       this.gameSessionService.cancelTimer(payload.sessionId);
 
-      const cached = await this.gameSessionService.getSessionState(payload.sessionId);
+      const cached = await this.gameSessionService.getSessionState(
+        payload.sessionId,
+      );
 
       if (cached.currentQuestionIndex >= cached.totalQuestions - 1) {
         this.logger.log(`[GameGateway] Last question reached, ending game`);
-        await this.gameSessionService.endGame(
-          payload.sessionId,
-          (endData) => this.emitToSession(payload.sessionId, 'game_ended', endData),
+        await this.gameSessionService.endGame(payload.sessionId, (endData) =>
+          this.emitToSession(payload.sessionId, 'game_ended', endData),
         );
         return { success: true, gameEnded: true };
       }
 
-      const result = await this.gameSessionService.nextQuestion(payload.sessionId, () => {});
+      const result = await this.gameSessionService.nextQuestion(
+        payload.sessionId,
+        () => { },
+      );
 
-      await new Promise(resolve => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
 
       // Create questionStartTime at the EXACT moment question begins (server is source of truth)
       const questionStartTime = Date.now();
@@ -613,19 +735,34 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
       // Emit question_start BEFORE updating questionStartTime in cache
       // This ensures the server and client have the same reference point
-      this.server.to(payload.sessionId).emit('question_start', questionStartPayload);
+      this.server
+        .to(payload.sessionId)
+        .emit('question_start', questionStartPayload);
 
       // Update questionStartTime in cache AFTER emitting (for scoring calculations)
-      await this.gameSessionService.updateQuestionStartTime(payload.sessionId, questionStartTime);
+      await this.gameSessionService.updateQuestionStartTime(
+        payload.sessionId,
+        questionStartTime,
+      );
 
       // Emit leaderboard_update for host to update player list
-      const leaderboard = await this.gameSessionService.getLeaderboard(payload.sessionId);
-      this.server.to(payload.sessionId).emit('leaderboard_update', { sessionId: payload.sessionId, leaderboard });
+      const leaderboard = await this.gameSessionService.getLeaderboard(
+        payload.sessionId,
+      );
+      this.server.to(payload.sessionId).emit('leaderboard_update', {
+        sessionId: payload.sessionId,
+        leaderboard,
+      });
 
       // Schedule question end timer (server-driven)
-      const nextCallback = (data: any) => this.handleQuestionEnd(payload.sessionId, data);
+      const nextCallback = (data: any) =>
+        this.handleQuestionEnd(payload.sessionId, data);
       this.sessionCallbacks.set(payload.sessionId, nextCallback);
-      this.gameSessionService.scheduleQuestionEnd(payload.sessionId, result.question.timeLimit, nextCallback);
+      this.gameSessionService.scheduleQuestionEnd(
+        payload.sessionId,
+        result.question.timeLimit,
+        nextCallback,
+      );
 
       return { success: true, gameEnded: false };
     } catch (error) {
@@ -663,7 +800,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   ) {
     try {
       const identity = await this.verifyHost(client, payload.sessionId);
-      if (!identity) return { success: false, error: 'Only host can close room' };
+      if (!identity)
+        return { success: false, error: 'Only host can close room' };
 
       await this.cleanupSession(payload.sessionId, 'HOST_EXITED');
       return { success: true };
@@ -680,7 +818,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   ) {
     try {
       const identity = await this.verifyHost(client, payload.sessionId);
-      if (!identity) return { success: false, error: 'Only host can restart game' };
+      if (!identity)
+        return { success: false, error: 'Only host can restart game' };
 
       const hostId = identity.userId || identity.playerId;
 
@@ -688,30 +827,45 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
       let result: any;
       try {
-        result = await this.gameSessionService.startGame(payload.roomId, hostId);
+        result = await this.gameSessionService.startGame(
+          payload.roomId,
+          hostId,
+        );
       } catch (startError) {
-        this.logger.error(`[host_play_again] startGame failed: ${startError.message}`);
+        this.logger.error(
+          `[host_play_again] startGame failed: ${startError.message}`,
+        );
         await this.roomService.updateStatus(payload.roomId, 'PLAYING' as any);
         throw startError;
       }
 
       const oldSessionId = payload.sessionId;
 
-      await this.roomService.updateCurrentSessionId(payload.roomId, result.session.id);
-      this.logger.log(`[GameGateway] host_play_again: ${oldSessionId} → ${result.session.id}`);
+      await this.roomService.updateCurrentSessionId(
+        payload.roomId,
+        result.session.id,
+      );
+      this.logger.log(
+        `[GameGateway] host_play_again: ${oldSessionId} → ${result.session.id}`,
+      );
 
       // Update host's presence to new session BEFORE emitting session_switched
       // This ensures players see the host is already in the new session
-      await this.presenceService.detachPlayer(oldSessionId, `host_${identity.userId}`);
+      await this.presenceService.detachPlayer(
+        oldSessionId,
+        `host_${identity.userId}`,
+      );
       await this.presenceService.attachPlayer({
         sessionId: result.session.id,
         playerId: `host_${identity.userId}`,
         nickname: 'Host',
         socketId: client.id,
         isHost: true,
+        ipAddress: this.getClientIp(client),
       });
 
       identity.sessionId = result.session.id;
+      identity.ipAddress = this.getClientIp(client);
       client.leave(oldSessionId);
       client.join(result.session.id);
       this.registerSocket(client, identity);
@@ -753,13 +907,23 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
       for (let i = 5; i > 0; i--) {
         await this.delay(1000);
-        this.server.to(result.session.id).emit('countdown_tick', { remaining: i - 1 });
-        this.roomGateway.server.to(payload.roomId).emit('countdown_tick', { remaining: i - 1 });
+        this.server
+          .to(result.session.id)
+          .emit('countdown_tick', { remaining: i - 1 });
+        this.roomGateway.server
+          .to(payload.roomId)
+          .emit('countdown_tick', { remaining: i - 1 });
       }
 
       // Emit redirect to players in room
-      this.server.to(payload.roomId).emit('game_redirect', { url: `/game/${result.session.id}`, sessionId: result.session.id });
-      this.roomGateway.server.to(payload.roomId).emit('game_redirect', { url: `/game/${result.session.id}`, sessionId: result.session.id });
+      this.server.to(payload.roomId).emit('game_redirect', {
+        url: `/game/${result.session.id}`,
+        sessionId: result.session.id,
+      });
+      this.roomGateway.server.to(payload.roomId).emit('game_redirect', {
+        url: `/game/${result.session.id}`,
+        sessionId: result.session.id,
+      });
 
       // Buffer time for players to navigate and join the new game session
       await this.delay(GAME_CONSTANTS.GAME_REDIRECT_BUFFER_MS);
@@ -783,15 +947,25 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
       // Emit question_start BEFORE updating questionStartTime in cache
       // This ensures the server and client have the same reference point
-      this.server.to(result.session.id).emit('question_start', questionStartPayload);
+      this.server
+        .to(result.session.id)
+        .emit('question_start', questionStartPayload);
 
       // Update questionStartTime in cache AFTER emitting (for scoring calculations)
-      await this.gameSessionService.updateQuestionStartTime(result.session.id, questionStartTime);
+      await this.gameSessionService.updateQuestionStartTime(
+        result.session.id,
+        questionStartTime,
+      );
 
       // Schedule question end timer (server-driven)
-      const questionEndCallback = (data: any) => this.handleQuestionEnd(result.session.id, data);
+      const questionEndCallback = (data: any) =>
+        this.handleQuestionEnd(result.session.id, data);
       this.sessionCallbacks.set(result.session.id, questionEndCallback);
-      this.gameSessionService.scheduleQuestionEnd(result.session.id, result.firstQuestion.timeLimit, questionEndCallback);
+      this.gameSessionService.scheduleQuestionEnd(
+        result.session.id,
+        result.firstQuestion.timeLimit,
+        questionEndCallback,
+      );
 
       return { success: true, sessionId: result.session.id };
     } catch (error) {
@@ -807,10 +981,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   @SubscribeMessage('join_game')
   async handleJoinGame(
     @ConnectedSocket() client: Socket,
-    @MessageBody() payload: { sessionId: string; playerId: string; nickname: string },
+    @MessageBody()
+    payload: { sessionId: string; playerId: string; nickname: string },
   ) {
     try {
-      const fullState = await this.gameSessionService.getFullSessionState(payload.sessionId);
+      const fullState = await this.gameSessionService.getFullSessionState(
+        payload.sessionId,
+      );
 
       if (!fullState) {
         return { success: false, error: 'Game session not found' };
@@ -818,10 +995,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
       // Check if game is finished - redirect to newer session if available
       if (fullState.status === GameState.FINISHED) {
-        const currentSessionId = await this.roomService.getCurrentSessionId(fullState.roomId);
+        const currentSessionId = await this.roomService.getCurrentSessionId(
+          fullState.roomId,
+        );
 
         if (currentSessionId && currentSessionId !== payload.sessionId) {
-          this.logger.log(`[GameGateway] Player ${payload.playerId} in finished session ${payload.sessionId}, redirecting to ${currentSessionId}`);
+          this.logger.log(
+            `[GameGateway] Player ${payload.playerId} in finished session ${payload.sessionId}, redirecting to ${currentSessionId}`,
+          );
           return {
             success: true,
             needsRedirect: true,
@@ -833,7 +1014,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       }
 
       // RECONNECT: Check if player was previously connected (disconnected but still in session)
-      const existingPresence = await this.presenceService.getPlayerPresence(payload.sessionId, payload.playerId);
+      const existingPresence = await this.presenceService.getPlayerPresence(
+        payload.sessionId,
+        payload.playerId,
+      );
       const isReconnect = !!existingPresence;
 
       if (isReconnect) {
@@ -853,7 +1037,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
           timestamp: Date.now(),
         });
 
-        this.logger.log(`[GameGateway] Player ${payload.nickname} reconnected to session ${payload.sessionId}`);
+        this.logger.log(
+          `[GameGateway] Player ${payload.nickname} reconnected to session ${payload.sessionId}`,
+        );
       } else {
         // Fresh join: attach player to session
         await this.presenceService.attachPlayer({
@@ -862,6 +1048,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
           nickname: payload.nickname,
           socketId: client.id,
           isHost: false,
+          ipAddress: this.getClientIp(client),
         });
 
         // Ensure player is in leaderboard with score 0
@@ -888,6 +1075,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         sessionId: payload.sessionId,
         nickname: payload.nickname,
         isHost: false,
+        ipAddress: this.getClientIp(client),
       };
       client.join(payload.sessionId);
       this.socketMap.set(client.id, identity);
@@ -908,7 +1096,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   @SubscribeMessage('submit_answer')
   async handleSubmitAnswer(
     @ConnectedSocket() client: Socket,
-    @MessageBody() payload: {
+    @MessageBody()
+    payload: {
       sessionId: string;
       playerId: string;
       questionId: string;
@@ -918,7 +1107,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   ) {
     try {
       // [T2] Backend received submit_answer
-      this.logger.debug(`[T2] submit_answer received player=${payload.playerId} ts=${payload.clientTimestamp}`);
+      this.logger.debug(
+        `[T2] submit_answer received player=${payload.playerId} ts=${payload.clientTimestamp}`,
+      );
 
       const result = await this.gameSessionService.submitAnswer(
         payload.sessionId,
@@ -948,7 +1139,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
       // [T4] Emit leaderboard_update using leaderboard from submitAnswer (already fetched)
       // No need to call getLeaderboard again - result.leaderboard already contains it
-      this.server.to(payload.sessionId).emit('leaderboard_update', { sessionId: payload.sessionId, leaderboard: result.leaderboard });
+      this.server.to(payload.sessionId).emit('leaderboard_update', {
+        sessionId: payload.sessionId,
+        leaderboard: result.leaderboard,
+      });
 
       return {
         success: true,
@@ -965,15 +1159,24 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   @SubscribeMessage('player_leave_game')
   async handlePlayerLeaveGame(
     @ConnectedSocket() client: Socket,
-    @MessageBody() payload: { sessionId: string; playerId: string; nickname: string },
+    @MessageBody()
+    payload: { sessionId: string; playerId: string; nickname: string },
   ) {
-    this.logger.log(`[GameGateway] player_leave_game: ${payload.nickname} (${payload.playerId}) from session ${payload.sessionId}`);
+    this.logger.log(
+      `[GameGateway] player_leave_game: ${payload.nickname} (${payload.playerId}) from session ${payload.sessionId}`,
+    );
 
     // Mark player as LEFT (don't remove from leaderboard)
-    await this.gameSessionService.markPlayerLeft(payload.sessionId, payload.playerId);
+    await this.gameSessionService.markPlayerLeft(
+      payload.sessionId,
+      payload.playerId,
+    );
 
     // Detach player from session
-    await this.presenceService.detachPlayer(payload.sessionId, payload.playerId);
+    await this.presenceService.detachPlayer(
+      payload.sessionId,
+      payload.playerId,
+    );
 
     // Remove from socket map
     this.socketMap.delete(client.id);
@@ -988,8 +1191,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     this.server.to(payload.sessionId).emit('player_left', leftEvent);
 
     // Broadcast updated leaderboard with LEFT status
-    const leaderboard = await this.gameSessionService.getLeaderboard(payload.sessionId);
-    this.server.to(payload.sessionId).emit('leaderboard_update', { sessionId: payload.sessionId, leaderboard });
+    const leaderboard = await this.gameSessionService.getLeaderboard(
+      payload.sessionId,
+    );
+    this.server.to(payload.sessionId).emit('leaderboard_update', {
+      sessionId: payload.sessionId,
+      leaderboard,
+    });
 
     return { success: true };
   }
@@ -1004,8 +1212,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     @MessageBody() payload: { sessionId: string },
   ) {
     try {
-      const state = await this.gameSessionService.getSessionState(payload.sessionId);
-      const leaderboard = await this.gameSessionService.getLeaderboard(payload.sessionId);
+      const state = await this.gameSessionService.getSessionState(
+        payload.sessionId,
+      );
+      const leaderboard = await this.gameSessionService.getLeaderboard(
+        payload.sessionId,
+      );
       return { success: true, state, leaderboard };
     } catch (error) {
       return { success: false, error: error.message };
@@ -1018,7 +1230,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     @MessageBody() payload: { sessionId: string },
   ) {
     try {
-      const leaderboard = await this.gameSessionService.getLeaderboard(payload.sessionId);
+      const leaderboard = await this.gameSessionService.getLeaderboard(
+        payload.sessionId,
+      );
       return { success: true, leaderboard };
     } catch (error) {
       return { success: false, error: error.message };
@@ -1053,8 +1267,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   // PRIVATE HELPERS
   // ============================================================================
 
-  private async cleanupSession(sessionId: string, reason: 'HOST_EXITED' | 'GAME_FINISHED' | 'HOST_DISCONNECTED') {
-    this.logger.log(`[GameGateway] Cleaning up session ${sessionId} with reason: ${reason}`);
+  private async cleanupSession(
+    sessionId: string,
+    reason: 'HOST_EXITED' | 'GAME_FINISHED' | 'HOST_DISCONNECTED',
+  ) {
+    this.logger.log(
+      `[GameGateway] Cleaning up session ${sessionId} with reason: ${reason}`,
+    );
 
     this.gameSessionService.cancelTimer(sessionId);
     this.sessionCallbacks.delete(sessionId);
@@ -1076,13 +1295,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   }
 
   private async handleQuestionEnd(sessionId: string, data: any) {
-    this.server.to(sessionId).emit('question_result', { ...data, serverTime: Date.now() });
+    this.server
+      .to(sessionId)
+      .emit('question_result', { ...data, serverTime: Date.now() });
 
     if (data.isLastQuestion) {
       await this.delay(3000);
-      await this.gameSessionService.endGame(
-        sessionId,
-        (endData) => this.emitToSession(sessionId, 'game_ended', endData),
+      await this.gameSessionService.endGame(sessionId, (endData) =>
+        this.emitToSession(sessionId, 'game_ended', endData),
       );
     }
   }

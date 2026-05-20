@@ -18,7 +18,8 @@ async function bootstrap() {
     "http://127.0.0.1:3000",
     "http://localhost:3001",
     "http://127.0.0.1:3001",
-  ];
+    process.env.CORS_ORIGIN,
+  ].filter(Boolean);
 
   app.enableCors({
     origin: (origin, callback) => {

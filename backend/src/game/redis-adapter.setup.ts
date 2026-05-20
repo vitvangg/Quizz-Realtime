@@ -1,13 +1,13 @@
 import { createAdapter } from '@socket.io/redis-adapter';
-import { createClient, RedisClientType } from 'redis';
+import Redis from 'ioredis';
 import { Server } from 'socket.io';
 import { Logger } from '@nestjs/common';
 
 const logger = new Logger('RedisAdapter');
 
 // Singleton state - shared across all gateways
-let pubClient: RedisClientType | null = null;
-let subClient: RedisClientType | null = null;
+let pubClient: Redis | null = null;
+let subClient: Redis | null = null;
 let isInitialized = false;
 let initPromise: Promise<void> | null = null;
 
@@ -52,18 +52,21 @@ export async function setupRedisAdapter(
   initPromise = (async () => {
     const url = getRedisUrl(redisConfig);
 
-    // Create two Redis clients: one for publishing, one for subscribing
-    pubClient = createClient({ url });
+    // Create two Redis clients: one for publishing, one for subscribing using ioredis
+    pubClient = new Redis(url, {
+      maxRetriesPerRequest: 3,
+      retryStrategy: (times) => Math.min(times * 200, 2000),
+    });
     subClient = pubClient.duplicate();
 
-    // Handle errors
-    pubClient.on('error', (err) => logger.error('Redis Pub Client Error', err));
-    subClient.on('error', (err) => logger.error('Redis Sub Client Error', err));
+    // Handle errors to prevent unhandled exceptions
+    pubClient.on('error', (err) => logger.error('Redis Pub Client Error:', err.message));
+    subClient.on('error', (err) => logger.error('Redis Sub Client Error:', err.message));
 
-    // Connect both clients
+    // ioredis connects automatically, but we can wait for the 'ready' event
     await Promise.all([
-      pubClient.connect(),
-      subClient.connect(),
+      new Promise<void>((resolve) => pubClient!.once('ready', resolve)),
+      new Promise<void>((resolve) => subClient!.once('ready', resolve)),
     ]);
 
     // Get raw Socket.IO server and set adapter globally

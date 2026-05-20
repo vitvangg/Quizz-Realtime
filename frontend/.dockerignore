@@ -1,0 +1,42 @@
+# =============================================================================
+# FRONTEND .dockerignore
+# Build context: ./frontend (từ docker-compose)
+# =============================================================================
+
+# ─── Node modules (sẽ được cài lại bởi RUN npm install trong Dockerfile) ─────
+node_modules
+
+# ─── Build outputs (sẽ được tạo bởi RUN npm run build) ───────────────────────
+.next
+out
+
+# ─── Environment secrets ─────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ─── Logs ────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ─── TypeScript cache ────────────────────────────────────────────────────────
+*.tsbuildinfo
+
+# ─── OS / IDE ────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# ─── Git ─────────────────────────────────────────────────────────────────────
+.git
+.gitignore
+
+# ─── Docs / files không cần thiết trong image ────────────────────────────────
+docs/
+README.md
+ADMIN_SYSTEM_README.md
+AGENTS.md
+CLAUDE.md
+backup_pase_game

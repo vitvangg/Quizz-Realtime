@@ -22,8 +22,7 @@ export function AdminHeader() {
             <User className="h-5 w-5 text-neon-yellow" />
           </div>
           <div className="flex flex-col">
-            <span className="text-sm font-black">{user?.username || "Admin User"}</span>
-            <span className="text-xs font-medium text-black/50">{user?.email || "admin@quizz.com"}</span>
+            <span className="text-sm font-black">Admin User</span>
           </div>
         </div>
       </div>
