@@ -22,6 +22,7 @@ interface QuizState {
   create: (data: { title: string; description?: string; category: QuizCategory }) => Promise<any>;
   update: (id: string, data: any) => Promise<void>;
   delete: (id: string) => Promise<void>;
+  adminDelete: (id: string) => Promise<void>;
   search: (q: string) => Promise<void>;
 }
 
@@ -126,6 +127,21 @@ export const useQuizStore = create<QuizState>((set, get) => ({
         quizzes: state.quizzes.filter((q) => q.id !== id),
       }));
       toast.success("Xóa quiz thành công");
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Xóa thất bại"));
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  adminDelete: async (id) => {
+    try {
+      set({ loading: true });
+      await quizService.adminDelete(id);
+      set((state) => ({
+        quizzes: state.quizzes.filter((q) => q.id !== id),
+      }));
+      toast.success("Xóa quiz (Admin) thành công");
     } catch (error) {
       toast.error(getErrorMessage(error, "Xóa thất bại"));
     } finally {

@@ -32,6 +32,12 @@ export class QuizzsService {
       },
 
       include: {
+        user: {
+          select: {
+            email: true,
+            fullName: true,
+          }
+        },
         questions: {
           where: {
             deletedAt: null,
@@ -214,6 +220,13 @@ export class QuizzsService {
 
     // Use soft delete instead of hard delete to avoid foreign key constraint violations
     // and preserve game history (rooms, player answers).
+    return this.prismaService.quiz.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    });
+  }
+
+  async adminRemove(id: string) {
     return this.prismaService.quiz.update({
       where: { id },
       data: { deletedAt: new Date() },

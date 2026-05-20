@@ -55,4 +55,9 @@ export class QuizzsController {
   remove(@Param('id') id: string, @CurrentUser() user) {
     return this.quizzsService.remove(id, user.id);
   }
+
+  @Delete('admin/:id')
+  adminRemove(@Param('id') id: string) {
+    return this.quizzsService.adminRemove(id);
+  }
 }

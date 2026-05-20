@@ -47,6 +47,12 @@ export const quizService = {
         return response.data;
     },
 
+    // Xóa quiz (Admin)
+    async adminDelete(id: string) {
+        const response = await api.delete(`/quizzs/admin/${id}`);
+        return response.data;
+    },
+
     // Search quiz
     async search(q: string) {
         const response = await api.get(`/quizzs/search?q=${q}`);
