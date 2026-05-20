@@ -113,11 +113,11 @@ export default function MyQuizzesPage() {
     setIsFiltering(true);
     const timer = setTimeout(async () => {
       const query = selectedCategory !== "ALL" ? selectedCategory : searchKeyword;
-      
+
       const startTime = Date.now();
       await search(query);
       const endTime = Date.now();
-      
+
       const duration = endTime - startTime;
       const minLoadingTime = 800; // Force loading for at least 800ms
       const remainingTime = Math.max(0, minLoadingTime - duration);
@@ -131,11 +131,7 @@ export default function MyQuizzesPage() {
     return () => clearTimeout(timer);
   }, [searchKeyword, selectedCategory, search, resetPage]);
 
-  useEffect(() => {
-    return () => {
-      reset();
-    };
-  }, [reset]);
+
 
   useEffect(() => {
     if (currentRoom) {
