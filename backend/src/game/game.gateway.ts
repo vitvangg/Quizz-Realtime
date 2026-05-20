@@ -50,8 +50,7 @@ interface PlayerIdentity {
   namespace: '/game',
 })
 export class GameGateway
-  implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit
-{
+  implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit {
   @WebSocketServer()
   server: Server;
 
@@ -71,7 +70,7 @@ export class GameGateway
     private readonly jwtService: JwtService,
     private readonly roomGateway: RoomGateway,
     private readonly redisService: RedisService,
-  ) {}
+  ) { }
 
   afterInit(server: Server) {
     this.logger.log(
@@ -123,14 +122,13 @@ export class GameGateway
   async handleDisconnect(client: Socket) {
     const identity = this.socketMap.get(client.id);
     this.logger.log(
-      `[GameGateway] Client disconnected: ${client.id} | identity: ${
-        identity
-          ? JSON.stringify({
-              playerId: identity.playerId,
-              isHost: identity.isHost,
-              sessionId: identity.sessionId,
-            })
-          : 'none'
+      `[GameGateway] Client disconnected: ${client.id} | identity: ${identity
+        ? JSON.stringify({
+          playerId: identity.playerId,
+          isHost: identity.isHost,
+          sessionId: identity.sessionId,
+        })
+        : 'none'
       }`,
     );
 
@@ -248,8 +246,26 @@ export class GameGateway
 
   private buildReloadResponse(fullState: any, leaderboard: any[] = []) {
     let remainingTime = fullState?.remainingTime ?? null;
+
+    // Recalculate remainingTime for QUESTION_ACTIVE state
+    // to account for time elapsed since the state was cached
+    if (fullState?.status === GameState.QUESTION_ACTIVE && fullState?.questionStartedAt) {
+      const elapsed = (Date.now() - fullState.questionStartedAt) / 1000;
+      const timeLimit = fullState.currentQuestion?.timeLimit || 20;
+      remainingTime = Math.max(0, Math.floor(timeLimit - elapsed));
+    }
+
     if (fullState?.status === GameState.QUESTION_RESULT) {
       remainingTime = 0;
+    }
+
+    // Check if we need to redirect to a newer session (play_again case)
+    // Include currentSessionId so frontend can redirect to the new session
+    let redirectToSessionId: string | undefined;
+    if (fullState?.status === GameState.FINISHED && fullState?.roomId) {
+      // Note: The actual currentSessionId lookup is done in the calling function
+      // Here we just pass through what was already computed
+      redirectToSessionId = fullState.currentSessionId;
     }
 
     return {
@@ -261,6 +277,17 @@ export class GameGateway
         leaderboard.length > 0 ? leaderboard : fullState?.leaderboard || [],
       remainingTime,
       correctAnswerId: fullState?.correctAnswerId || null,
+      questionStartedAt: fullState?.questionStartedAt || null,
+      // FIX: Use questionStartedAt as serverTime to match question_start event behavior
+      // This ensures consistent timer calculation between real-time events and HTTP recovery
+      // client calculates: elapsedMs = Date.now() - serverTime
+      // When serverTime = questionStartedAt, elapsedMs = time since question started
+      // When serverTime = Date.now(), elapsedMs ≈ 0 → remaining always = timeLimit (20s)
+      serverTime: fullState?.status === GameState.QUESTION_ACTIVE && fullState?.questionStartedAt
+        ? fullState.questionStartedAt
+        : Date.now(),
+      // Include redirect info for FINISHED sessions (play_again case)
+      currentSessionId: redirectToSessionId,
     };
   }
 
@@ -382,11 +409,40 @@ export class GameGateway
         return { success: false, error: 'Game session not found' };
       }
 
-      const isActualHost = !!(
-        fullState.room?.hostId && hostId === fullState.room.hostId
-      );
+      const isActualHost = !!(fullState.room?.hostId && hostId === fullState.room.hostId);
+
+      // === DEBUG LOGGING FOR HOST JOIN GAME ===
+      console.log(`[HostJoinGame] sessionId=${payload.sessionId} jwtUserId=${hostId} roomHostId=${fullState.room?.hostId} isActualHost=${isActualHost}`);
+      console.log(`[HostJoinGame] returned status=${fullState.status} source=${'tbd'}`);
+
       if (!isActualHost) {
         return { success: false, error: 'Only the host can join as host' };
+      }
+
+      // Check if session is finished and needs redirect (play_again case)
+      // Use currentSessionId from fullState (already computed by getFullSessionState)
+      let currentSessionId: string | undefined;
+      console.log(`[HostJoinGame] Checking FINISHED redirect: status=${fullState.status}, roomId=${fullState.roomId}`);
+      console.log(`[HostJoinGame] fullState.currentSessionId=${fullState.currentSessionId}, payload.sessionId=${payload.sessionId}`);
+
+      if (fullState.status === GameState.FINISHED && fullState.roomId) {
+        // currentSessionId is already computed in getFullSessionState
+        if (fullState.currentSessionId && fullState.currentSessionId !== payload.sessionId) {
+          currentSessionId = fullState.currentSessionId;
+          console.log(`[HostJoinGame] FINISHED session redirect: ${payload.sessionId} → ${currentSessionId}`);
+        } else {
+          // Fallback: query room directly
+          const newSessionId = await this.roomService.getCurrentSessionId(fullState.roomId);
+          console.log(`[HostJoinGame] FINISHED session redirect fallback: roomId=${fullState.roomId}, getCurrentSessionId=${newSessionId}`);
+          if (newSessionId && newSessionId !== payload.sessionId) {
+            currentSessionId = newSessionId;
+            console.log(`[HostJoinGame] Using fallback redirect: ${payload.sessionId} → ${currentSessionId}`);
+          } else {
+            console.log(`[HostJoinGame] NO redirect needed: newSessionId=${newSessionId} === payload.sessionId=${payload.sessionId}`);
+          }
+        }
+      } else {
+        console.log(`[HostJoinGame] No FINISHED redirect: status=${fullState.status}, roomId=${fullState.roomId}`);
       }
 
       const hostPlayerId = `host_${hostId}`;
@@ -462,6 +518,7 @@ export class GameGateway
         isActualHost,
         isReconnect: isRejoin && !isRefresh,
         rejoinReason,
+        currentSessionId,
         state: this.buildReloadResponse(fullState),
       };
     } catch (error) {
@@ -654,7 +711,7 @@ export class GameGateway
 
       const result = await this.gameSessionService.nextQuestion(
         payload.sessionId,
-        () => {},
+        () => { },
       );
 
       await new Promise((resolve) => setImmediate(resolve));

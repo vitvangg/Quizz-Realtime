@@ -15,6 +15,8 @@ import { getGameSocket, connectGameSocket } from '@/lib/game-socket';
 import { usePagination } from '@/hooks/usePagination';
 import { PaginationControls } from '@/components/common/PaginationControls';
 import { Zap, Trophy, Crown, Clock, Target, CheckCircle, XCircle, AlertTriangle, Users } from 'lucide-react';
+import { useGameHostIdentity } from '@/hooks/useHostIdentity';
+import { HostGameView, PlayerGameView } from '@/components/game/game';
 
 // ============================================================================
 // FREEZE OVERLAY COMPONENT - Neo-Brutalism Style
@@ -119,9 +121,29 @@ export default function GamePage() {
     correctAnswerId,
     timeRemaining,
     questionStartTime,
+    serverTime,
     connectSocket,
     reset,
   } = useGameStore();
+
+  // ============================================================
+  // SINGLE SOURCE OF TRUTH: useGameHostIdentity
+  // ============================================================
+  // This hook provides authoritative host identity based on:
+  // 1. Server response (host_join_game response) - authoritative
+  // 2. Store's isHost flag (set by server response)
+  // 3. Storage recovery (sessionStorage for reload)
+  const hostIdentity = useGameHostIdentity();
+  
+  // Debug logging in development
+  if (process.env.NODE_ENV === 'development' && sessionId) {
+    console.log('[GamePage] Host Identity:', {
+      isHost: hostIdentity.isHost,
+      source: hostIdentity.source,
+      storeIsHost: isHost,
+      debug: hostIdentity.debug,
+    });
+  }
 
   const isLastQuestion = totalQuestions > 0 && questionIndex >= totalQuestions - 1;
 
@@ -129,6 +151,13 @@ export default function GamePage() {
   const [isJoining, setIsJoining] = useState(true);
   const [authReady, setAuthReady] = useState(false);
   const [hasRecoveredFromHttp, setHasRecoveredFromHttp] = useState(false);
+
+  // ============================================================
+  // EFFECTIVE HOST STATUS FOR UI
+  // ============================================================
+  // Use hostIdentity.isHost as authoritative for UI
+  // This ensures consistent host detection across all UI elements
+  const effectiveIsHost = hostIdentity.isHost;
 
   const hasRecoveredRef = useRef(false);
   const joinedSessionRef = useRef<string | null>(null);
@@ -224,7 +253,19 @@ export default function GamePage() {
     };
 
     const handleQuestionStart = (data: any) => {
-      console.log('[GamePage] question_start:', data);
+      console.log('[GamePage] ========================================');
+      console.log('[GamePage] question_start event received');
+      console.log('[GamePage] question_start: current url sessionId=', sessionId);
+      console.log('[GamePage] question_start: event data:', {
+        sessionId: data.sessionId,
+        questionIndex: data.questionIndex,
+        questionContent: data.question?.content?.substring(0, 50),
+        totalQuestions: data.totalQuestions,
+        timeLimit: data.timeLimit,
+        serverTime: data.serverTime,
+        questionStartTime: data.questionStartTime,
+      });
+      console.log('[GamePage] ========================================');
       const state = useGameStore.getState();
 
       // DEBUG: Validate payload
@@ -329,7 +370,12 @@ export default function GamePage() {
     };
 
     const handleGameEnded = (data: any) => {
-      console.log('[GamePage] game_ended:', data);
+      console.log('[GamePage] ========================================');
+      console.log('[GamePage] game_ended event received:', data);
+      console.log('[GamePage] game_ended: current url sessionId=', sessionId);
+      console.log('[GamePage] game_ended: store sessionId=', useGameStore.getState().sessionId);
+      console.log('[GamePage] game_ended: leaderboard length=', data.leaderboard?.length);
+      console.log('[GamePage] ========================================');
       
       // DEBUG: Validate payload
       if (!data) {
@@ -362,9 +408,19 @@ export default function GamePage() {
     };
 
     const handleSessionClosed = (data: { sessionId: string; reason: 'HOST_EXITED' | 'GAME_FINISHED' | 'HOST_DISCONNECTED' }) => {
-      console.log('[GamePage] session_closed:', data);
+      console.log('[GamePage] session_closed received:', data);
+      console.log('[GamePage] session_closed: incoming sessionId=', data.sessionId, 'current url sessionId=', sessionId);
+      
+      // === GUARD: Chỉ xử lý nếu sessionId khớp ===
+      const currentSessionId = sessionId || useGameStore.getState().sessionId;
+      if (data.sessionId !== currentSessionId) {
+        console.warn('[GamePage] ⚠️ STALE session_closed ignored! incoming=', data.sessionId, 'current=', currentSessionId);
+        return;
+      }
+      
       const storedHostSessionId = sessionStorage.getItem('hostSessionId');
       const isHostSession = storedHostSessionId === data.sessionId;
+      console.log('[GamePage] session_closed: isHostSession=', isHostSession, 'reason=', data.reason);
 
       sessionStorage.removeItem('hostSessionId');
       sessionStorage.removeItem('hostUserId');
@@ -440,7 +496,14 @@ export default function GamePage() {
       const resolvedNewSessionId = data.newSessionId || (data as any).sessionId;
       const resolvedOldSessionId = data.oldSessionId || sessionId;
 
-      console.log('[GamePage] session_transition:', { resolvedNewSessionId, resolvedOldSessionId, data });
+      console.log('[GamePage] ========================================');
+      console.log(`[GamePage] session_transition received:`);
+      console.log(`  resolvedNewSessionId=${resolvedNewSessionId}`);
+      console.log(`  resolvedOldSessionId=${resolvedOldSessionId}`);
+      console.log(`  current url sessionId=${sessionId}`);
+      console.log(`  event timestamp=${data.timestamp}`);
+      console.log(`  data.state.status=${data.state?.status}`);
+      console.log('[GamePage] ========================================');
 
       const state = useGameStore.getState();
       console.log('[GamePage] BEFORE reset: leaderboard.length=', state.leaderboard?.length, 'myScore=', state.myScore);
@@ -687,16 +750,25 @@ export default function GamePage() {
     };
 
     const handleGameRedirect = (data: { url: string; sessionId: string }) => {
-      console.log('[GamePage] game_redirect received:', data, 'current sessionId:', sessionId);
+      console.log('[GamePage] ========================================');
+      console.log('[GamePage] game_redirect received:', data);
+      console.log('[GamePage] game_redirect: current url sessionId=', sessionId);
+      console.log('[GamePage] game_redirect: redirecting to=', data.url, 'redirect sessionId=', data.sessionId);
       if (data.sessionId !== sessionId) {
+        console.log('[GamePage] game_redirect: ⚠️ Session mismatch, will redirect!');
         useGameStore.setState({ _pendingRedirect: data.url });
+      } else {
+        console.log('[GamePage] game_redirect: Same session, no redirect needed');
       }
+      console.log('[GamePage] ========================================');
     };
 
     const handleRoomClosed = (data: { reason: string }) => {
       console.log('[GamePage] room_closed received:', data);
+      console.log('[GamePage] room_closed: current url sessionId=', sessionId, 'store sessionId=', useGameStore.getState().sessionId);
       const storedHostSessionId = sessionStorage.getItem('hostSessionId');
       const isHostSession = storedHostSessionId === sessionId;
+      console.log('[GamePage] room_closed: isHostSession=', isHostSession);
 
       if (isHostSession) {
         toast.info(data.reason || 'Da dong phong');
@@ -836,27 +908,58 @@ export default function GamePage() {
     const storedNickname = sessionStorage.getItem('playerNickname');
     const storedRoomId = sessionStorage.getItem('currentRoomId');
     
-    const isHostFromStorage = storedHostSessionId === sessionId;
+    // Normalize sessionId to handle potential whitespace/case issues
+    const normalizedSessionId = sessionId?.trim();
+    const normalizedHostSessionId = storedHostSessionId?.trim();
+    
+    const isHostFromStorage = normalizedHostSessionId === normalizedSessionId;
     const isPlayer = !isHostFromStorage && !!storedPlayerId && !!storedNickname;
-    console.log('[GamePage] Role: isHostFromStorage=', isHostFromStorage, 'isPlayer=', isPlayer);
+    
+    // CRITICAL DEBUG: Log all values for host identity detection
+    console.log('[GamePage] === IDENTITY DEBUG ===');
+    console.log(`  sessionId (url) = "${sessionId}"`);
+    console.log(`  storedHostSessionId = "${storedHostSessionId}"`);
+    console.log(`  normalizedSessionId = "${normalizedSessionId}"`);
+    console.log(`  normalizedHostSessionId = "${normalizedHostSessionId}"`);
+    console.log(`  storedPlayerId = "${storedPlayerId}"`);
+    console.log(`  storedNickname = "${storedNickname}"`);
+    console.log(`  isHostFromStorage = ${isHostFromStorage} (normalizedHostSessionId === normalizedSessionId)`);
+    console.log(`  isPlayer = ${isPlayer}`);
+    console.log(`  accessToken exists = ${!!accessToken}`);
+    console.log('[GamePage] ======================');
 
     // Check for redirect state FIRST (from previous redirect via router.replace)
     const checkRedirectState = (): boolean => {
       const redirectStateStr = sessionStorage.getItem('redirectState');
       if (!redirectStateStr) return false;
       
+      // Check if we've already processed this redirect (prevent double processing)
+      const processedKey = `redirectProcessed:${sessionId}`;
+      if (sessionStorage.getItem(processedKey)) {
+        // Already processed, remove both and continue normally
+        sessionStorage.removeItem('redirectState');
+        sessionStorage.removeItem(processedKey);
+        return false;
+      }
+      
       try {
         const redirectState = JSON.parse(redirectStateStr);
         if (redirectState.sessionId === sessionId && redirectState.reason === 'finished_redirect' &&
             (Date.now() - redirectState._timestamp) < 30000) {
           console.log('[GamePage] Using redirect state:', redirectState);
-          sessionStorage.removeItem('redirectState');
           
-          // Hydrate from redirect state
+          // Mark as processed BEFORE navigating
+          sessionStorage.setItem(processedKey, '1');
+          
+          // Hydrate from redirect state - explicitly set isHost
+          const isHostRedirect = storedHostSessionId === sessionId;
+          console.log('[GamePage] redirect recovery: isHostRedirect=', isHostRedirect);
+          
           useGameStore.setState({
             sessionId,
             roomId: redirectState.state?.roomId || storedRoomId,
             gameStatus: GameState.FINISHED,
+            isHost: isHostRedirect,  // Set isHost based on storage
             leaderboard: redirectState.state?.leaderboard || [],
             currentQuestion: null,
             _isRecovering: false,
@@ -870,26 +973,178 @@ export default function GamePage() {
           
           if (socket.connected) {
             useGameStore.setState({ socket });
-            socket.emit('join_game', { sessionId, playerId: storedPlayerId, nickname: storedNickname }, (joinRes: any) => {
-              console.log('[GamePage] join_game response:', joinRes);
-            });
+            if (isHostRedirect && accessToken) {
+              console.log('[GamePage] redirect recovery: calling host_join_game (host detected)');
+              socket.emit('host_join_game', { sessionId, jwt: accessToken }, (joinRes: any) => {
+                console.log('[GamePage] redirect recovery: host_join_game response:', joinRes);
+                
+                // CRITICAL: Update game state from response
+                if (joinRes.success && joinRes.state) {
+                  const { state } = joinRes;
+                  useGameStore.setState({
+                    gameStatus: state.status === 'QUESTION_RESULT' 
+                      ? GameState.QUESTION_RESULT 
+                      : state.status === 'QUESTION_ACTIVE'
+                        ? GameState.QUESTION_ACTIVE
+                        : state.status === 'WAITING'
+                          ? GameState.WAITING
+                          : state.status === 'STARTING'
+                            ? GameState.STARTING
+                            : state.status === 'FINISHED'
+                              ? GameState.FINISHED
+                              : GameState.WAITING,
+                    leaderboard: state.leaderboard || [],
+                    questionIndex: state.questionIndex ?? 0,
+                    totalQuestions: state.totalQuestions ?? 0,
+                    currentQuestion: state.currentQuestion || null,
+                    correctAnswerId: state.correctAnswerId || null,
+                    timeRemaining: state.remainingTime ?? 0,
+                    questionStartTime: state.questionStartedAt ? state.questionStartedAt : undefined,
+                    isHost: joinRes.isActualHost ?? true,
+                  });
+                }
+                
+                // Clear redirect state after successful processing
+                sessionStorage.removeItem('redirectState');
+                sessionStorage.removeItem(processedKey);
+                setIsJoining(false);
+              });
+            } else {
+              console.log('[GamePage] redirect recovery: calling join_game (player detected)');
+              socket.emit('join_game', { sessionId, playerId: storedPlayerId, nickname: storedNickname }, (joinRes: any) => {
+                console.log('[GamePage] redirect recovery: join_game response:', joinRes);
+                
+                // CRITICAL: Update game state from response
+                if (joinRes.success && joinRes.state) {
+                  const { state } = joinRes;
+                  useGameStore.setState({
+                    gameStatus: state.status === 'QUESTION_RESULT' 
+                      ? GameState.QUESTION_RESULT 
+                      : state.status === 'QUESTION_ACTIVE'
+                        ? GameState.QUESTION_ACTIVE
+                        : state.status === 'WAITING'
+                          ? GameState.WAITING
+                          : state.status === 'STARTING'
+                            ? GameState.STARTING
+                            : state.status === 'FINISHED'
+                              ? GameState.FINISHED
+                              : GameState.WAITING,
+                    leaderboard: state.leaderboard || [],
+                    questionIndex: state.questionIndex ?? 0,
+                    totalQuestions: state.totalQuestions ?? 0,
+                    currentQuestion: state.currentQuestion || null,
+                    correctAnswerId: state.correctAnswerId || null,
+                    timeRemaining: state.remainingTime ?? 0,
+                    questionStartTime: state.questionStartedAt ? state.questionStartedAt : undefined,
+                    myPlayerId: joinRes.playerId,
+                    myNickname: joinRes.nickname,
+                    myScore: joinRes.score ?? 0,
+                    myRank: joinRes.rank ?? null,
+                    hasAnswered: joinRes.hasAnswered ?? false,
+                    selectedAnswerId: joinRes.selectedAnswerId ?? null,
+                  });
+                }
+                
+                // Clear redirect state after successful processing
+                sessionStorage.removeItem('redirectState');
+                sessionStorage.removeItem(processedKey);
+                setIsJoining(false);
+              });
+            }
           } else {
             socket.on('connect', () => {
               useGameStore.setState({ socket });
-              socket.emit('join_game', { sessionId, playerId: storedPlayerId, nickname: storedNickname }, (joinRes: any) => {
-                console.log('[GamePage] join_game response:', joinRes);
-              });
+              if (isHostRedirect && accessToken) {
+                console.log('[GamePage] redirect recovery (connect): calling host_join_game (host detected)');
+                socket.emit('host_join_game', { sessionId, jwt: accessToken }, (joinRes: any) => {
+                  console.log('[GamePage] redirect recovery (connect): host_join_game response:', joinRes);
+                  
+                  // CRITICAL: Update game state from response
+                  if (joinRes.success && joinRes.state) {
+                    const { state } = joinRes;
+                    useGameStore.setState({
+                      gameStatus: state.status === 'QUESTION_RESULT' 
+                        ? GameState.QUESTION_RESULT 
+                        : state.status === 'QUESTION_ACTIVE'
+                          ? GameState.QUESTION_ACTIVE
+                          : state.status === 'WAITING'
+                            ? GameState.WAITING
+                            : state.status === 'STARTING'
+                              ? GameState.STARTING
+                              : state.status === 'FINISHED'
+                                ? GameState.FINISHED
+                                : GameState.WAITING,
+                      leaderboard: state.leaderboard || [],
+                      questionIndex: state.questionIndex ?? 0,
+                      totalQuestions: state.totalQuestions ?? 0,
+                      currentQuestion: state.currentQuestion || null,
+                      correctAnswerId: state.correctAnswerId || null,
+                      timeRemaining: state.remainingTime ?? 0,
+                      questionStartTime: state.questionStartedAt ? state.questionStartedAt : undefined,
+                      isHost: joinRes.isActualHost ?? true,
+                    });
+                  }
+                  
+                  // Clear redirect state after successful processing
+                  sessionStorage.removeItem('redirectState');
+                  sessionStorage.removeItem(processedKey);
+                  setIsJoining(false);
+                });
+              } else {
+                console.log('[GamePage] redirect recovery (connect): calling join_game (player detected)');
+                socket.emit('join_game', { sessionId, playerId: storedPlayerId, nickname: storedNickname }, (joinRes: any) => {
+                  console.log('[GamePage] redirect recovery (connect): join_game response:', joinRes);
+                  
+                  // CRITICAL: Update game state from response
+                  if (joinRes.success && joinRes.state) {
+                    const { state } = joinRes;
+                    useGameStore.setState({
+                      gameStatus: state.status === 'QUESTION_RESULT' 
+                        ? GameState.QUESTION_RESULT 
+                        : state.status === 'QUESTION_ACTIVE'
+                          ? GameState.QUESTION_ACTIVE
+                          : state.status === 'WAITING'
+                            ? GameState.WAITING
+                            : state.status === 'STARTING'
+                              ? GameState.STARTING
+                              : state.status === 'FINISHED'
+                                ? GameState.FINISHED
+                                : GameState.WAITING,
+                      leaderboard: state.leaderboard || [],
+                      questionIndex: state.questionIndex ?? 0,
+                      totalQuestions: state.totalQuestions ?? 0,
+                      currentQuestion: state.currentQuestion || null,
+                      correctAnswerId: state.correctAnswerId || null,
+                      timeRemaining: state.remainingTime ?? 0,
+                      questionStartTime: state.questionStartedAt ? state.questionStartedAt : undefined,
+                      myPlayerId: joinRes.playerId,
+                      myNickname: joinRes.nickname,
+                      myScore: joinRes.score ?? 0,
+                      myRank: joinRes.rank ?? null,
+                      hasAnswered: joinRes.hasAnswered ?? false,
+                      selectedAnswerId: joinRes.selectedAnswerId ?? null,
+                    });
+                  }
+                  
+                  // Clear redirect state after successful processing
+                  sessionStorage.removeItem('redirectState');
+                  sessionStorage.removeItem(processedKey);
+                  setIsJoining(false);
+                });
+              }
             });
           }
           
-          setIsJoining(false);
           return true;
         } else {
+          // Stale or wrong session — clear it
           sessionStorage.removeItem('redirectState');
+          sessionStorage.removeItem(processedKey);
           return false;
         }
       } catch (e) {
         sessionStorage.removeItem('redirectState');
+        sessionStorage.removeItem(processedKey);
         return false;
       }
     };
@@ -994,12 +1249,38 @@ export default function GamePage() {
       try {
         const response = await apiClient.get(`/games/${sessionId}/state`);
         httpData = response.data;
-        console.log('[GamePage] HTTP state recovered:', httpData);
+        
+        // === COMPREHENSIVE DEBUG LOGGING ===
+        console.log('[GamePage Reload] ========================================');
+        console.log(`[GamePage Reload] sessionId=${sessionId}`);
+        console.log(`[GamePage Reload] authReady=${authReady} hasAccessToken=${!!accessToken}`);
+        console.log(`[GamePage Reload] storedHostSessionId=${storedHostSessionId} isHostFromStorage=${storedHostSessionId === sessionId}`);
+        console.log(`[GamePage Reload] storedPlayerId=${storedPlayerId} storedNickname=${storedNickname}`);
+        console.log(`[GamePage Reload] HTTP state:`, {
+          status: httpData.status,
+          roomId: httpData.roomId,
+          currentQuestionIndex: httpData.currentQuestionIndex,
+          totalQuestions: httpData.totalQuestions,
+          currentQuestion: httpData.currentQuestion?.content?.substring(0, 50),
+          questionStartedAt: httpData.questionStartedAt,
+          remainingTime: httpData.remainingTime,
+          leaderboardLength: httpData.leaderboard?.length,
+          serverTime: httpData.serverTime,
+        });
+        console.log('[GamePage Reload] ========================================');
 
         // CRITICAL: If session is FINISHED, redirect immediately BEFORE setting any state
         // This prevents flash of old FINISHED state on page reload after host_play_again
         if (httpData.status === 'FINISHED' && httpData.currentSessionId) {
           console.log(`[GamePage] Session finished, redirecting to new session ${httpData.currentSessionId}`);
+          
+          // FIX: If we were a host session, update hostSessionId to new session
+          // This ensures host rejoins correctly after play_again redirect
+          const wasHostSession = storedHostSessionId === sessionId;
+          if (wasHostSession) {
+            console.log(`[GamePage] Was host session, updating hostSessionId: ${storedHostSessionId} -> ${httpData.currentSessionId}`);
+            sessionStorage.setItem('hostSessionId', httpData.currentSessionId);
+          }
           
           // Store redirect state with full game state for SPA navigation
           sessionStorage.setItem('redirectState', JSON.stringify({
@@ -1030,13 +1311,24 @@ export default function GamePage() {
         let playerHasAnswered = false;
 
         if (httpData.status === 'QUESTION_ACTIVE' && httpData.currentQuestion) {
+          // Calculate time remaining using server's timestamps
+          // serverTime is current server time, questionStartedAt is when question started
           let adjustedRemainingTime: number;
+          let adjustedServerTime: number;
+          
           if (httpData.questionStartedAt && httpData.serverTime) {
+            // Server provided both timestamps - use them
             const elapsedSeconds = (httpData.serverTime - httpData.questionStartedAt) / 1000;
-            const networkLatencySec = Math.max(0, (Date.now() - httpData.serverTime) / 1000);
-            adjustedRemainingTime = Math.max(0, Math.ceil((httpData.currentQuestion.timeLimit || 15) - elapsedSeconds - networkLatencySec));
+            adjustedRemainingTime = Math.max(0, Math.ceil((httpData.currentQuestion.timeLimit || 20) - elapsedSeconds));
+            adjustedServerTime = httpData.serverTime;
+          } else if (httpData.remainingTime !== null && httpData.remainingTime !== undefined) {
+            // Fallback: use remainingTime from server (if provided)
+            adjustedRemainingTime = Math.max(0, httpData.remainingTime - 1);
+            adjustedServerTime = Date.now();
           } else {
-            adjustedRemainingTime = Math.max(0, (httpData.remainingTime || httpData.currentQuestion.timeLimit || 15) - 1);
+            // Last resort: assume full time limit
+            adjustedRemainingTime = httpData.currentQuestion.timeLimit || 20;
+            adjustedServerTime = Date.now();
           }
 
           useGameStore.setState({
@@ -1045,7 +1337,11 @@ export default function GamePage() {
             questionIndex: httpData.currentQuestionIndex,
             totalQuestions: httpData.totalQuestions,
             timeRemaining: adjustedRemainingTime,
-            questionStartTime: Date.now(),
+            // CRITICAL: Use server's questionStartedAt as questionStartTime
+            // Timer interval uses this to calculate elapsed time
+            questionStartTime: httpData.questionStartedAt || httpData.serverTime || Date.now(),
+            // Also set serverTime for consistency with question_start handler
+            serverTime: adjustedServerTime,
             leaderboard: [],
           });
         } else if (httpData.status === 'QUESTION_RESULT') {
@@ -1132,10 +1428,43 @@ export default function GamePage() {
       if (isHostFromStorage && accessToken) {
         console.log('[GamePage] Joining as HOST with JWT');
         socket.emit('host_join_game', { sessionId, jwt: accessToken }, (response: any) => {
-          // DEBUG: Log response
-          console.log('[GamePage] host_join_game response:', response);
+          // === COMPREHENSIVE DEBUG LOGGING FOR HOST JOIN ===
+          console.log('[GamePage] ========================================');
+          console.log(`[GamePage Reload] host_join_game response:`);
+          console.log(`  success=${response.success}`);
+          console.log(`  isActualHost=${response.isActualHost}`);
+          console.log(`  isReconnect=${response.isReconnect}`);
+          console.log(`  rejoinReason=${response.rejoinReason}`);
+          console.log(`  state.status=${response.state?.status}`);
+          console.log(`  state.currentQuestion=${response.state?.currentQuestion?.content?.substring(0, 30)}...`);
+          console.log(`  state.questionIndex=${response.state?.questionIndex}`);
+          console.log(`  state.totalQuestions=${response.state?.totalQuestions}`);
+          console.log(`  state.remainingTime=${response.state?.remainingTime}`);
+          console.log(`  state.leaderboard length=${response.state?.leaderboard?.length}`);
+          console.log(`  state.currentSessionId=${response.state?.currentSessionId}`);
+          console.log(`  TOP-LEVEL currentSessionId=${response.currentSessionId}`);
+          console.log(`  url sessionId=${sessionId}`);
+          console.log('[GamePage] ========================================');
           
           if (response.success && response.state) {
+            // CRITICAL: Check if we need to redirect to a NEWER session (play_again case)
+            // Only redirect if there's a NEWER session (currentSessionId !== sessionId)
+            // If currentSessionId === sessionId or undefined, this is the latest session - don't redirect
+            const redirectTarget = response.currentSessionId || response.state?.currentSessionId;
+            console.log(`[GamePage] redirect check: redirectTarget=${redirectTarget} sessionId=${sessionId} isSame=${redirectTarget === sessionId}`);
+            
+            if (redirectTarget && redirectTarget !== sessionId) {
+              console.log(`[GamePage] Session finished, redirecting to newer session ${redirectTarget}`);
+              
+              // Update hostSessionId for the new session
+              sessionStorage.setItem('hostSessionId', redirectTarget);
+              sessionStorage.setItem('playerSessionId', redirectTarget);
+              
+              // Navigate to new session
+              router.replace(`/game/${redirectTarget}`);
+              return;
+            }
+            
             console.log('[GamePage] host_join_game success', {
               isActualHost: response.isActualHost,
               isReconnect: response.isReconnect,
@@ -1161,6 +1490,30 @@ export default function GamePage() {
             
             console.log('[GamePage] host_join_game: isNewGame=', isNewGame, 'leaderboard length=', safeLeaderboard.length);
             
+            // Calculate remaining time for QUESTION_ACTIVE state
+            // Need to recalculate because remainingTime from server might be stale
+            let finalTimeRemaining: number;
+            let finalQuestionStartTime: number | undefined = undefined;
+            let finalServerTime: number | undefined = undefined;
+            
+            if (response.state.status === GameState.QUESTION_ACTIVE) {
+              if (response.state.questionStartedAt && response.state.serverTime) {
+                // Use server timestamps to calculate accurate remaining time
+                const elapsedSeconds = (response.state.serverTime - response.state.questionStartedAt) / 1000;
+                const timeLimit = response.state.currentQuestion?.timeLimit || 20;
+                finalTimeRemaining = Math.max(0, Math.ceil(timeLimit - elapsedSeconds));
+                finalQuestionStartTime = response.state.questionStartedAt;
+                finalServerTime = response.state.serverTime;
+              } else {
+                // Fallback to server's remainingTime (might be slightly stale)
+                finalTimeRemaining = response.state.remainingTime ?? response.state.currentQuestion?.timeLimit ?? 20;
+              }
+            } else {
+              finalTimeRemaining = response.state.remainingTime ?? 0;
+            }
+            
+            console.log('[GamePage] host_join_game: calculated remainingTime=', finalTimeRemaining, 'questionStartedAt=', finalQuestionStartTime);
+            
             useGameStore.setState({
               sessionId,
               roomId: response.state.roomId || httpData?.roomId || null,
@@ -1174,7 +1527,9 @@ export default function GamePage() {
               questionIndex: response.state.questionIndex ?? 0,
               totalQuestions: response.state.totalQuestions ?? 0,
               leaderboard: safeLeaderboard,
-              timeRemaining: response.state.remainingTime ?? response.state.currentQuestion?.timeLimit ?? 0,
+              timeRemaining: finalTimeRemaining,
+              questionStartTime: finalQuestionStartTime,
+              serverTime: finalServerTime,
               correctAnswerId,
               myScore: 0,       // Reset for new game session
               myRank: null,     // Reset for new game session
@@ -1183,7 +1538,7 @@ export default function GamePage() {
             if (!actualIsHost) {
               console.warn('[GamePage] Server rejected host identity - user is NOT the host');
             }
-          } else {
+            } else {
             console.error('[GamePage] host_join_game failed:', response?.error);
             const fallbackNickname = storedNickname || authStore.user?.email?.split('@')[0] || `Player_${Date.now() % 1000}`;
             socket.emit('join_game', { sessionId, playerId: storedPlayerId || null, nickname: fallbackNickname }, (playerResponse: any) => {
@@ -1191,10 +1546,38 @@ export default function GamePage() {
               console.log('[GamePage] join_game fallback response:', playerResponse);
               
               if (playerResponse.success && playerResponse.state) {
+                // CRITICAL: Check if we need to redirect (session finished, play_again case)
+                // Use httpData which was fetched before this callback
+                if (httpData?.status === 'FINISHED' && httpData?.currentSessionId && httpData.currentSessionId !== sessionId) {
+                  console.log(`[GamePage] Session finished in fallback, redirecting to ${httpData.currentSessionId}`);
+                  sessionStorage.setItem('playerSessionId', httpData.currentSessionId);
+                  router.replace(`/game/${httpData.currentSessionId}`);
+                  return;
+                }
+                
                 // Defensive: ensure leaderboard is an array
                 const safeLeaderboard = Array.isArray(playerResponse.state.leaderboard)
                   ? playerResponse.state.leaderboard
                   : (Array.isArray(httpData?.leaderboard) ? httpData.leaderboard : []);
+                
+                // Calculate remaining time for QUESTION_ACTIVE state
+                let finalTimeRemaining: number;
+                let finalQuestionStartTime: number | undefined = undefined;
+                let finalServerTime: number | undefined = undefined;
+                
+                if (playerResponse.state.status === GameState.QUESTION_ACTIVE) {
+                  if (playerResponse.state.questionStartedAt && playerResponse.state.serverTime) {
+                    const elapsedSeconds = (playerResponse.state.serverTime - playerResponse.state.questionStartedAt) / 1000;
+                    const timeLimit = playerResponse.state.currentQuestion?.timeLimit || 20;
+                    finalTimeRemaining = Math.max(0, Math.ceil(timeLimit - elapsedSeconds));
+                    finalQuestionStartTime = playerResponse.state.questionStartedAt;
+                    finalServerTime = playerResponse.state.serverTime;
+                  } else {
+                    finalTimeRemaining = playerResponse.state.remainingTime ?? playerResponse.state.currentQuestion?.timeLimit ?? 20;
+                  }
+                } else {
+                  finalTimeRemaining = playerResponse.state.remainingTime ?? 0;
+                }
                 
                 useGameStore.setState({
                   sessionId,
@@ -1207,7 +1590,9 @@ export default function GamePage() {
                   questionIndex: playerResponse.state.questionIndex ?? 0,
                   totalQuestions: playerResponse.state.totalQuestions ?? 0,
                   leaderboard: safeLeaderboard,
-                  timeRemaining: playerResponse.state.remainingTime ?? playerResponse.state.currentQuestion?.timeLimit ?? 0,
+                  timeRemaining: finalTimeRemaining,
+                  questionStartTime: finalQuestionStartTime,
+                  serverTime: finalServerTime,
                   myScore: 0,       // Reset for new game session
                   myRank: null,     // Reset for new game session
                   _isRecovering: false,
@@ -1274,6 +1659,25 @@ export default function GamePage() {
             // Do NOT use old myScore/myRank from store
             const myEntryFromFinal = safeFinalLeaderboard.find((e: any) => e?.playerId === storedPlayerId);
             
+            // Calculate remaining time for QUESTION_ACTIVE state
+            let finalTimeRemaining: number;
+            let finalQuestionStartTime: number | undefined = undefined;
+            let finalServerTime: number | undefined = undefined;
+            
+            if (response.state.status === GameState.QUESTION_ACTIVE) {
+              if (response.state.questionStartedAt && response.state.serverTime) {
+                const elapsedSeconds = (response.state.serverTime - response.state.questionStartedAt) / 1000;
+                const timeLimit = response.state.currentQuestion?.timeLimit || 20;
+                finalTimeRemaining = Math.max(0, Math.ceil(timeLimit - elapsedSeconds));
+                finalQuestionStartTime = response.state.questionStartedAt;
+                finalServerTime = response.state.serverTime;
+              } else {
+                finalTimeRemaining = response.state.remainingTime ?? response.state.currentQuestion?.timeLimit ?? 20;
+              }
+            } else {
+              finalTimeRemaining = response.state.remainingTime ?? 0;
+            }
+            
             useGameStore.setState({
               sessionId,
               roomId: response.state.roomId || storedRoomId,
@@ -1285,7 +1689,9 @@ export default function GamePage() {
               questionIndex: response.state.questionIndex ?? 0,
               totalQuestions: response.state.totalQuestions ?? 0,
               leaderboard: safeFinalLeaderboard,
-              timeRemaining: response.state.remainingTime ?? response.state.currentQuestion?.timeLimit ?? 0,
+              timeRemaining: finalTimeRemaining,
+              questionStartTime: finalQuestionStartTime,
+              serverTime: finalServerTime,
               correctAnswerId,
               // Reset scores - get from leaderboard or default to 0
               // Do NOT fallback to old store values
@@ -1337,31 +1743,41 @@ export default function GamePage() {
 
   }, [sessionId, authReady]);
 
-  // Server-driven timer: recalculate from questionStartTime + serverTime instead of local countdown
-  // This ensures host and player timers stay in sync
+  // Server-driven timer: recalculate from serverTime (source of truth)
+  // This ensures host and player timers stay in sync even after page reload
   useEffect(() => {
-    if (gameStatus === GameState.QUESTION_ACTIVE && currentQuestion && questionStartTime) {
+    if (gameStatus === GameState.QUESTION_ACTIVE && currentQuestion) {
+      // CRITICAL: Detect recovery vs live mode
+      // Recovery: serverTime > questionStartTime (serverTime = Date.now() when response sent)
+      // Live: serverTime === questionStartTime (both set from same question_start event)
+      const isRecoveryMode = serverTime > questionStartTime && questionStartTime > 0;
+      
       const calculateRemaining = () => {
-        const serverTime = useGameStore.getState().serverTime || questionStartTime;
         const timeLimit = currentQuestion.timeLimit || 20;
-        const elapsedMs = Date.now() - questionStartTime;
-        const elapsedSec = Math.floor(elapsedMs / 1000);
-        return Math.max(0, timeLimit - elapsedSec);
+        
+        if (isRecoveryMode && timeRemaining !== null && timeRemaining !== undefined) {
+          // Recovery: backend already calculated remainingTime correctly
+          // Only subtract elapsed time since we received the response
+          const msSinceResponse = Date.now() - serverTime;
+          const secSinceResponse = Math.floor(msSinceResponse / 1000);
+          return Math.max(0, timeRemaining - secSinceResponse);
+        } else {
+          // Live: calculate from questionStartTime
+          const elapsed = questionStartTime > 0 ? Date.now() - questionStartTime : 0;
+          const elapsedSec = Math.floor(elapsed / 1000);
+          return Math.max(0, timeLimit - elapsedSec);
+        }
       };
 
       setLocalTimeRemaining(calculateRemaining());
       const interval = setInterval(() => {
-        const remaining = calculateRemaining();
-        setLocalTimeRemaining(remaining);
-        if (remaining <= 0) {
-          clearInterval(interval);
-        }
+        setLocalTimeRemaining(calculateRemaining());
       }, 100);
       return () => clearInterval(interval);
-    } else if (gameStatus !== GameState.QUESTION_ACTIVE) {
+    } else {
       setLocalTimeRemaining(0);
     }
-  }, [gameStatus, currentQuestion, questionStartTime]);
+  }, [gameStatus, currentQuestion, questionStartTime, serverTime, timeRemaining]);
 
   const handleNextQuestion = () => {
     const gameStore = useGameStore.getState();
@@ -1419,14 +1835,6 @@ export default function GamePage() {
     gameStore.reset();
     useRoomStore.getState().reset();
     router.push('/');
-  };
-
-  const handleEndGame = () => {
-    const gameStore = useGameStore.getState();
-    if (!gameStore.socket || !sessionId) return;
-    gameStore.socket.emit('host_end_game', { sessionId }, (response: any) => {
-      if (response.success) router.push('/quiz');
-    });
   };
 
   const handleCloseRoom = () => {
@@ -1512,514 +1920,149 @@ export default function GamePage() {
     );
   }
 
-  // Countdown overlay
+  // Countdown/Starting
   if (gameStatus === GameState.STARTING) {
+    if (effectiveIsHost) {
+      return (
+        <HostGameView
+          gameStatus="STARTING"
+          currentQuestion={null}
+          questionIndex={questionIndex}
+          totalQuestions={totalQuestions}
+          timeRemaining={localTimeRemaining}
+          countdown={countdown}
+          leaderboard={leaderboard}
+        />
+      );
+    }
     return (
-      <div className="min-h-screen bg-neon-yellow flex items-center justify-center overflow-hidden">
-        <div className="text-center">
-          <p className="text-lg font-bold text-black/60 mb-8 uppercase tracking-wide">
-            Game sắp bắt đầu
-          </p>
-
-          <div className="relative inline-block">
-            <div className="bg-black border-4 border-black shadow-brutal-xl w-64 h-64 flex items-center justify-center">
-              <span className="text-8xl font-black text-neon-yellow">
-                {countdown}
-              </span>
-            </div>
-          </div>
-
-          <p className="text-2xl font-bold text-black/70 mt-8 uppercase tracking-wide">
-            Chuẩn bị câu hỏi
-          </p>
-        </div>
-      </div>
+      <PlayerGameView
+        gameStatus="STARTING"
+        currentQuestion={null}
+        questionIndex={questionIndex}
+        totalQuestions={totalQuestions}
+        timeRemaining={localTimeRemaining}
+        countdown={countdown}
+      />
     );
   }
 
   // Waiting
   if (gameStatus === GameState.WAITING) {
+    if (effectiveIsHost) {
+      return (
+        <HostGameView
+          gameStatus="WAITING"
+          currentQuestion={null}
+          questionIndex={questionIndex}
+          totalQuestions={totalQuestions}
+          timeRemaining={localTimeRemaining}
+          leaderboard={leaderboard}
+        />
+      );
+    }
     return (
-      <div className="min-h-screen bg-neon-blue flex items-center justify-center p-4">
-        <Card className="w-full max-w-md bg-white border-4 border-black shadow-brutal-xl">
-          <CardHeader className="bg-neon-pink border-b-4 border-black text-center">
-            <CardTitle className="text-2xl font-black uppercase text-white">
-              Đang chờ game bắt đầu
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col items-center gap-4 pt-6">
-            <div className="w-12 h-12 border-4 border-black border-t-transparent rounded-full animate-spin bg-neon-green" />
-            <p className="text-lg font-bold text-black/60">
-              {isHost ? 'Đợi người chơi tham gia' : 'Chờ host bắt đầu game'}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+      <PlayerGameView
+        gameStatus="WAITING"
+        currentQuestion={null}
+        questionIndex={questionIndex}
+        totalQuestions={totalQuestions}
+        timeRemaining={localTimeRemaining}
+      />
     );
   }
 
-  // Question active
+  // Question Active
   if (gameStatus === GameState.QUESTION_ACTIVE && currentQuestion) {
-    // Neo-Brutalism colors for answers
-    const answerColors = [
-      { bg: 'bg-neon-blue', border: 'border-blue-600', hover: 'hover:bg-blue-600' },
-      { bg: 'bg-neon-green', border: 'border-green-600', hover: 'hover:bg-green-600' },
-      { bg: 'bg-neon-yellow', border: 'border-yellow-500', hover: 'hover:bg-yellow-500' },
-      { bg: 'bg-neon-purple', border: 'border-purple-600', hover: 'hover:bg-purple-600' },
-    ];
-
+    if (effectiveIsHost) {
+      return (
+        <HostGameView
+          gameStatus="QUESTION_ACTIVE"
+          currentQuestion={currentQuestion}
+          questionIndex={questionIndex}
+          totalQuestions={totalQuestions}
+          timeRemaining={localTimeRemaining}
+          leaderboard={leaderboard}
+        />
+      );
+    }
     return (
-      <div className="min-h-screen bg-neon-yellow p-4">
-        {/* Player count for non-host players */}
-        {!isHost && (
-          <div className="max-w-4xl mx-auto mb-4">
-            <Card className="bg-white border-4 border-black shadow-brutal">
-              <CardContent className="py-3 px-4 flex items-center gap-2">
-                <Users className="w-5 h-5 text-black/50" />
-                <span className="font-bold text-black/70">
-                  {activePlayerCount} người đang chơi
-                </span>
-              </CardContent>
-            </Card>
-          </div>
-        )}
-
-        {/* Host Player List Panel with Pagination */}
-        {isHost && (
-          <div className="max-w-6xl mx-auto mb-4">
-            <Card className="bg-white border-4 border-black shadow-brutal">
-              <CardHeader className="bg-neon-green border-b-4 border-black pb-3">
-                <div className="flex justify-between items-center gap-4">
-                  <CardTitle className="text-xl font-black text-black">Người chơi ({hostPlayerTotalItems})</CardTitle>
-                  <span className="text-sm font-bold text-black/70">
-                    {leaderboard.filter(e => e.connection !== 'LEFT').length} active
-                  </span>
-                </div>
-              </CardHeader>
-              <CardContent className="p-3">
-                {/* Pagination controls */}
-                {hostPlayerShouldShowPagination && (
-                  <div className="mb-3">
-                    <PaginationControls
-                      page={hostPlayerPage}
-                      totalPages={hostPlayerTotalPages}
-                      totalItems={hostPlayerTotalItems}
-                      startIndex={hostPlayerStartIndex}
-                      endIndex={hostPlayerEndIndex}
-                      onPrev={hostPlayerPrevPage}
-                      onNext={hostPlayerNextPage}
-                    />
-                  </div>
-                )}
-                <div className="max-h-64 overflow-y-auto space-y-2">
-                  {paginatedHostPlayers.map((entry) => (
-                    <div key={entry.playerId} className="flex items-center justify-between p-2 bg-gray-100 rounded-lg border-2 border-black">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-sm text-black/50 w-6">#{entry.rank}</span>
-                        <span className="font-bold text-black">{entry.nickname}</span>
-                        <span className={`
-                          text-xs font-bold px-2 py-0.5 rounded border
-                          ${entry.connection === 'CONNECTED' ? 'bg-green-400 text-black border-black' : ''}
-                          ${entry.connection === 'LEFT' ? 'bg-gray-400 text-black border-black line-through' : ''}
-                          ${entry.connection === 'DISCONNECTED' ? 'bg-orange-400 text-black border-black' : ''}
-                          ${!entry.connection ? 'bg-gray-300 text-black border-black' : ''}
-                        `}>
-                          {entry.connection === 'CONNECTED' ? 'Online' : entry.connection === 'LEFT' ? 'Đã rời' : entry.connection === 'DISCONNECTED' ? 'Mất kết nối' : 'Offline'}
-                        </span>
-                        <span className={`
-                          text-xs font-bold px-2 py-0.5 rounded border
-                          ${entry.hasAnswered ? 'bg-neon-green text-black border-black' : 'bg-gray-300 text-black border-black'}
-                        `}>
-                          {entry.hasAnswered ? 'Đã trả lời' : 'Chưa trả lời'}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                  {leaderboard.length === 0 && (
-                    <p className="text-center text-black/50 font-bold">Chưa có người chơi</p>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        )}
-
-        <div className={isHost ? 'max-w-3xl mx-auto' : 'max-w-4xl mx-auto'}>
-          {/* Header */}
-          <div className="flex justify-between items-center mb-6 bg-white rounded-2xl p-4 border-4 border-black shadow-brutal">
-            <div className="bg-black border-4 border-black shadow-brutal-sm px-4 py-2">
-              <span className="text-white font-black text-xl uppercase">
-                Câu {questionIndex + 1}/{totalQuestions}
-              </span>
-            </div>
-            <div className={`px-6 py-3 border-4 border-black shadow-brutal ${localTimeRemaining <= 5 ? 'bg-red-500' : 'bg-neon-green'}`}>
-              <span className="text-white font-black text-2xl flex items-center gap-2">
-                <Clock className="w-6 h-6" />
-                {localTimeRemaining}s
-              </span>
-            </div>
-          </div>
-
-          {/* Question card */}
-          <Card className="mb-6 bg-white border-4 border-black shadow-brutal">
-            <CardHeader className="bg-neon-pink border-b-4 border-black pb-4">
-              <div className="flex items-center gap-3">
-                <Target className="w-8 h-8 text-white" />
-                <CardTitle className="text-2xl font-black text-white text-center leading-relaxed">
-                  {currentQuestion.content}
-                </CardTitle>
-              </div>
-            </CardHeader>
-          </Card>
-
-          {/* Answer buttons - Neo-Brutalism style */}
-          <div className="grid grid-cols-2 gap-4 mb-6">
-            {currentQuestion.answers.map((answer, index) => {
-              const color = answerColors[index % 4];
-              const isSelected = selectedAnswerId === answer.id;
-              return (
-                <button
-                  key={answer.id}
-                  onClick={() => !isHost && handleSubmitAnswer(answer.id)}
-                  disabled={hasAnswered || isHost}
-                  className={`
-                    ${color.bg} border-4 border-black
-                    text-white text-xl py-10 px-6
-                    font-black uppercase
-                    shadow-brutal
-                    transition-all duration-150
-                    ${!isHost && !hasAnswered ? `${color.hover} hover:-translate-y-1 hover:shadow-brutal-lg cursor-pointer` : ''}
-                    ${isSelected ? 'ring-4 ring-white scale-105' : ''}
-                    disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:translate-y-0
-                  `}
-                >
-                  <span className="flex items-center justify-center gap-4">
-                    <span className="w-12 h-12 rounded-xl bg-black/20 flex items-center justify-center text-2xl font-black">
-                      {String.fromCharCode(65 + index)}
-                    </span>
-                    <span className="text-left flex-1">{answer.content}</span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Status message - Neo-Brutalism */}
-          {isHost ? (
-            <div className="text-center bg-white border-4 border-black shadow-brutal p-4">
-              <p className="font-bold text-black/60 uppercase tracking-wide">
-                <span className="inline-block w-3 h-3 bg-neon-orange border-2 border-black mr-2"></span>
-                Host đang theo dõi câu hỏi
-              </p>
-            </div>
-          ) : hasAnswered ? (
-            <div className="text-center bg-neon-green border-4 border-black shadow-brutal p-4">
-              <p className="font-black text-white uppercase tracking-wide flex items-center justify-center gap-2">
-                <CheckCircle className="w-6 h-6" />
-                Đã gửi đáp án! Chờ kết quả...
-              </p>
-            </div>
-          ) : (
-            <div className="text-center bg-white border-4 border-black shadow-brutal p-4">
-              <p className="font-bold text-black/60 uppercase tracking-wide">
-                Chọn đáp án của bạn
-              </p>
-            </div>
-          )}
-
-          {/* Score display - only when NOT answering */}
-          {gameStatus !== GameState.QUESTION_ACTIVE && (
-            <div className="mt-6 text-center bg-white border-4 border-black shadow-brutal p-4">
-              <span className="font-bold text-black/60">Điểm của bạn: </span>
-              <span className="font-black text-neon-green">{myScore} pts</span>
-              <span className="font-bold text-black/40 mx-4">|</span>
-              <span className="font-bold text-black/60">Xếp hạng: </span>
-              <span className="font-black text-neon-pink">#{myRank || '-'}</span>
-            </div>
-          )}
-        </div>
-      </div>
+      <PlayerGameView
+        gameStatus="QUESTION_ACTIVE"
+        currentQuestion={currentQuestion}
+        questionIndex={questionIndex}
+        totalQuestions={totalQuestions}
+        timeRemaining={localTimeRemaining}
+        leaderboardCount={leaderboard.filter(e => e.connection !== 'LEFT').length}
+        selectedAnswerId={selectedAnswerId}
+        hasAnswered={hasAnswered}
+        myScore={myScore}
+        myRank={myRank}
+        onAnswerSelect={handleSubmitAnswer}
+      />
     );
   }
 
-  // Question result
+  // Question Result
   if (gameStatus === GameState.QUESTION_RESULT) {
-    const isCorrect = selectedAnswerId === correctAnswerId;
-    const noAnswer = !selectedAnswerId;
-
+    if (effectiveIsHost) {
+      return (
+        <HostGameView
+          gameStatus="QUESTION_RESULT"
+          currentQuestion={currentQuestion}
+          questionIndex={questionIndex}
+          totalQuestions={totalQuestions}
+          timeRemaining={localTimeRemaining}
+          leaderboard={leaderboard}
+          correctAnswerId={correctAnswerId}
+          onNextQuestion={handleNextQuestion}
+          isLastQuestion={isLastQuestion}
+        />
+      );
+    }
     return (
-      <div className="min-h-screen bg-neon-green p-4">
-        <div className="max-w-4xl mx-auto">
-          {/* Result header */}
-          <div className="text-center mb-6">
-            {isCorrect ? (
-              <>
-                <div className="bg-neon-yellow border-4 border-black shadow-brutal-xl inline-block px-8 py-4 mb-3">
-                  <CheckCircle className="w-16 h-16 text-black mx-auto" />
-                </div>
-                <h2 className="text-4xl font-black text-white uppercase">Chính xác!</h2>
-              </>
-            ) : noAnswer ? (
-              <>
-                <div className="bg-neon-orange border-4 border-black shadow-brutal-xl inline-block px-8 py-4 mb-3">
-                  <Clock className="w-16 h-16 text-white mx-auto" />
-                </div>
-                <h2 className="text-4xl font-black text-white uppercase">Hết giờ!</h2>
-              </>
-            ) : (
-              <>
-                <div className="bg-red-500 border-4 border-black shadow-brutal-xl inline-block px-8 py-4 mb-3">
-                  <XCircle className="w-16 h-16 text-white mx-auto" />
-                </div>
-                <h2 className="text-4xl font-black text-white uppercase">Chưa đúng!</h2>
-              </>
-            )}
-          </div>
-
-          {/* Question card */}
-          <Card className="mb-6 bg-white border-4 border-black shadow-brutal">
-            <CardHeader className="bg-neon-blue border-b-4 border-black pb-4">
-              <CardTitle className="text-xl font-black text-white text-center leading-relaxed">
-                {currentQuestion?.content}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {currentQuestion?.answers.map((answer, index) => {
-                  const isAnswerCorrect = answer.id === correctAnswerId;
-                  const isSelected = !isHost && answer.id === selectedAnswerId;
-                  
-                  return (
-                    <div key={answer.id} className={`
-                      p-4 rounded-xl flex items-center gap-3 border-4 border-black
-                      ${isAnswerCorrect 
-                        ? 'bg-neon-green shadow-brutal' 
-                        : isSelected 
-                          ? 'bg-red-500 shadow-brutal' 
-                          : 'bg-white shadow-brutal-sm'
-                      }
-                    `}>
-                      <span className={`w-10 h-10 rounded-lg border-2 border-black flex items-center justify-center font-black text-lg ${
-                        isAnswerCorrect || isSelected ? 'bg-black text-white' : 'bg-black/10 text-black'
-                      }`}>
-                        {String.fromCharCode(65 + index)}
-                      </span>
-                      <span className={`flex-1 font-bold text-lg ${isAnswerCorrect || isSelected ? 'text-white' : 'text-black'}`}>
-                        {answer.content}
-                      </span>
-                      {isAnswerCorrect && <CheckCircle className="w-6 h-6 text-white" />}
-                    </div>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Player score card */}
-          {!isHost && (
-            <Card className="mb-6 bg-white border-4 border-black shadow-brutal">
-              <CardContent className="pt-6 text-center">
-                <p className="text-sm font-bold text-black/50 uppercase tracking-wider mb-2">Điểm của bạn</p>
-                <div className="text-5xl font-black text-neon-pink mb-2">{myScore} pts</div>
-                <div className="text-lg font-bold text-black/70">
-                  Xếp hạng: <span className="text-neon-blue font-black">#{myRank || '-'}</span>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Host leaderboard */}
-          {isHost && (
-            <Card className="mb-6 bg-white border-4 border-black shadow-brutal">
-              <CardHeader className="bg-neon-yellow border-b-4 border-black pb-4">
-                <CardTitle className="text-xl font-black uppercase flex items-center gap-2">
-                  <Trophy className="w-6 h-6 text-black" />
-                  Bảng xếp hạng ({leaderboardTotalItems})
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {/* Pagination controls */}
-                {leaderboardShouldShowPagination && (
-                  <div className="mb-4">
-                    <PaginationControls
-                      page={leaderboardPage}
-                      totalPages={leaderboardTotalPages}
-                      totalItems={leaderboardTotalItems}
-                      startIndex={leaderboardStartIndex}
-                      endIndex={leaderboardEndIndex}
-                      onPrev={leaderboardPrevPage}
-                      onNext={leaderboardNextPage}
-                    />
-                  </div>
-                )}
-                <div className="space-y-3 max-h-80 overflow-y-auto">
-                  {paginatedLeaderboard.map((entry, idx) => (
-                    <div key={entry.playerId} className={`
-                      flex justify-between items-center p-4 rounded-xl border-4 border-black
-                      ${entry.rank === 1 ? 'bg-neon-yellow shadow-brutal' : entry.rank === 2 ? 'bg-gray-300 shadow-brutal-sm' : entry.rank === 3 ? 'bg-orange-400 shadow-brutal-sm' : 'bg-white shadow-brutal-sm'}
-                    `}>
-                      <div className="flex items-center gap-3">
-                        <span className={`w-10 h-10 rounded-lg border-4 border-black flex items-center justify-center font-black text-lg ${
-                          entry.rank === 1 ? 'bg-black text-neon-yellow' : 'bg-black/20 text-black'
-                        }`}>
-                          {entry.rank === 1 ? '👑' : entry.rank === 2 ? '🥈' : entry.rank === 3 ? '🥉' : entry.rank}
-                        </span>
-                        <div className="flex items-center gap-2">
-                        <span className="font-bold text-lg text-black">{entry.nickname}</span>
-                        <span className={`
-                          text-xs font-bold px-2 py-0.5 rounded border-2 border-black
-                          ${entry.connection === 'CONNECTED' ? 'bg-green-400 text-black' : ''}
-                          ${entry.connection === 'LEFT' ? 'bg-gray-400 text-black line-through' : ''}
-                          ${entry.connection === 'DISCONNECTED' ? 'bg-orange-400 text-black' : ''}
-                          ${!entry.connection ? 'bg-gray-300 text-black' : ''}
-                        `}>
-                          {entry.connection === 'CONNECTED' ? 'Online' : entry.connection === 'LEFT' ? 'Đã rời' : entry.connection === 'DISCONNECTED' ? 'Mất kết nối' : 'Offline'}
-                        </span>
-                      </div>
-                      </div>
-                      {/* <span className="font-black text-xl text-black">{entry.score} pts</span> */}
-                    </div>
-                  ))}
-                  {leaderboard.length === 0 && (
-                    <p className="text-center font-bold text-black/50 uppercase">Chưa có dữ liệu</p>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Next question button */}
-          {isHost && !isLastQuestion && (
-            <Button
-              onClick={handleNextQuestion}
-              className="w-full bg-neon-pink border-4 border-black shadow-brutal hover:shadow-none hover:translate-x-2 hover:translate-y-2 font-black text-xl py-8 uppercase"
-            >
-              Tiếp tục →
-            </Button>
-          )}
-        </div>
-      </div>
+      <PlayerGameView
+        gameStatus="QUESTION_RESULT"
+        currentQuestion={currentQuestion}
+        questionIndex={questionIndex}
+        totalQuestions={totalQuestions}
+        timeRemaining={localTimeRemaining}
+        selectedAnswerId={selectedAnswerId}
+        correctAnswerId={correctAnswerId}
+        hasAnswered={hasAnswered}
+        myScore={myScore}
+        myRank={myRank}
+      />
     );
   }
 
-  // Game finished
+  // Game Finished
   if (gameStatus === GameState.FINISHED) {
+    if (effectiveIsHost) {
+      return (
+        <HostGameView
+          gameStatus="FINISHED"
+          currentQuestion={null}
+          questionIndex={questionIndex}
+          totalQuestions={totalQuestions}
+          timeRemaining={0}
+          leaderboard={leaderboard}
+          onPlayAgain={handlePlayAgain}
+          onEndGame={handleCloseRoom}
+        />
+      );
+    }
     return (
-      <div className="min-h-screen bg-neon-pink p-4">
-        <div className="max-w-4xl mx-auto">
-          {/* Game Over header */}
-          <div className="text-center mb-8">
-            <div className="bg-neon-yellow border-4 border-black shadow-brutal-xl inline-block px-8 py-4 mb-4">
-              <Trophy className="w-16 h-16 text-black mx-auto" />
-            </div>
-            <h1 className="text-5xl font-black text-white uppercase mb-2">Game Over!</h1>
-            <p className="text-xl font-bold text-white/70 uppercase tracking-wide">Kết quả cuối cùng</p>
-          </div>
-
-          {/* Player result card */}
-          {!isHost && (
-            <Card className="mb-6 bg-white border-4 border-black shadow-brutal-xl">
-              <CardHeader className="bg-neon-blue border-b-4 border-black pb-4">
-                <CardTitle className="text-xl font-black uppercase text-white text-center">
-                  Kết quả của bạn
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="pt-6 text-center">
-                <div className="bg-neon-yellow border-4 border-black shadow-brutal inline-block px-8 py-4 mb-3">
-                  <p className="text-6xl font-black text-black">{myScore}</p>
-                  <p className="text-sm font-bold text-black/60 uppercase">Điểm</p>
-                </div>
-                <div className="text-2xl font-bold text-black/70 mt-4">
-                  Xếp hạng: <span className="text-neon-pink font-black">#{myRank || '-'}</span>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Host leaderboard */}
-          {isHost && (
-            <Card className="mb-6 bg-white border-4 border-black shadow-brutal-xl">
-              <CardHeader className="bg-neon-green border-b-4 border-black pb-4">
-                <CardTitle className="text-xl font-black uppercase flex items-center gap-2">
-                  <Crown className="w-6 h-6 text-black" />
-                  Bảng xếp hạng ({leaderboardTotalItems})
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {/* Pagination controls */}
-                {leaderboardShouldShowPagination && (
-                  <div className="mb-4">
-                    <PaginationControls
-                      page={leaderboardPage}
-                      totalPages={leaderboardTotalPages}
-                      totalItems={leaderboardTotalItems}
-                      startIndex={leaderboardStartIndex}
-                      endIndex={leaderboardEndIndex}
-                      onPrev={leaderboardPrevPage}
-                      onNext={leaderboardNextPage}
-                    />
-                  </div>
-                )}
-                <div className="space-y-3 max-h-96 overflow-y-auto">
-                  {paginatedLeaderboard.map((entry, idx) => (
-                    <div key={entry.playerId} className={`
-                      flex justify-between items-center p-4 rounded-xl border-4 border-black
-                      ${entry.rank === 1 ? 'bg-neon-yellow shadow-brutal' : entry.rank === 2 ? 'bg-gray-300 shadow-brutal-sm' : entry.rank === 3 ? 'bg-orange-400 shadow-brutal-sm' : 'bg-white shadow-brutal-sm'}
-                    `}>
-                      <div className="flex items-center gap-3">
-                        <span className={`w-12 h-12 rounded-xl border-4 border-black flex items-center justify-center text-2xl ${
-                          entry.rank === 1 ? 'bg-black text-neon-yellow' : entry.rank === 2 ? 'bg-black text-gray-300' : entry.rank === 3 ? 'bg-black text-orange-400' : 'bg-black/20 text-black'
-                        }`}>
-                          {entry.rank === 1 ? '👑' : entry.rank === 2 ? '🥈' : entry.rank === 3 ? '🥉' : entry.rank}
-                        </span>
-                        <span className="font-black text-xl text-black">{entry.nickname}</span>
-                        <span className={`
-                          text-xs font-bold px-2 py-0.5 rounded border-2 border-black
-                          ${entry.connection === 'CONNECTED' ? 'bg-green-400 text-black' : ''}
-                          ${entry.connection === 'LEFT' ? 'bg-gray-400 text-black line-through' : ''}
-                          ${entry.connection === 'DISCONNECTED' ? 'bg-orange-400 text-black' : ''}
-                          ${!entry.connection ? 'bg-gray-300 text-black' : ''}
-                        `}>
-                          {entry.connection === 'CONNECTED' ? 'Online' : entry.connection === 'LEFT' ? 'Đã rời' : entry.connection === 'DISCONNECTED' ? 'Mất kết nối' : 'Offline'}
-                        </span>
-                      </div>
-                      <span className="font-black text-2xl text-black">{entry.score} pts</span>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Action buttons */}
-          {isHost ? (
-            <div className="grid grid-cols-2 gap-4">
-              <Button
-                onClick={handlePlayAgain}
-                className="bg-neon-green border-4 border-black shadow-brutal hover:shadow-none hover:translate-x-2 hover:translate-y-2 font-black text-xl py-8 uppercase"
-              >
-                <Zap className="w-6 h-6 mr-2" />
-                Chơi lại
-              </Button>
-              <Button
-                onClick={handleCloseRoom}
-                variant="outline"
-                className="bg-white border-4 border-black shadow-brutal hover:shadow-none hover:translate-x-2 hover:translate-y-2 font-black text-xl py-8 uppercase"
-              >
-                Về Quiz
-              </Button>
-            </div>
-          ) : (
-            <Button
-              onClick={handleLeaveRoom}
-              variant="outline"
-              className="w-full bg-white border-4 border-black shadow-brutal hover:shadow-none hover:translate-x-2 hover:translate-y-2 font-black text-xl py-8 uppercase"
-            >
-              Rời phòng
-            </Button>
-          )}
-        </div>
-      </div>
+      <PlayerGameView
+        gameStatus="FINISHED"
+        currentQuestion={null}
+        questionIndex={questionIndex}
+        totalQuestions={totalQuestions}
+        timeRemaining={0}
+        myScore={myScore}
+        myRank={myRank}
+        onLeaveRoom={handleLeaveRoom}
+      />
     );
   }
 

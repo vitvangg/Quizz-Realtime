@@ -13,6 +13,7 @@ import { useGameStore } from '@/stores/game.store';
 import { useAuthStore } from '@/stores/auth.store';
 import { GameState } from '@/types/game.type';
 import { toast } from 'sonner';
+import { useRoomHostIdentity, checkIsHost } from '@/hooks/useHostIdentity';
 
 interface WaitingScreenProps {
   roomId: string;
@@ -47,11 +48,18 @@ export function WaitingScreen({ roomId }: WaitingScreenProps) {
     shouldShowPagination: lobbyShouldShowPagination,
   } = usePagination(players, { pageSize: lobbyPageSize });
 
-  const isHost = !!(
-    currentPlayer?.isHost ||
-    currentPlayer?.id === currentRoom?.hostId ||
-    (currentPlayer?.id?.startsWith('host_') && currentRoom?.hostId)
-  );
+  // ============================================================
+  // SINGLE SOURCE OF TRUTH: useRoomHostIdentity
+  // ============================================================
+  // This hook provides authoritative host identity based on:
+  // 1. Server response (room_joined event) - authoritative
+  // 2. Server validation (playerId format)
+  // 3. Storage recovery (sessionStorage for reload)
+  const hostIdentity = useRoomHostIdentity(roomId);
+  
+  // Use the hook's isHost for consistent determination
+  // The hook handles all edge cases and priority logic
+  const isHost = hostIdentity.isHost;
 
   const gameStore = useGameStore();
 
@@ -63,6 +71,15 @@ export function WaitingScreen({ roomId }: WaitingScreenProps) {
 
   useEffect(() => {
     if (!roomSocket) return;
+
+    const handleRoomClosed = (data: { roomId: string; reason: string; message?: string }) => {
+      console.log('[WaitingScreen] room_closed received:', data);
+      resetRoomStore();
+      toast.warning(data.message || 'Phòng đã bị đóng.', {
+        duration: 5000,
+      });
+      router.push('/');
+    };
 
     const handleRoomLeft = (data: { roomId: string; isHost?: boolean }) => {
       resetRoomStore();
@@ -82,21 +99,44 @@ export function WaitingScreen({ roomId }: WaitingScreenProps) {
       setTimeout(() => router.push('/'), 2000);
     };
 
+    const handleGameStarting = (data: { sessionId: string; countdown: number }) => {
+      console.log('[WaitingScreen] game_starting received:', data);
+      // Update store state
+      useGameStore.setState({
+        gameStatus: GameState.STARTING,
+        countdown: data.countdown,
+        sessionId: data.sessionId,
+      });
+      // Show success toast - this happens BEFORE question_start
+      toast.success('Game bắt đầu!', { id: 'start-game' });
+    };
+
+    const handleCountdownTick = (data: { remaining: number }) => {
+      console.log('[WaitingScreen] countdown_tick received:', data);
+      useGameStore.setState({ countdown: data.remaining });
+    };
+
     const handleGameRedirect = (data: { url: string; sessionId: string }) => {
       console.log('[WaitingScreen] game_redirect received:', data);
       // Set pendingRedirect to trigger redirect effect
       useGameStore.setState({ _pendingRedirect: data.url });
     };
 
+    roomSocket.on('room_closed', handleRoomClosed);
     roomSocket.on('room_left', handleRoomLeft);
     roomSocket.on('host_left', handleHostLeft);
     // NOTE: player_left toast is handled by room.store.ts
     // DO NOT add duplicate listener here
+    roomSocket.on('game_starting', handleGameStarting);
+    roomSocket.on('countdown_tick', handleCountdownTick);
     roomSocket.on('game_redirect', handleGameRedirect);
 
     return () => {
+      roomSocket.off('room_closed', handleRoomClosed);
       roomSocket.off('room_left', handleRoomLeft);
       roomSocket.off('host_left', handleHostLeft);
+      roomSocket.off('game_starting', handleGameStarting);
+      roomSocket.off('countdown_tick', handleCountdownTick);
       roomSocket.off('game_redirect', handleGameRedirect);
     };
   }, [roomSocket, router, resetRoomStore]);
@@ -107,22 +147,23 @@ export function WaitingScreen({ roomId }: WaitingScreenProps) {
     if (!pendingRedirect) return;
     console.log('[WaitingScreen] SPA redirect to:', pendingRedirect);
     
-    const isActualHost = !!(
-      currentPlayer?.isHost ||
-      currentPlayer?.id === currentRoom?.hostId ||
-      (currentPlayer?.id?.startsWith('host_') && currentRoom?.hostId)
-    );
+    // ============================================================
+    // DETERMINE HOST STATUS FOR REDIRECT
+    // Using single source of truth
+    // ============================================================
+    const isHostForRedirect = hostIdentity.isHost;
     
-    if (isActualHost) {
+    if (isHostForRedirect) {
+      // Update sessionStorage for the new game session
       sessionStorage.setItem('hostSessionId', pendingRedirect.replace('/game/', ''));
-      console.log('[WaitingScreen] Set hostSessionId (is actual host)');
+      console.log('[WaitingScreen] Set hostSessionId (is host)');
     } else {
       console.log('[WaitingScreen] Not setting hostSessionId (is player)');
     }
     
     useGameStore.setState({ _pendingRedirect: null });
     router.push(pendingRedirect);
-  }, [pendingRedirect, currentPlayer, currentRoom]);
+  }, [pendingRedirect, hostIdentity.isHost, router]);
 
   const handleCopyPin = async () => {
     if (currentRoom?.pin) {
@@ -163,19 +204,16 @@ export function WaitingScreen({ roomId }: WaitingScreenProps) {
         });
       }
 
-      const sessionId = await gameStore.startGame(currentRoom.id);
-
-      if (sessionId) {
-        const authStore = useAuthStore.getState();
-        sessionStorage.setItem('hostSessionId', sessionId);
-        if (authStore.user?.id) {
-          sessionStorage.setItem('hostUserId', String(authStore.user.id));
-          console.log('[WaitingScreen] Saved hostUserId:', authStore.user.id);
-        }
-        // NOTE: Redirect will be triggered by game_starting/game_redirect event
-        // via the handleGameRedirect listener in this component
-        toast.success('Game bắt đầu!', { id: 'start-game' });
-      }
+      // IMPORTANT: Redirect immediately after emitting host_start_game
+      // DO NOT wait for response - the redirect will happen via game_redirect event
+      // This ensures the toast "Game bắt đầu!" appears BEFORE question_start
+      gameStore.startGame(currentRoom.id);
+      
+      // SessionId will be set by server response, but we redirect anyway
+      // The game_redirect event will also trigger redirect
+      // toast.success will be called by the game_starting event handler
+      // So we just return without waiting
+      
     } catch (error) {
       console.error('[WaitingScreen] Start game error:', error);
       toast.error('Không thể bắt đầu game', { id: 'start-game' });
