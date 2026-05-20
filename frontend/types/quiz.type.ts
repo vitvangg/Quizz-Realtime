@@ -73,3 +73,16 @@ export interface CreateAnswerDto {
   content: string;
   isCorrect: boolean;
 }
+
+export interface QuizPaginationProps {
+  page: number;
+  totalPages: number;
+  totalItems: number;
+  startIndex: number;
+  endIndex: number;
+  onPrev: () => void;
+  onNext: () => void;
+  onPageChange?: (page: number) => void;
+  showItemRange?: boolean;
+  className?: string;
+}

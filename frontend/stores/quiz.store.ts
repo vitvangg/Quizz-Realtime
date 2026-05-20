@@ -12,14 +12,17 @@ interface QuizState {
   // Lưu trữ bộ lọc toàn cục
   searchKeyword: string;
   selectedCategory: string;
+  sortOrder: "newest" | "oldest";
 
   setFilters: (keyword: string, category: string) => void;
+  setSortOrder: (order: "newest" | "oldest") => void;
   getAll: () => Promise<void>;
   getMyQuizzes: () => Promise<void>;
   getById: (id: string) => Promise<void>;
   create: (data: { title: string; description?: string; category: QuizCategory }) => Promise<any>;
   update: (id: string, data: any) => Promise<void>;
   delete: (id: string) => Promise<void>;
+  adminDelete: (id: string) => Promise<void>;
   search: (q: string) => Promise<void>;
 }
 
@@ -37,9 +40,14 @@ export const useQuizStore = create<QuizState>((set, get) => ({
   
   searchKeyword: "",
   selectedCategory: "ALL",
+  sortOrder: "newest",
 
   setFilters: (keyword, category) => {
     set({ searchKeyword: keyword, selectedCategory: category });
+  },
+
+  setSortOrder: (order) => {
+    set({ sortOrder: order });
   },
 
   getAll: async () => {
@@ -119,6 +127,21 @@ export const useQuizStore = create<QuizState>((set, get) => ({
         quizzes: state.quizzes.filter((q) => q.id !== id),
       }));
       toast.success("Xóa quiz thành công");
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Xóa thất bại"));
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  adminDelete: async (id) => {
+    try {
+      set({ loading: true });
+      await quizService.adminDelete(id);
+      set((state) => ({
+        quizzes: state.quizzes.filter((q) => q.id !== id),
+      }));
+      toast.success("Xóa quiz (Admin) thành công");
     } catch (error) {
       toast.error(getErrorMessage(error, "Xóa thất bại"));
     } finally {
