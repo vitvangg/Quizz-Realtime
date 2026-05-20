@@ -10,15 +10,15 @@ import { Card, CardContent } from "@/components/ui/card";
 
 import {
   PlusCircle,
-  Save,
+
   ArrowLeft,
-  LayoutGrid,
+
   Info,
   FileDown,
   FileUp,
   FileText,
   Sparkles,
-  Loader2,
+
 } from "lucide-react";
 
 import Link from "next/link";
@@ -33,23 +33,7 @@ import { AIComponent } from "@/components/quiz/ai-component";
 import { QuestionCard } from "@/components/quiz/question-card";
 import { QuizCategory, CATEGORY_LABELS } from "@/types/quiz.type";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-
-interface Answer {
-  id: string;
-  content: string;
-  isCorrect: boolean;
-}
-
-interface Question {
-  id: string;
-  content: string;
-  timeLimit: number;
-  imageUrl?: string;
-  imageId?: string;
-  pendingFile?: File;
-  previewUrl?: string;
-  answers: Answer[];
-}
+import { Question, Answer } from "@/types/quiz.type";
 
 export default function QuizBuilderPage() {
   const router = useRouter();
@@ -386,7 +370,7 @@ export default function QuizBuilderPage() {
         setCategory(cat);
       }
     }
-    
+
     setShowAI(false); // Đóng sau khi gen xong
   };
 
@@ -469,13 +453,13 @@ export default function QuizBuilderPage() {
       />
 
       {/* HEADER */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 sticky top-16 z-40 bg-background/90 backdrop-blur-xl py-6 border-b transition-all duration-300">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 sticky top-16 z-40 bg-background/90 backdrop-blur-xl py-6 px-4 md:px-8 border-b transition-all duration-300 rounded-3xl">
         <div className="flex items-center gap-5">
           <Link href="/quiz">
             <Button
               variant="ghost"
               size="icon"
-              className="rounded-2xl bg-muted hover:bg-primary hover:text-white transition-all"
+              className="rounded-full bg-muted hover:bg-primary hover:text-white transition-all border shadow-sm"
             >
               <ArrowLeft className="h-5 w-5" />
             </Button>
@@ -564,7 +548,7 @@ export default function QuizBuilderPage() {
                       placeholder="Ví dụ: Lập trình React căn bản..."
                       value={title}
                       onChange={(e) => setTitle(e.target.value)}
-                      className="text-2xl font-black py-8 border-2 border-transparent bg-background focus:border-primary/50 transition-all rounded-2xl placeholder:text-muted-foreground/30"
+                      className="text-2xl font-black py-8 border-2 border-transparent bg-white focus:border-primary/50 transition-all rounded-2xl placeholder:text-muted-foreground/30"
                     />
                   </div>
 
@@ -573,7 +557,7 @@ export default function QuizBuilderPage() {
                       Danh mục
                     </Label>
                     <Select value={category} onValueChange={(value) => setCategory(value as QuizCategory)}>
-                      <SelectTrigger className="text-xl font-black py-8 border-2 border-transparent bg-background focus:border-primary/50 transition-all rounded-2xl h-auto">
+                      <SelectTrigger className="text-xl font-black py-8 border-2 border-transparent bg-white focus:border-primary/50 transition-all rounded-2xl h-14">
                         <SelectValue placeholder="Chọn danh mục" />
                       </SelectTrigger>
                       <SelectContent className="rounded-2xl border-2">

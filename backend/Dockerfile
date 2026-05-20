@@ -2,21 +2,21 @@
 FROM node:20-alpine AS builder
 
 WORKDIR /app
-
-# Copy package files
+# Copy package files, prisma schema và config
 COPY package*.json ./
 COPY prisma ./prisma/
+COPY prisma.config.ts ./
 
-# Install dependencies
+# Install all dependencies
 RUN npm install
 
 # Copy source code
 COPY . .
 
-# Generate Prisma Client
+# Generate Prisma Client (output → /app/generated/prisma theo schema.prisma)
 RUN npx prisma generate
 
-# Build the application
+# Build NestJS app
 RUN npm run build
 
 # Stage 2: Production
@@ -24,20 +24,23 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy package files and install production only dependencies
+# Copy package files, install production deps + đúng phiên bản prisma
 COPY package*.json ./
-RUN npm install --omit=dev
+RUN npm install --omit=dev && npm install prisma@7.8.0 dotenv
 
-# Copy built files and prisma from builder
+# Copy build output từ builder
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=builder /app/prisma ./prisma
 
-# Environment variables (Defaults - should be overridden by docker-compose)
+# Copy Prisma generated client (custom output path)
+COPY --from=builder /app/generated ./generated
+
+# Copy prisma schema + config (cần để migrate deploy)
+COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/prisma.config.ts ./
+
 ENV NODE_ENV=production
 ENV PORT=5000
 
 EXPOSE 5000
 
-# Start the application
-CMD ["node", "dist/main"]
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/main"]

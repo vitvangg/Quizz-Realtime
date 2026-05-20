@@ -6,6 +6,8 @@ import { Play, Copy, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PlayerList } from './player-list';
+import { PaginationControls } from '@/components/common/PaginationControls';
+import { usePagination } from '@/hooks/usePagination';
 import { useRoomStore } from '@/stores/room.store';
 import { useGameStore } from '@/stores/game.store';
 import { useAuthStore } from '@/stores/auth.store';
@@ -28,6 +30,22 @@ export function WaitingScreen({ roomId }: WaitingScreenProps) {
     reset: resetRoomStore,
   } = useRoomStore();
   const [copied, setCopied] = useState(false);
+
+  // Pagination for lobby player list - 20 players per page
+  const lobbyPageSize = 20;
+  const {
+    page: lobbyPage,
+    totalPages: lobbyTotalPages,
+    totalItems: lobbyTotalItems,
+    startIndex: lobbyStartIndex,
+    endIndex: lobbyEndIndex,
+    hasNextPage: lobbyHasNextPage,
+    hasPrevPage: lobbyHasPrevPage,
+    nextPage: lobbyNextPage,
+    prevPage: lobbyPrevPage,
+    paginatedItems: paginatedPlayers,
+    shouldShowPagination: lobbyShouldShowPagination,
+  } = usePagination(players, { pageSize: lobbyPageSize });
 
   const isHost = !!(
     currentPlayer?.isHost ||
@@ -64,18 +82,22 @@ export function WaitingScreen({ roomId }: WaitingScreenProps) {
       setTimeout(() => router.push('/'), 2000);
     };
 
-    const handlePlayerLeft = (data: { nickname: string }) => {
-      toast.info(`${data.nickname} đã rời phòng`);
+    const handleGameRedirect = (data: { url: string; sessionId: string }) => {
+      console.log('[WaitingScreen] game_redirect received:', data);
+      // Set pendingRedirect to trigger redirect effect
+      useGameStore.setState({ _pendingRedirect: data.url });
     };
 
     roomSocket.on('room_left', handleRoomLeft);
     roomSocket.on('host_left', handleHostLeft);
-    roomSocket.on('player_left', handlePlayerLeft);
+    // NOTE: player_left toast is handled by room.store.ts
+    // DO NOT add duplicate listener here
+    roomSocket.on('game_redirect', handleGameRedirect);
 
     return () => {
       roomSocket.off('room_left', handleRoomLeft);
       roomSocket.off('host_left', handleHostLeft);
-      roomSocket.off('player_left', handlePlayerLeft);
+      roomSocket.off('game_redirect', handleGameRedirect);
     };
   }, [roomSocket, router, resetRoomStore]);
 
@@ -150,6 +172,8 @@ export function WaitingScreen({ roomId }: WaitingScreenProps) {
           sessionStorage.setItem('hostUserId', String(authStore.user.id));
           console.log('[WaitingScreen] Saved hostUserId:', authStore.user.id);
         }
+        // NOTE: Redirect will be triggered by game_starting/game_redirect event
+        // via the handleGameRedirect listener in this component
         toast.success('Game bắt đầu!', { id: 'start-game' });
       }
     } catch (error) {
@@ -265,11 +289,24 @@ export function WaitingScreen({ roomId }: WaitingScreenProps) {
 
           {/* Right Column - Player List */}
           <div>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-black text-lg uppercase tracking-wide">
+                Người chơi ({lobbyTotalItems})
+              </h3>
+            </div>
             <PlayerList
-              players={players}
+              players={paginatedPlayers}
               isHost={isHost}
               currentPlayerId={currentPlayer?.id}
               hostId={currentRoom.hostId}
+              page={lobbyPage}
+              totalPages={lobbyTotalPages}
+              totalItems={lobbyTotalItems}
+              startIndex={lobbyStartIndex}
+              endIndex={lobbyEndIndex}
+              onPrev={lobbyPrevPage}
+              onNext={lobbyNextPage}
+              showPagination={lobbyShouldShowPagination}
             />
           </div>
         </div>

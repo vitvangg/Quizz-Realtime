@@ -9,7 +9,9 @@ import {
 import { PrismaService } from 'src/prisma/prisma.service';
 import { RedisService } from 'src/redis/redis.service';
 import { PlayerCacheService } from './player-cache.service';
+import { PlayerPresenceService } from './player-presence.service';
 import { AnswerQueueService, QueuedAnswer } from './answer-queue.service';
+import { GAME_CONSTANTS } from 'src/common/constants';
 
 export enum GameState {
   WAITING = 'WAITING',
@@ -67,6 +69,7 @@ export class GameSessionService {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly playerCache: PlayerCacheService,
+    private readonly presenceService: PlayerPresenceService,
     private readonly answerQueue: AnswerQueueService,
   ) {}
 
@@ -153,14 +156,24 @@ export class GameSessionService {
       `game:${session.id}`,
       JSON.stringify(gameCache),
       'EX',
-      7200,
+      GAME_CONSTANTS.GAME_CACHE_TTL,
     );
 
     // Add regular players to leaderboard (their player.id values)
     await this.initLeaderboard(session.id, room.players.map((p) => p.id));
 
-    // Warm up player name cache for fast leaderboard lookups
-    await this.playerCache.warmupSessionCache(session.id);
+    // Warm up player name cache in BACKGROUND - don't block game start!
+    this.playerCache.warmupSessionCache(session.id).catch((e) =>
+      this.logger.warn(`Cache warmup failed (non-critical): ${e.message}`),
+    );
+
+    // Track active room for admin ops
+    await this.redis.setActiveRoom(session.id, {
+      roomId,
+      hostId,
+      status: 'PLAYING',
+      startedAt: Date.now(),
+    });
 
     this.logger.log(
       `Game session ${session.id} started for room ${roomId} | ${room.players.length} players`,
@@ -391,7 +404,7 @@ export class GameSessionService {
       `game:${sessionId}`,
       JSON.stringify(newCache),
       'EX',
-      7200,
+      GAME_CONSTANTS.GAME_CACHE_TTL,
     );
 
     const questionData = {
@@ -464,14 +477,21 @@ export class GameSessionService {
     // Cancel timer
     this.cancelTimer(sessionId);
 
-    // Delete Redis cache
-    await this.redis.del(`game:cache:${sessionId}`);
-    await this.redis.del(`game:timer:${sessionId}`);
+    // Delete Redis cache - NOTE: key is `game:{sessionId}` (see getGameCache)
+    await this.redis.del(`game:${sessionId}`);
+
+    // Delete timer metadata
     await this.redis.del(`game:timer_meta:${sessionId}`);
     await this.redis.del(`game:timer_pause:${sessionId}`);
 
     // Delete leaderboard
-    await this.redis.del(`game:leaderboard:${sessionId}`);
+    await this.redis.del(`leaderboard:${sessionId}`);
+
+    // Track active room for admin ops
+    await this.redis.removeActiveRoom(sessionId);
+
+    // Delete player in-game tracking keys
+    // Note: We don't delete player names cache as it's shared across sessions
 
     this.logger.log(`[GameSessionService] Session ${sessionId} cleaned up`);
   }
@@ -505,6 +525,9 @@ export class GameSessionService {
         });
       }
     });
+
+    // Track active room for admin ops
+    await this.redis.removeActiveRoom(sessionId);
 
     this.logger.log(`[GameSessionService] Session ${sessionId} closed in DB`);
   }
@@ -616,6 +639,19 @@ export class GameSessionService {
 
     const leaderboard = await this.getLeaderboard(sessionId);
 
+    // Check if we need to redirect to a newer session
+    let currentSessionId: string | undefined;
+    if (cached?.status === GameState.FINISHED) {
+      // Get the current session ID from room
+      const room = await this.prisma.room.findUnique({
+        where: { id: session.roomId },
+        select: { currentSessionId: true },
+      });
+      if (room?.currentSessionId && room.currentSessionId !== sessionId) {
+        currentSessionId = room.currentSessionId;
+      }
+    }
+
     return {
       sessionId: session.id,
       roomId: session.roomId,
@@ -629,8 +665,9 @@ export class GameSessionService {
       currentQuestion,
       correctAnswerId,
       leaderboard,
-      serverTime: Date.now(), // Thời điểm server trả response
-      questionStartedAt: cached?.questionStartedAt || null, // Thời điểm câu hỏi bắt đầu (server time)
+      serverTime: Date.now(),
+      questionStartedAt: cached?.questionStartedAt || null,
+      currentSessionId, // Include for redirect if session is finished
     };
   }
 
@@ -730,7 +767,7 @@ export class GameSessionService {
       `game:timer_meta:${sessionId}`,
       JSON.stringify({ totalMs, scheduledAt, timerVersion }),
       'EX',
-      7200,
+      GAME_CONSTANTS.GAME_CACHE_TTL,
     );
 
     this.logger.log(`Timer scheduled for session ${sessionId}: ${timeLimit}s (version=${timerVersion})`);
@@ -756,7 +793,7 @@ export class GameSessionService {
         `game:timer_pause:${sessionId}`,
         String(remaining),
         'EX',
-        86400,
+        GAME_CONSTANTS.PLAYER_PRESENCE_TTL,
       );
 
       this.logger.warn(`[FREEZE] Timer paused for ${sessionId}, remaining: ${(remaining / 1000).toFixed(1)}s`);
@@ -804,7 +841,7 @@ export class GameSessionService {
         `game:${sessionId}`,
         JSON.stringify(updated),
         'EX',
-        7200,
+        GAME_CONSTANTS.GAME_CACHE_TTL,
       );
     }
   }
@@ -838,12 +875,70 @@ export class GameSessionService {
   }
 
   /**
+   * Ensure player is in leaderboard with score 0 (used when player joins game)
+   */
+  async ensurePlayerInLeaderboard(sessionId: string, playerId: string, nickname: string) {
+    const key = `leaderboard:${sessionId}`;
+    const currentScore = await this.redis.zscore(key, playerId);
+    if (currentScore === null) {
+      // Player not in leaderboard yet - add with score 0
+      await this.redis.zadd(key, 0, playerId);
+      // Also cache the nickname for lookups
+      await this.playerCache.setPlayerName(playerId, nickname);
+      this.logger.debug(`[ensurePlayerInLeaderboard] Added player ${playerId} to leaderboard with score 0`);
+    }
+  }
+
+  /**
    * Remove player from leaderboard (when they disconnect)
+   * NOTE: Prefer markPlayerLeft() for explicit leave - player stays in leaderboard
    */
   async removePlayerFromLeaderboard(sessionId: string, playerId: string) {
     const key = `leaderboard:${sessionId}`;
     await this.redis.zrem(key, playerId);
     this.logger.debug(`[removePlayerFromLeaderboard] Removed player ${playerId} from session ${sessionId}`);
+  }
+
+  /**
+   * Mark player as LEFT (explicit leave) - player stays in leaderboard
+   * Uses Redis SET to track LEFT players per session
+   */
+  async markPlayerLeft(sessionId: string, playerId: string) {
+    const key = `left:players:${sessionId}`;
+    await this.redis.sadd(key, playerId);
+    this.logger.debug(`[markPlayerLeft] Player ${playerId} marked as LEFT in session ${sessionId}`);
+  }
+
+  /**
+   * Get all LEFT players for a session
+   */
+  async getLeftPlayers(sessionId: string): Promise<string[]> {
+    const key = `left:players:${sessionId}`;
+    return await this.redis.smembers(key);
+  }
+
+  /**
+   * Mark player as having answered current question
+   */
+  async markPlayerAnswered(sessionId: string, playerId: string) {
+    const key = `answered:${sessionId}`;
+    await this.redis.sadd(key, playerId);
+  }
+
+  /**
+   * Get all players who answered current question
+   */
+  async getAnsweredPlayers(sessionId: string): Promise<string[]> {
+    const key = `answered:${sessionId}`;
+    return await this.redis.smembers(key);
+  }
+
+  /**
+   * Clear answered status for new question
+   */
+  async clearAnsweredPlayers(sessionId: string) {
+    const key = `answered:${sessionId}`;
+    await this.redis.del(key);
   }
 
   async getLeaderboard(sessionId: string, limit = 100) {
@@ -863,12 +958,31 @@ export class GameSessionService {
     // Use PlayerCacheService for efficient name lookups
     const names = await this.playerCache.getPlayerNames(playerIds);
 
-    return leaderboard.map((l, index) => ({
-      rank: index + 1,
-      playerId: l.playerId,
-      nickname: names.get(l.playerId) || 'Unknown',
-      score: l.score,
-    }));
+    // Get LEFT players for this session
+    const leftPlayers = await this.getLeftPlayers(sessionId);
+    const leftSet = new Set(leftPlayers);
+
+    // Get online players from presence
+    const sessionPlayers = await this.presenceService.getSessionPlayers(sessionId);
+    const presenceMap = new Map(sessionPlayers.map(p => [p.playerId, p.connection]));
+
+    // Get answered players for current question
+    const answeredPlayers = await this.getAnsweredPlayers(sessionId);
+    const answeredSet = new Set(answeredPlayers);
+
+    return leaderboard.map((l, index) => {
+      const isLeft = leftSet.has(l.playerId);
+      const connection = isLeft ? 'LEFT' : (presenceMap.get(l.playerId) || 'DISCONNECTED');
+
+      return {
+        rank: index + 1,
+        playerId: l.playerId,
+        nickname: names.get(l.playerId) || 'Unknown',
+        score: l.score,
+        connection,
+        hasAnswered: answeredSet.has(l.playerId),
+      };
+    });
   }
 
   async getPlayerScore(sessionId: string, playerId: string) {
@@ -912,6 +1026,13 @@ export class GameSessionService {
       throw new BadRequestException(`Cannot submit answer now - game status is ${cached.status}`);
     }
 
+    // CRITICAL: Validate questionId is the CURRENT question in session
+    const currentQuestionId = cached.questionIds[cached.currentQuestionIndex];
+    if (questionId !== currentQuestionId) {
+      this.logger.warn(`[submitAnswer:${sessionId}] Invalid questionId ${questionId}, expected ${currentQuestionId}`);
+      throw new BadRequestException('Invalid question - this question is not currently active');
+    }
+
     // CRITICAL: Idempotency check using Redis distributed lock
     // This prevents race condition when player spam-clicks submit
     const idempotencyKey = `answer:lock:${sessionId}:${playerId}:${questionId}`;
@@ -930,17 +1051,24 @@ export class GameSessionService {
       });
 
       if (!playerSession) {
-        throw new NotFoundException('Player session not found');
+        throw new ForbiddenException('Player is not part of this game session');
       }
 
       // Fetch question with answers
       const question = await this.prisma.question.findUnique({
         where: { id: questionId },
-        include: { answers: true },
+        include: { answers: { where: { deletedAt: null } } },
       });
 
       if (!question) {
         throw new NotFoundException('Question not found');
+      }
+
+      // CRITICAL: Validate answerId belongs to this question
+      const validAnswerIds = question.answers.map((a) => a.id);
+      if (!validAnswerIds.includes(answerId)) {
+        this.logger.warn(`[submitAnswer:${sessionId}] Invalid answerId ${answerId} for question ${questionId}`);
+        throw new BadRequestException('Invalid answer - answer does not belong to this question');
       }
 
       // Calculate score using server authoritative timestamp
@@ -956,8 +1084,8 @@ export class GameSessionService {
 
         // CRITICAL: Cap timeTaken to prevent negative bonus from network issues
         const cappedTimeTaken = Math.min(timeTaken, maxTime);
-        const timeBonus = Math.max(0, Math.floor((maxTime - cappedTimeTaken) / 10));
-        scoreEarned = 1000 + timeBonus;
+        const timeBonus = Math.max(0, Math.floor((maxTime - cappedTimeTaken) / GAME_CONSTANTS.TIME_BONUS_DIVISOR));
+        scoreEarned = GAME_CONSTANTS.BASE_SCORE + timeBonus;
 
         // Update Redis leaderboard immediately (fast path)
         await this.updateScore(sessionId, playerId, scoreEarned);
@@ -977,6 +1105,9 @@ export class GameSessionService {
         sessionId,
       };
       await this.answerQueue.queueAnswer(queuedAnswer);
+
+      // Mark player as answered for this question
+      await this.markPlayerAnswered(sessionId, playerId);
 
       // Get leaderboard AFTER all writes complete
       const leaderboard = await this.getLeaderboard(sessionId);

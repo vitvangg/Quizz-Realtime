@@ -24,6 +24,8 @@ export interface LeaderboardEntry {
   playerId: string;
   nickname: string;
   score: number;
+  connection?: 'CONNECTED' | 'DISCONNECTED' | 'LEFT';
+  hasAnswered?: boolean;
 }
 
 export interface GameStateData {

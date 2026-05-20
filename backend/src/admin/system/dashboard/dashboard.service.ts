@@ -143,42 +143,32 @@ export class DashboardService {
   }
 
   async getActiveSessions() {
-    // Scan Redis để lấy tất cả game còn đang chạy
-    const keys = await this.redisService.keys('game:*');
-    const sessions: Array<{
-      sessionId: string;
-      roomId: string;
-      status: string;
-      currentQuestionIndex: number;
-      totalQuestions: number;
-      questionStartedAt: number | null;
-      timeLimit: number;
-    }> = [];
-
-    for (const key of keys) {
-      // Bỏ qua các key phụ (timer_pause, timer_meta)
-      if (key.includes(':timer_') || key.includes(':config:')) continue;
-
-      try {
-        const raw = await this.redisService.get(key);
-        if (!raw) continue;
-        const cache = JSON.parse(raw);
-
-        if (cache.status === 'FINISHED') continue;
-
-        sessions.push({
-          sessionId: cache.sessionId,
-          roomId: cache.roomId,
-          status: cache.status,
-          currentQuestionIndex: cache.currentQuestionIndex,
-          totalQuestions: cache.totalQuestions,
-          questionStartedAt: cache.questionStartedAt,
-          timeLimit: cache.timeLimit,
-        });
-      } catch { /* skip corrupt cache */ }
-    }
+    const roomsMap = await this.redisService.getActiveRooms();
+    const sessions = Object.entries(roomsMap).map(([sessionId, info]) => ({
+      sessionId,
+      roomId: info.roomId,
+      hostId: info.hostId,
+      status: info.status,
+      playersCount: info.playersCount || 0,
+      startedAt: info.startedAt,
+    }));
 
     return { success: true, sessions };
+  }
+
+  async getSessionPlayers(sessionId: string) {
+    const data = await this.redisService.hgetall(`presence:session:${sessionId}`);
+    if (!data) return { success: true, players: [] };
+
+    const players = Object.values(data).map(str => {
+      try {
+        return JSON.parse(str);
+      } catch {
+        return null;
+      }
+    }).filter(Boolean);
+
+    return { success: true, players };
   }
 
   // ============================================================================

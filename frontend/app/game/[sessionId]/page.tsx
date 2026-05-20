@@ -10,8 +10,11 @@ import { GameState } from '@/types/game.type';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { apiClient } from '@/lib/apiClient';
-import { getSocket, connectSocketWithAuth, registerStoreUpdater } from '@/lib/socket';
-import { Zap, Trophy, Crown, Clock, Target, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
+import { registerStoreUpdater } from '@/lib/socket';
+import { getGameSocket, connectGameSocket } from '@/lib/game-socket';
+import { usePagination } from '@/hooks/usePagination';
+import { PaginationControls } from '@/components/common/PaginationControls';
+import { Zap, Trophy, Crown, Clock, Target, CheckCircle, XCircle, AlertTriangle, Users } from 'lucide-react';
 
 // ============================================================================
 // FREEZE OVERLAY COMPONENT - Neo-Brutalism Style
@@ -115,6 +118,7 @@ export default function GamePage() {
     countdown,
     correctAnswerId,
     timeRemaining,
+    questionStartTime,
     connectSocket,
     reset,
   } = useGameStore();
@@ -127,9 +131,50 @@ export default function GamePage() {
   const [hasRecoveredFromHttp, setHasRecoveredFromHttp] = useState(false);
 
   const hasRecoveredRef = useRef(false);
+  const joinedSessionRef = useRef<string | null>(null);
+  const lastJoinedTimeRef = useRef<number>(0);
+
+  // Pagination for host player panel during game - 15 players per page
+  const hostPlayerPageSize = 15;
+  const {
+    page: hostPlayerPage,
+    totalPages: hostPlayerTotalPages,
+    totalItems: hostPlayerTotalItems,
+    startIndex: hostPlayerStartIndex,
+    endIndex: hostPlayerEndIndex,
+    hasNextPage: hostPlayerHasNextPage,
+    hasPrevPage: hostPlayerHasPrevPage,
+    nextPage: hostPlayerNextPage,
+    prevPage: hostPlayerPrevPage,
+    paginatedItems: paginatedHostPlayers,
+    shouldShowPagination: hostPlayerShouldShowPagination,
+    resetPage: resetHostPlayerPage,
+  } = usePagination(leaderboard, { pageSize: hostPlayerPageSize });
+
+  // Pagination for host leaderboard in result/finished - 20 players per page
+  const hostLeaderboardPageSize = 20;
+  const {
+    page: leaderboardPage,
+    totalPages: leaderboardTotalPages,
+    totalItems: leaderboardTotalItems,
+    startIndex: leaderboardStartIndex,
+    endIndex: leaderboardEndIndex,
+    hasNextPage: leaderboardHasNextPage,
+    hasPrevPage: leaderboardHasPrevPage,
+    nextPage: leaderboardNextPage,
+    prevPage: leaderboardPrevPage,
+    paginatedItems: paginatedLeaderboard,
+    shouldShowPagination: leaderboardShouldShowPagination,
+    resetPage: resetLeaderboardPage,
+  } = usePagination(leaderboard, { pageSize: hostLeaderboardPageSize });
+
+  // Player count for non-host players
+  const activePlayerCount = leaderboard.filter(e => e.connection !== 'LEFT').length;
 
   useEffect(() => {
     hasRecoveredRef.current = false;
+    joinedSessionRef.current = null;
+    lastJoinedTimeRef.current = 0;
   }, [sessionId]);
 
   useEffect(() => {
@@ -162,7 +207,7 @@ export default function GamePage() {
       useGameStore.setState(updater);
     });
 
-    const socket = getSocket();
+    const socket = getGameSocket();
     useGameStore.setState({ socket });
 
     const handleGameStarting = (data: { sessionId: string; countdown: number }) => {
@@ -206,12 +251,18 @@ export default function GamePage() {
 
       console.log('[GamePage] question_start: isNewQuestion=', isNewQuestion, 'shouldResetAnswer=', shouldResetAnswer);
 
-      let newTimeRemaining = data.question.timeLimit || 20;
-      if (data.timeRemaining !== undefined && data.timeRemaining !== null) {
-        if (shouldResetAnswer) {
-          newTimeRemaining = data.timeRemaining;
-        }
-      }
+      // Calculate timeRemaining based on server time (server is source of truth)
+      // Account for network latency to sync host and player timers
+      const clientReceiveTime = Date.now();
+      const serverToClientLatencyMs = Math.max(0, clientReceiveTime - data.serverTime);
+      const latencyCompensationMs = Math.floor(serverToClientLatencyMs / 2);
+      const adjustedQuestionStartTime = data.questionStartTime + latencyCompensationMs;
+      const elapsedMs = clientReceiveTime - adjustedQuestionStartTime;
+      const elapsedSec = Math.floor(elapsedMs / 1000);
+      const timeLimit = data.timeLimit || 20;
+      const newTimeRemaining = Math.max(0, timeLimit - elapsedSec);
+
+      console.log(`[GamePage] question_start: serverTime=${data.serverTime}, questionStartTime=${data.questionStartTime}, latency=${serverToClientLatencyMs}ms, elapsed=${elapsedSec}s, timeRemaining=${newTimeRemaining}s`);
 
       useGameStore.setState({
         gameStatus: GameState.QUESTION_ACTIVE,
@@ -223,10 +274,20 @@ export default function GamePage() {
         selectedAnswerId: shouldResetAnswer ? null : state.selectedAnswerId,
         correctAnswerId: shouldResetAnswer ? null : state.correctAnswerId,
       });
-      
+
+      // Reset hasAnswered for all players in leaderboard when new question starts
+      if (shouldResetAnswer && Array.isArray(state.leaderboard)) {
+        const resetLeaderboard = state.leaderboard.map((entry: any) => ({
+          ...entry,
+          hasAnswered: false,
+        }));
+        useGameStore.setState({ leaderboard: resetLeaderboard });
+      }
+
       useGameStore.setState({
         timeRemaining: newTimeRemaining,
-        questionStartTime: data.serverTime || Date.now(),
+        questionStartTime: data.questionStartTime,
+        serverTime: data.serverTime,
       });
     };
 
@@ -293,9 +354,11 @@ export default function GamePage() {
       });
     };
 
-    const handleHostReconnected = () => {
-      console.log('[GamePage] host_reconnected');
-      toast.success('Host đã kết nối lại!');
+    const handleHostReconnected = (data: { sessionId: string; reason?: string; phase?: string }) => {
+      console.log('[GamePage] host_reconnected:', data);
+      // TEMPORARILY DISABLED: This event should only fire for actual host reload during game
+      // Not for first join after game_redirect
+      // toast.success('Host đã kết nối lại!');
     };
 
     const handleSessionClosed = (data: { sessionId: string; reason: 'HOST_EXITED' | 'GAME_FINISHED' | 'HOST_DISCONNECTED' }) => {
@@ -337,34 +400,207 @@ export default function GamePage() {
       }
     };
 
-    // Handle player reconnecting (entering grace period)
-    const handlePlayerReconnecting = (data: { playerId: string; nickname: string; gracePeriodMs: number }) => {
-      console.log('[GamePage] player_reconnecting:', data);
-      
-      // Add to reconnecting set so UI can show "reconnecting..." status
-      useGameStore.getState().setPlayerReconnecting(data.playerId, data.nickname, data.gracePeriodMs);
-      
-      // Show toast indicating player is reconnecting
-      toast.warning(`${data.nickname} đang kết nối lại...`, {
-        duration: Math.min(data.gracePeriodMs, 5000),
+    // Unified session transition handler — handles BOTH host and player play_again.
+    //
+    // TIMELINE:
+    //   1. host_play_again emitted → backend creates new session, updates host presence,
+    //      moves host socket to new room, then emits session_switched to OLD room.
+    //   2. session_switched received by ALL (host + players still in old room).
+    //   3. Handler stores embedded state in sessionStorage (playAgainState) and navigates
+    //      to /game/{newSessionId} via router.replace → page remounts.
+    //   4. Remounted useEffect sees valid playAgainState → skips HTTP fetch,
+    //      hydrates store with STARTING state, emits join_game.
+    //   5. question_start arrives after countdown → game proceeds.
+    //
+    // KEY PRINCIPLES:
+    //   - Does NOT update store directly (would be overwritten on remount anyway).
+    //   - Does NOT emit join_game here (handled after remount in useEffect).
+    //   - Guards against duplicate events using sessionStorage key + timestamp.
+    //   - session_started event listener is also kept for backward compat (if any old
+    //     socket connections receive it), but it's now unreachable from backend.
+    const handleSessionTransition = (data: {
+      oldSessionId: string;
+      newSessionId: string;
+      url?: string;
+      timestamp?: number;
+      state?: {
+        status: string;
+        currentQuestion: any;
+        questionIndex: number;
+        totalQuestions: number;
+        leaderboard: any[];
+        remainingTime: number;
+        correctAnswerId: string | null;
+        countdown: number;
+      };
+      // session_started uses "sessionId" instead of "newSessionId"
+      sessionId?: string;
+    }) => {
+      // Normalise: support both session_started (sessionId) and session_switched (newSessionId)
+      const resolvedNewSessionId = data.newSessionId || (data as any).sessionId;
+      const resolvedOldSessionId = data.oldSessionId || sessionId;
+
+      console.log('[GamePage] session_transition:', { resolvedNewSessionId, resolvedOldSessionId, data });
+
+      const state = useGameStore.getState();
+      console.log('[GamePage] BEFORE reset: leaderboard.length=', state.leaderboard?.length, 'myScore=', state.myScore);
+
+      // CRITICAL: Reset leaderboard AND scores IMMEDIATELY in store for new game
+      // This ensures UI updates right away, before router.replace completes
+      // Also update sessionId to prevent old session events from affecting new session
+      useGameStore.setState({
+        leaderboard: [],
+        myScore: 0,
+        myRank: null,
+        sessionId: resolvedNewSessionId  // Update sessionId immediately
       });
+      console.log('[GamePage] AFTER reset: leaderboard=[], myScore=0, myRank=null, sessionId=', resolvedNewSessionId);
+
+      // GUARD: Ignore if we're already handling this new session (duplicate event)
+      // Use sessionStorage to survive page remount attempts
+      const pendingKey = `playAgain:${resolvedNewSessionId}`;
+      const existingPending = sessionStorage.getItem(pendingKey);
+      if (existingPending) {
+        const pending = JSON.parse(existingPending);
+        const age = Date.now() - (pending._timestamp || 0);
+        if (age < 15000) {
+          console.log('[GamePage] Ignoring duplicate session_transition for', resolvedNewSessionId);
+          return;
+        }
+      }
+
+      // Mark pending so page won't double-process
+      sessionStorage.setItem(pendingKey, JSON.stringify({
+        resolvedNewSessionId,
+        resolvedOldSessionId,
+        _timestamp: Date.now(),
+        _fromPlayAgain: true,
+      }));
+
+      toast.info('Game mới đã bắt đầu! Đang tải...', { duration: 3000 });
+
+      // Store embedded state for recovery after page remount.
+      // This is the SOLE source of truth after remount — HTTP fetch is SKIPPED.
+      // CRITICAL: leaderboard MUST be reset to empty for new game
+      sessionStorage.setItem('playAgainState', JSON.stringify({
+        sessionId: resolvedNewSessionId,
+        gameStatus: GameState.STARTING,
+        currentQuestion: null,
+        questionIndex: 0,
+        totalQuestions: data.state?.totalQuestions ?? 0,
+        leaderboard: [],  // Reset leaderboard for new game
+        correctAnswerId: null,
+        hasAnswered: false,
+        selectedAnswerId: null,
+        countdown: data.state?.countdown ?? 5,
+        isHost: state.isHost,
+        myPlayerId: state.myPlayerId,
+        myNickname: state.myNickname,
+        roomId: state.roomId,
+        _fromPlayAgain: true,
+        _timestamp: Date.now(),
+      }));
+
+      // Update sessionStorage identity keys for remount detection
+      if (state.isHost) {
+        sessionStorage.setItem('hostSessionId', resolvedNewSessionId);
+      } else {
+        sessionStorage.setItem('playerSessionId', resolvedNewSessionId);
+      }
+
+      // Navigate to new session — router.replace triggers page remount
+      const redirectUrl = data.url || `/game/${resolvedNewSessionId}`;
+      console.log('[GamePage] Navigating to new session:', redirectUrl);
+      router.replace(redirectUrl);
     };
 
-    // Handle player reconnected (within grace period)
-    const handlePlayerReconnected = (data: { playerId: string; nickname: string; timestamp: number }) => {
-      console.log('[GamePage] player_reconnected:', data);
-      
-      // Clear from reconnecting set
-      useGameStore.getState().clearPlayerReconnecting(data.playerId);
-      
-      // Show toast indicating player reconnected
-      toast.success(`${data.nickname} đã quay lại!`);
+    // Alias for backward compat (backend used to emit session_started separately)
+    const handleSessionStarted = handleSessionTransition;
+    const handleSessionSwitched = handleSessionTransition;
+
+    // Handle player joined - update leaderboard with new player
+    const handlePlayerJoined = (data: { playerId: string; nickname: string; timestamp: number }) => {
+      console.log('[GamePage] player_joined:', data);
+
+      const state = useGameStore.getState();
+
+      // Add new player to leaderboard if not exists, or update connection
+      if (Array.isArray(state.leaderboard)) {
+        const existingEntry = state.leaderboard.find(e => e.playerId === data.playerId);
+        if (!existingEntry) {
+          // New player - will be added when leaderboard_update comes
+          console.log('[GamePage] New player joined, waiting for leaderboard_update');
+        } else {
+          // Player reconnecting - update connection status
+          const updatedLeaderboard = state.leaderboard.map((entry) => {
+            if (entry?.playerId === data.playerId) {
+              return { ...entry, connection: 'CONNECTED' as const };
+            }
+            return entry;
+          });
+          useGameStore.setState({ leaderboard: updatedLeaderboard });
+        }
+      }
+
+      // Toast handled by backend
+    };
+
+    // Handle player answer - immediate UI update for host
+    // Updates hasAnswered status as soon as player submits, before leaderboard_update
+    const handlePlayerAnswered = (data: { sessionId: string; playerId: string; questionId: string; hasAnswered: boolean; answeredAt: number }) => {
+      console.log('[GamePage] player_answered:', data);
+
+      const state = useGameStore.getState();
+
+      // Immediately update hasAnswered in leaderboard (optimistic update)
+      if (Array.isArray(state.leaderboard)) {
+        const updatedLeaderboard = state.leaderboard.map((entry) => {
+          if (entry?.playerId === data.playerId) {
+            return { ...entry, hasAnswered: data.hasAnswered };
+          }
+          return entry;
+        });
+        useGameStore.setState({ leaderboard: updatedLeaderboard });
+      }
+
+      // No toast for answer - just silent UI update
+    };
+
+    // Handle player connection status changes
+    // NOTE: player_status only updates connection state, NO toasts for reload/reconnect
+    // Toast for join/leave comes from player_joined/player_left events only
+    const handlePlayerStatus = (data: { playerId: string; nickname: string; connection: 'CONNECTED' | 'DISCONNECTED'; isHost: boolean; timestamp: number }) => {
+      console.log('[GamePage] player_status:', data);
+
+      const state = useGameStore.getState();
+
+      // Update player status in store
+      state.setPlayerStatus({
+        playerId: data.playerId,
+        nickname: data.nickname,
+        connection: data.connection,
+        isHost: data.isHost,
+        lastSeen: data.timestamp,
+      });
+
+      // FIX: Also update leaderboard entry with connection status
+      if (Array.isArray(state.leaderboard)) {
+        const updatedLeaderboard = state.leaderboard.map((entry) => {
+          if (entry?.playerId === data.playerId) {
+            return { ...entry, connection: data.connection as 'CONNECTED' | 'DISCONNECTED' };
+          }
+          return entry;
+        });
+        useGameStore.setState({ leaderboard: updatedLeaderboard });
+      }
+
+      // NO toasts here - connection status updates silently
+      // Toast for actual join/leave is handled by player_joined/player_left events
     };
 
     const handlePlayerLeft = (data: { playerId: string; nickname: string; timestamp: number }) => {
       console.log('[GamePage] player_left:', data);
 
-      // DEBUG: Validate payload
       if (!data) {
         console.error('[GamePage] player_left: Invalid payload - data is null/undefined');
         return;
@@ -375,13 +611,6 @@ export default function GamePage() {
       }
 
       const state = useGameStore.getState();
-      
-      // Check if player was in reconnecting state - if so, ignore this event
-      // (player_left is only emitted AFTER grace period expires)
-      if (state.reconnectingPlayers.has(data.playerId)) {
-        console.log('[GamePage] Ignoring player_left for player in reconnecting state:', data.playerId);
-        return;
-      }
 
       // Defensive: ensure leaderboard is an array before filtering
       if (!Array.isArray(state.leaderboard)) {
@@ -390,14 +619,18 @@ export default function GamePage() {
         return;
       }
 
-      const newLeaderboard = state.leaderboard.filter(
-        (entry) => entry?.playerId !== data.playerId
-      );
+      // FIX: Update player connection to LEFT instead of removing from leaderboard
+      const newLeaderboard = state.leaderboard.map((entry) => {
+        if (entry?.playerId === data.playerId) {
+          return { ...entry, connection: 'LEFT' as const };
+        }
+        return entry;
+      });
 
       useGameStore.setState({ leaderboard: newLeaderboard });
 
       if (data.playerId === state.myPlayerId) {
-        toast.error('Bạn đã bị ngắt kết nối');
+        toast.error('Bạn đã rời phòng');
       } else if (data.nickname) {
         toast.info(`${data.nickname} đã rời phòng`);
       }
@@ -424,12 +657,14 @@ export default function GamePage() {
         return;
       }
 
-      if (state.gameStatus === GameState.QUESTION_ACTIVE) {
-        console.log('[GamePage] Skipping score_update during QUESTION_ACTIVE to prevent cheating');
+      // Skip for non-host players during QUESTION_ACTIVE (anti-cheat)
+      if (state.gameStatus === GameState.QUESTION_ACTIVE && !state.isHost) {
+        console.log('[GamePage] Skipping score_update during QUESTION_ACTIVE for non-host');
         return;
       }
 
-      if (!state.hasAnswered) {
+      // Only non-host players need to have answered
+      if (!state.isHost && !state.hasAnswered) {
         console.log('[GamePage] Skipping score_update: player has not answered this question');
         return;
       }
@@ -476,6 +711,47 @@ export default function GamePage() {
       }
     };
 
+    // Handle leaderboard_update event - merges with existing leaderboard preserving connection/hasAnswered
+    const handleLeaderboardUpdate = (data: { leaderboard: any[]; sessionId?: string }) => {
+      if (!data?.leaderboard || !Array.isArray(data.leaderboard)) {
+        return;
+      }
+
+      // CRITICAL: Validate sessionId matches current session
+      // This prevents old session leaderboard data from overriding new session
+      const currentSessionId = useGameStore.getState().sessionId;
+      const incomingSessionId = data.sessionId;
+      console.log('[GamePage] leaderboard_update:', {
+        incomingSessionId,
+        currentSessionId,
+        leaderboardLength: data.leaderboard?.length
+      });
+      if (incomingSessionId && incomingSessionId !== currentSessionId) {
+        console.warn('[GamePage] leaderboard_update: sessionId mismatch, ignoring', {
+          incoming: incomingSessionId,
+          current: currentSessionId
+        });
+        return;
+      }
+
+      const state = useGameStore.getState();
+      const existingMap = new Map(
+        (state.leaderboard || []).map((e: any) => [e.playerId, e])
+      );
+
+      const mergedLeaderboard = data.leaderboard.map((entry: any) => {
+        const existing = existingMap.get(entry.playerId);
+        return {
+          ...entry,
+          connection: entry.connection || existing?.connection || 'DISCONNECTED',
+          hasAnswered: entry.hasAnswered ?? existing?.hasAnswered ?? false,
+        };
+      });
+
+      console.log('[GamePage] leaderboard_update: setting leaderboard with', mergedLeaderboard.length, 'entries, first entry score:', mergedLeaderboard[0]?.score);
+      useGameStore.setState({ leaderboard: mergedLeaderboard });
+    };
+
     socket.on('game_starting', handleGameStarting);
     socket.on('countdown_tick', handleCountdownTick);
     socket.on('question_start', handleQuestionStart);
@@ -487,9 +763,13 @@ export default function GamePage() {
     socket.on('host_disconnected', handleHostDisconnected);
     socket.on('host_reconnected', handleHostReconnected);
     socket.on('session_closed', handleSessionClosed);
+    socket.on('session_started', handleSessionTransition);
+    socket.on('session_switched', handleSessionTransition);
     socket.on('player_left', handlePlayerLeft);
-    socket.on('player_reconnecting', handlePlayerReconnecting);
-    socket.on('player_reconnected', handlePlayerReconnected);
+    socket.on('player_joined', handlePlayerJoined);
+    socket.on('player_answered', handlePlayerAnswered);
+    socket.on('player_status', handlePlayerStatus);
+    socket.on('leaderboard_update', handleLeaderboardUpdate);
 
     return () => {
       socket.off('game_starting', handleGameStarting);
@@ -503,9 +783,13 @@ export default function GamePage() {
       socket.off('host_disconnected', handleHostDisconnected);
       socket.off('host_reconnected', handleHostReconnected);
       socket.off('session_closed', handleSessionClosed);
+      socket.off('session_started', handleSessionTransition);
+      socket.off('session_switched', handleSessionTransition);
       socket.off('player_left', handlePlayerLeft);
-      socket.off('player_reconnecting', handlePlayerReconnecting);
-      socket.off('player_reconnected', handlePlayerReconnected);
+      socket.off('player_joined', handlePlayerJoined);
+      socket.off('player_answered', handlePlayerAnswered);
+      socket.off('player_status', handlePlayerStatus);
+      socket.off('leaderboard_update', handleLeaderboardUpdate);
     };
   }, [sessionId, router]);
 
@@ -521,6 +805,16 @@ export default function GamePage() {
 
   useEffect(() => {
     if (!sessionId || sessionId === 'undefined') return;
+
+    // CRITICAL: Reset game store for new session
+    // This ensures complete cleanup when navigating to a new game session
+    console.log('[GamePage] New session detected, resetting store for:', sessionId);
+    useGameStore.getState().reset();
+    console.log('[GamePage] After reset, store state:', {
+      leaderboard: useGameStore.getState().leaderboard,
+      myScore: useGameStore.getState().myScore,
+      myRank: useGameStore.getState().myRank
+    });
 
     if (!authReady) {
       console.log('[GamePage] Waiting for auth to hydrate...');
@@ -546,6 +840,152 @@ export default function GamePage() {
     const isPlayer = !isHostFromStorage && !!storedPlayerId && !!storedNickname;
     console.log('[GamePage] Role: isHostFromStorage=', isHostFromStorage, 'isPlayer=', isPlayer);
 
+    // Check for redirect state FIRST (from previous redirect via router.replace)
+    const checkRedirectState = (): boolean => {
+      const redirectStateStr = sessionStorage.getItem('redirectState');
+      if (!redirectStateStr) return false;
+      
+      try {
+        const redirectState = JSON.parse(redirectStateStr);
+        if (redirectState.sessionId === sessionId && redirectState.reason === 'finished_redirect' &&
+            (Date.now() - redirectState._timestamp) < 30000) {
+          console.log('[GamePage] Using redirect state:', redirectState);
+          sessionStorage.removeItem('redirectState');
+          
+          // Hydrate from redirect state
+          useGameStore.setState({
+            sessionId,
+            roomId: redirectState.state?.roomId || storedRoomId,
+            gameStatus: GameState.FINISHED,
+            leaderboard: redirectState.state?.leaderboard || [],
+            currentQuestion: null,
+            _isRecovering: false,
+          });
+          
+          // Connect socket and emit join_game
+          connectGameSocket(accessToken ?? undefined);
+          const socket = getGameSocket();
+          
+          console.log('[GamePage] redirect recovery: socket.id=', socket.id, 'sessionId=', sessionId, 'reason=finished_redirect');
+          
+          if (socket.connected) {
+            useGameStore.setState({ socket });
+            socket.emit('join_game', { sessionId, playerId: storedPlayerId, nickname: storedNickname }, (joinRes: any) => {
+              console.log('[GamePage] join_game response:', joinRes);
+            });
+          } else {
+            socket.on('connect', () => {
+              useGameStore.setState({ socket });
+              socket.emit('join_game', { sessionId, playerId: storedPlayerId, nickname: storedNickname }, (joinRes: any) => {
+                console.log('[GamePage] join_game response:', joinRes);
+              });
+            });
+          }
+          
+          setIsJoining(false);
+          return true;
+        } else {
+          sessionStorage.removeItem('redirectState');
+          return false;
+        }
+      } catch (e) {
+        sessionStorage.removeItem('redirectState');
+        return false;
+      }
+    };
+
+    // If redirect state exists, skip normal HTTP fetch
+    if (checkRedirectState()) {
+      return;
+    }
+
+    // --- playAgainState recovery (skip HTTP fetch) ---
+    // After session_transition navigates via router.replace, the page remounts.
+    // The remounted useEffect checks for valid playAgainState and hydrates
+    // directly from sessionStorage without an HTTP fetch.
+    const storedPlayAgain = sessionStorage.getItem('playAgainState');
+    if (storedPlayAgain) {
+      try {
+        const playAgain = JSON.parse(storedPlayAgain);
+        const age = Date.now() - (playAgain._timestamp || 0);
+
+        // Only consume if it's for this sessionId and not stale (15s window)
+        if (playAgain.sessionId === sessionId && age < 15000) {
+          console.log('[GamePage] Recovering from playAgainState:', playAgain);
+
+          useGameStore.setState({
+            sessionId: playAgain.sessionId,
+            roomId: playAgain.roomId || null,
+            gameStatus: GameState.STARTING,
+            isHost: playAgain.isHost,
+            myPlayerId: playAgain.myPlayerId,
+            myNickname: playAgain.myNickname,
+            currentQuestion: null,
+            questionIndex: 0,
+            totalQuestions: playAgain.totalQuestions || 0,
+            leaderboard: playAgain.leaderboard || [],
+            correctAnswerId: null,
+            hasAnswered: false,
+            selectedAnswerId: null,
+            countdown: playAgain.countdown ?? 5,
+            myScore: 0,      // Reset for new game
+            myRank: null,    // Reset for new game
+            _isRecovering: false,
+          });
+
+          // Connect socket and emit join_game (host → host_join_game, player → join_game)
+          connectGameSocket(accessToken ?? undefined);
+          const socket = getGameSocket();
+
+          if (socket.connected) {
+            useGameStore.setState({ socket });
+            if (playAgain.isHost) {
+              socket.emit('host_join_game', { sessionId, jwt: accessToken }, (res: any) => {
+                console.log('[GamePage] playAgainState: host_join_game response:', res);
+              });
+            } else {
+              socket.emit('join_game', {
+                sessionId,
+                playerId: playAgain.myPlayerId,
+                nickname: playAgain.myNickname,
+              }, (res: any) => {
+                console.log('[GamePage] playAgainState: join_game response:', res);
+              });
+            }
+          } else {
+            socket.on('connect', () => {
+              useGameStore.setState({ socket });
+              if (playAgain.isHost) {
+                socket.emit('host_join_game', { sessionId, jwt: accessToken }, (res: any) => {
+                  console.log('[GamePage] playAgainState: host_join_game response:', res);
+                });
+              } else {
+                socket.emit('join_game', {
+                  sessionId,
+                  playerId: playAgain.myPlayerId,
+                  nickname: playAgain.myNickname,
+                }, (res: any) => {
+                  console.log('[GamePage] playAgainState: join_game response:', res);
+                });
+              }
+            });
+          }
+
+          // Clean up after consuming
+          sessionStorage.removeItem('playAgainState');
+
+          setIsJoining(false);
+          return;
+        } else {
+          // Stale or wrong session — clear it
+          sessionStorage.removeItem('playAgainState');
+        }
+      } catch (e) {
+        sessionStorage.removeItem('playAgainState');
+      }
+    }
+    // --- end playAgainState recovery ---
+
     let httpData: any = null;
 
     const recoverState = async () => {
@@ -556,12 +996,36 @@ export default function GamePage() {
         httpData = response.data;
         console.log('[GamePage] HTTP state recovered:', httpData);
 
+        // CRITICAL: If session is FINISHED, redirect immediately BEFORE setting any state
+        // This prevents flash of old FINISHED state on page reload after host_play_again
+        if (httpData.status === 'FINISHED' && httpData.currentSessionId) {
+          console.log(`[GamePage] Session finished, redirecting to new session ${httpData.currentSessionId}`);
+          
+          // Store redirect state with full game state for SPA navigation
+          sessionStorage.setItem('redirectState', JSON.stringify({
+            sessionId: httpData.currentSessionId,
+            reason: 'finished_redirect',
+            state: {
+              status: httpData.status,
+              roomId: httpData.roomId,
+              leaderboard: httpData.leaderboard || [],
+            },
+            _timestamp: Date.now(),
+          }));
+          sessionStorage.setItem('playerSessionId', httpData.currentSessionId);
+          
+          // Use router.replace for SPA navigation
+          router.replace(`/game/${httpData.currentSessionId}`);
+          return; // Don't set any state - we're redirecting
+        }
+
         useGameStore.setState({
           currentQuestion: null,
           leaderboard: [],
           countdown: 0,
           correctAnswerId: null,
         });
+        console.log('[GamePage] recoverState: set leaderboard=[]');
 
         let playerHasAnswered = false;
 
@@ -672,17 +1136,30 @@ export default function GamePage() {
           console.log('[GamePage] host_join_game response:', response);
           
           if (response.success && response.state) {
-            console.log('[GamePage] host_join_game success, isActualHost:', response.isActualHost);
+            console.log('[GamePage] host_join_game success', {
+              isActualHost: response.isActualHost,
+              isReconnect: response.isReconnect,
+              rejoinReason: response.rejoinReason,
+            });
             
             const actualIsHost = response.isActualHost;
             const correctAnswerId = response.state.status === 'QUESTION_RESULT' 
               ? (response.state.correctAnswerId || httpData?.correctAnswerId || null)
               : null;
             
+            // CRITICAL: If game is WAITING (new game after play_again), reset leaderboard
+            // Backend may return leaderboard from old session
+            const isNewGame = response.state.status === GameState.WAITING;
+            
             // Defensive: ensure leaderboard is an array
-            const safeLeaderboard = Array.isArray(response.state.leaderboard) 
-              ? response.state.leaderboard 
-              : (Array.isArray(httpData?.leaderboard) ? httpData.leaderboard : []);
+            // Only use response leaderboard if game is NOT in WAITING state
+            const safeLeaderboard = isNewGame 
+              ? []  // Reset leaderboard for new game
+              : (Array.isArray(response.state.leaderboard) 
+                  ? response.state.leaderboard 
+                  : (Array.isArray(httpData?.leaderboard) ? httpData.leaderboard : []));
+            
+            console.log('[GamePage] host_join_game: isNewGame=', isNewGame, 'leaderboard length=', safeLeaderboard.length);
             
             useGameStore.setState({
               sessionId,
@@ -699,6 +1176,8 @@ export default function GamePage() {
               leaderboard: safeLeaderboard,
               timeRemaining: response.state.remainingTime ?? response.state.currentQuestion?.timeLimit ?? 0,
               correctAnswerId,
+              myScore: 0,       // Reset for new game session
+              myRank: null,     // Reset for new game session
               _isRecovering: false,
             });
             if (!actualIsHost) {
@@ -729,6 +1208,8 @@ export default function GamePage() {
                   totalQuestions: playerResponse.state.totalQuestions ?? 0,
                   leaderboard: safeLeaderboard,
                   timeRemaining: playerResponse.state.remainingTime ?? playerResponse.state.currentQuestion?.timeLimit ?? 0,
+                  myScore: 0,       // Reset for new game session
+                  myRank: null,     // Reset for new game session
                   _isRecovering: false,
                 });
               } else {
@@ -748,21 +1229,36 @@ export default function GamePage() {
           if (response.needsRedirect && response.redirectToSession) {
             console.log(`[GamePage] Session ${sessionId} is finished, redirecting to new session ${response.redirectToSession}`);
             
-            // Update sessionStorage with new session ID
+            // Store redirect state with full game state for SPA navigation
+            sessionStorage.setItem('redirectState', JSON.stringify({
+              sessionId: response.redirectToSession,
+              reason: 'finished_redirect',
+              state: response.state,
+              _timestamp: Date.now(),
+            }));
             sessionStorage.setItem('playerSessionId', response.redirectToSession);
             
-            // Redirect to new session
-            window.location.href = `/game/${response.redirectToSession}`;
+            // Use router.replace for SPA navigation
+            router.replace(`/game/${response.redirectToSession}`);
             return;
           }
           
           if (response.success && response.state) {
             console.log('[GamePage] join_game success');
             
+            // CRITICAL: If game is WAITING (new game after play_again), reset leaderboard
+            // Backend may return leaderboard from old session
+            const isNewGame = response.state.status === GameState.WAITING;
+            
             // Defensive: ensure leaderboard is an array
-            const safeLeaderboard = Array.isArray(response.state.leaderboard)
-              ? response.state.leaderboard
-              : (Array.isArray(httpData?.leaderboard) ? httpData.leaderboard : []);
+            // Only use response leaderboard if game is NOT in WAITING state
+            const safeLeaderboard = isNewGame
+              ? []
+              : (Array.isArray(response.state.leaderboard)
+                  ? response.state.leaderboard
+                  : (Array.isArray(httpData?.leaderboard) ? httpData.leaderboard : []));
+            
+            console.log('[GamePage] join_game: isNewGame=', isNewGame, 'leaderboard length=', safeLeaderboard.length);
             
             const myEntry = safeLeaderboard.find((e: any) => e?.playerId === storedPlayerId);
             const showLeaderboard = response.state.status !== GameState.QUESTION_ACTIVE;
@@ -774,6 +1270,8 @@ export default function GamePage() {
             const finalLeaderboard = showLeaderboard ? safeLeaderboard : useGameStore.getState().leaderboard;
             const safeFinalLeaderboard = Array.isArray(finalLeaderboard) ? finalLeaderboard : [];
             
+            // CRITICAL: Always reset scores for new game session
+            // Do NOT use old myScore/myRank from store
             const myEntryFromFinal = safeFinalLeaderboard.find((e: any) => e?.playerId === storedPlayerId);
             
             useGameStore.setState({
@@ -789,8 +1287,10 @@ export default function GamePage() {
               leaderboard: safeFinalLeaderboard,
               timeRemaining: response.state.remainingTime ?? response.state.currentQuestion?.timeLimit ?? 0,
               correctAnswerId,
-              myScore: myEntryFromFinal?.score ?? useGameStore.getState().myScore ?? 0,
-              myRank: myEntryFromFinal?.rank ?? useGameStore.getState().myRank ?? null,
+              // Reset scores - get from leaderboard or default to 0
+              // Do NOT fallback to old store values
+              myScore: myEntryFromFinal?.score ?? 0,
+              myRank: myEntryFromFinal?.rank ?? null,
               _isRecovering: false,
             });
           } else {
@@ -805,12 +1305,12 @@ export default function GamePage() {
     };
 
     const initGame = async () => {
-      const socket = getSocket();
+      const socket = getGameSocket();
       
       if (!socket.connected) {
         console.log('[GamePage] Connecting socket with auth token...');
         if (accessToken) {
-          connectSocketWithAuth(accessToken);
+          connectGameSocket(accessToken ?? undefined);
         } else {
           socket.connect();
         }
@@ -837,27 +1337,46 @@ export default function GamePage() {
 
   }, [sessionId, authReady]);
 
+  // Server-driven timer: recalculate from questionStartTime + serverTime instead of local countdown
+  // This ensures host and player timers stay in sync
   useEffect(() => {
-    if (gameStatus === GameState.QUESTION_ACTIVE && currentQuestion) {
-      const startTime = timeRemaining > 0 ? timeRemaining : currentQuestion.timeLimit;
-      setLocalTimeRemaining(startTime);
+    if (gameStatus === GameState.QUESTION_ACTIVE && currentQuestion && questionStartTime) {
+      const calculateRemaining = () => {
+        const serverTime = useGameStore.getState().serverTime || questionStartTime;
+        const timeLimit = currentQuestion.timeLimit || 20;
+        const elapsedMs = Date.now() - questionStartTime;
+        const elapsedSec = Math.floor(elapsedMs / 1000);
+        return Math.max(0, timeLimit - elapsedSec);
+      };
+
+      setLocalTimeRemaining(calculateRemaining());
       const interval = setInterval(() => {
-        setLocalTimeRemaining((prev) => Math.max(0, prev - 1));
-      }, 1000);
+        const remaining = calculateRemaining();
+        setLocalTimeRemaining(remaining);
+        if (remaining <= 0) {
+          clearInterval(interval);
+        }
+      }, 100);
       return () => clearInterval(interval);
+    } else if (gameStatus !== GameState.QUESTION_ACTIVE) {
+      setLocalTimeRemaining(0);
     }
-  }, [gameStatus, currentQuestion, timeRemaining]);
+  }, [gameStatus, currentQuestion, questionStartTime]);
 
   const handleNextQuestion = () => {
     const gameStore = useGameStore.getState();
-    if (!gameStore.socket || !sessionId) return;
-    
+    // FIX: Dùng sessionId từ store (đáng tin cậy) thay vì từ params (có thể stale sau router.replace)
+    const currentSessionId = gameStore.sessionId || sessionId;
+    if (!gameStore.socket || !currentSessionId) return;
+
     if (!gameStore.isHost) {
       console.warn('[GamePage] handleNextQuestion called by non-host, ignoring');
       return;
     }
-    
-    gameStore.socket.emit('host_next_question', { sessionId }, (response: any) => {
+
+    console.log('[GamePage] handleNextQuestion: params.sessionId=', sessionId, ', store.sessionId=', gameStore.sessionId, ', emit sessionId=', currentSessionId);
+
+    gameStore.socket.emit('host_next_question', { sessionId: currentSessionId }, (response: any) => {
       if (!response.success) {
         console.error('[GamePage] next_question error:', response.error);
         if (response.error === 'Game already finished') {
@@ -870,18 +1389,20 @@ export default function GamePage() {
     });
   };
 
-  const handlePlayAgain = async () => {
-    const { sessionId: sid, roomId: rid, playAgain } = useGameStore.getState();
-    if (!sid || !rid) return;
-    try {
-      const newSessionId = await playAgain(sid, rid);
-      if (newSessionId) {
-        sessionStorage.setItem('hostSessionId', newSessionId);
-        router.push(`/game/${newSessionId}`);
+  const handlePlayAgain = () => {
+    const gameStore = useGameStore.getState();
+    const { sessionId: sid, roomId: rid, socket } = gameStore;
+    if (!sid || !rid || !socket) return;
+    
+    // Emit play_again — backend will emit session_switched to this socket too.
+    // The session_switched handler stores state + navigates via router.replace.
+    socket.emit('host_play_again', { sessionId: sid, roomId: rid }, (response: any) => {
+      if (!response.success) {
+        toast.error(response.error || 'Không thể chơi lại');
       }
-    } catch (error) {
-      console.error('[GamePage] play_again error:', error);
-    }
+      // No store update here — session_transition handler handles everything.
+      // If response has new sessionId it's just for logging/debug.
+    });
   };
 
   const handleLeaveRoom = () => {
@@ -1049,7 +1570,81 @@ export default function GamePage() {
 
     return (
       <div className="min-h-screen bg-neon-yellow p-4">
-        <div className="max-w-4xl mx-auto">
+        {/* Player count for non-host players */}
+        {!isHost && (
+          <div className="max-w-4xl mx-auto mb-4">
+            <Card className="bg-white border-4 border-black shadow-brutal">
+              <CardContent className="py-3 px-4 flex items-center gap-2">
+                <Users className="w-5 h-5 text-black/50" />
+                <span className="font-bold text-black/70">
+                  {activePlayerCount} người đang chơi
+                </span>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* Host Player List Panel with Pagination */}
+        {isHost && (
+          <div className="max-w-6xl mx-auto mb-4">
+            <Card className="bg-white border-4 border-black shadow-brutal">
+              <CardHeader className="bg-neon-green border-b-4 border-black pb-3">
+                <div className="flex justify-between items-center gap-4">
+                  <CardTitle className="text-xl font-black text-black">Người chơi ({hostPlayerTotalItems})</CardTitle>
+                  <span className="text-sm font-bold text-black/70">
+                    {leaderboard.filter(e => e.connection !== 'LEFT').length} active
+                  </span>
+                </div>
+              </CardHeader>
+              <CardContent className="p-3">
+                {/* Pagination controls */}
+                {hostPlayerShouldShowPagination && (
+                  <div className="mb-3">
+                    <PaginationControls
+                      page={hostPlayerPage}
+                      totalPages={hostPlayerTotalPages}
+                      totalItems={hostPlayerTotalItems}
+                      startIndex={hostPlayerStartIndex}
+                      endIndex={hostPlayerEndIndex}
+                      onPrev={hostPlayerPrevPage}
+                      onNext={hostPlayerNextPage}
+                    />
+                  </div>
+                )}
+                <div className="max-h-64 overflow-y-auto space-y-2">
+                  {paginatedHostPlayers.map((entry) => (
+                    <div key={entry.playerId} className="flex items-center justify-between p-2 bg-gray-100 rounded-lg border-2 border-black">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-sm text-black/50 w-6">#{entry.rank}</span>
+                        <span className="font-bold text-black">{entry.nickname}</span>
+                        <span className={`
+                          text-xs font-bold px-2 py-0.5 rounded border
+                          ${entry.connection === 'CONNECTED' ? 'bg-green-400 text-black border-black' : ''}
+                          ${entry.connection === 'LEFT' ? 'bg-gray-400 text-black border-black line-through' : ''}
+                          ${entry.connection === 'DISCONNECTED' ? 'bg-orange-400 text-black border-black' : ''}
+                          ${!entry.connection ? 'bg-gray-300 text-black border-black' : ''}
+                        `}>
+                          {entry.connection === 'CONNECTED' ? 'Online' : entry.connection === 'LEFT' ? 'Đã rời' : entry.connection === 'DISCONNECTED' ? 'Mất kết nối' : 'Offline'}
+                        </span>
+                        <span className={`
+                          text-xs font-bold px-2 py-0.5 rounded border
+                          ${entry.hasAnswered ? 'bg-neon-green text-black border-black' : 'bg-gray-300 text-black border-black'}
+                        `}>
+                          {entry.hasAnswered ? 'Đã trả lời' : 'Chưa trả lời'}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                  {leaderboard.length === 0 && (
+                    <p className="text-center text-black/50 font-bold">Chưa có người chơi</p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        <div className={isHost ? 'max-w-3xl mx-auto' : 'max-w-4xl mx-auto'}>
           {/* Header */}
           <div className="flex justify-between items-center mb-6 bg-white rounded-2xl p-4 border-4 border-black shadow-brutal">
             <div className="bg-black border-4 border-black shadow-brutal-sm px-4 py-2">
@@ -1239,12 +1834,26 @@ export default function GamePage() {
               <CardHeader className="bg-neon-yellow border-b-4 border-black pb-4">
                 <CardTitle className="text-xl font-black uppercase flex items-center gap-2">
                   <Trophy className="w-6 h-6 text-black" />
-                  Bảng xếp hạng
+                  Bảng xếp hạng ({leaderboardTotalItems})
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-3">
-                  {leaderboard.slice(0, 5).map((entry, idx) => (
+                {/* Pagination controls */}
+                {leaderboardShouldShowPagination && (
+                  <div className="mb-4">
+                    <PaginationControls
+                      page={leaderboardPage}
+                      totalPages={leaderboardTotalPages}
+                      totalItems={leaderboardTotalItems}
+                      startIndex={leaderboardStartIndex}
+                      endIndex={leaderboardEndIndex}
+                      onPrev={leaderboardPrevPage}
+                      onNext={leaderboardNextPage}
+                    />
+                  </div>
+                )}
+                <div className="space-y-3 max-h-80 overflow-y-auto">
+                  {paginatedLeaderboard.map((entry, idx) => (
                     <div key={entry.playerId} className={`
                       flex justify-between items-center p-4 rounded-xl border-4 border-black
                       ${entry.rank === 1 ? 'bg-neon-yellow shadow-brutal' : entry.rank === 2 ? 'bg-gray-300 shadow-brutal-sm' : entry.rank === 3 ? 'bg-orange-400 shadow-brutal-sm' : 'bg-white shadow-brutal-sm'}
@@ -1255,9 +1864,20 @@ export default function GamePage() {
                         }`}>
                           {entry.rank === 1 ? '👑' : entry.rank === 2 ? '🥈' : entry.rank === 3 ? '🥉' : entry.rank}
                         </span>
+                        <div className="flex items-center gap-2">
                         <span className="font-bold text-lg text-black">{entry.nickname}</span>
+                        <span className={`
+                          text-xs font-bold px-2 py-0.5 rounded border-2 border-black
+                          ${entry.connection === 'CONNECTED' ? 'bg-green-400 text-black' : ''}
+                          ${entry.connection === 'LEFT' ? 'bg-gray-400 text-black line-through' : ''}
+                          ${entry.connection === 'DISCONNECTED' ? 'bg-orange-400 text-black' : ''}
+                          ${!entry.connection ? 'bg-gray-300 text-black' : ''}
+                        `}>
+                          {entry.connection === 'CONNECTED' ? 'Online' : entry.connection === 'LEFT' ? 'Đã rời' : entry.connection === 'DISCONNECTED' ? 'Mất kết nối' : 'Offline'}
+                        </span>
                       </div>
-                      <span className="font-black text-xl text-black">{entry.score} pts</span>
+                      </div>
+                      {/* <span className="font-black text-xl text-black">{entry.score} pts</span> */}
                     </div>
                   ))}
                   {leaderboard.length === 0 && (
@@ -1322,23 +1942,46 @@ export default function GamePage() {
               <CardHeader className="bg-neon-green border-b-4 border-black pb-4">
                 <CardTitle className="text-xl font-black uppercase flex items-center gap-2">
                   <Crown className="w-6 h-6 text-black" />
-                  Bảng xếp hạng
+                  Bảng xếp hạng ({leaderboardTotalItems})
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-3">
-                  {leaderboard.map((entry, idx) => (
+                {/* Pagination controls */}
+                {leaderboardShouldShowPagination && (
+                  <div className="mb-4">
+                    <PaginationControls
+                      page={leaderboardPage}
+                      totalPages={leaderboardTotalPages}
+                      totalItems={leaderboardTotalItems}
+                      startIndex={leaderboardStartIndex}
+                      endIndex={leaderboardEndIndex}
+                      onPrev={leaderboardPrevPage}
+                      onNext={leaderboardNextPage}
+                    />
+                  </div>
+                )}
+                <div className="space-y-3 max-h-96 overflow-y-auto">
+                  {paginatedLeaderboard.map((entry, idx) => (
                     <div key={entry.playerId} className={`
                       flex justify-between items-center p-4 rounded-xl border-4 border-black
-                      ${idx === 0 ? 'bg-neon-yellow shadow-brutal' : idx === 1 ? 'bg-gray-300 shadow-brutal-sm' : idx === 2 ? 'bg-orange-400 shadow-brutal-sm' : 'bg-white shadow-brutal-sm'}
+                      ${entry.rank === 1 ? 'bg-neon-yellow shadow-brutal' : entry.rank === 2 ? 'bg-gray-300 shadow-brutal-sm' : entry.rank === 3 ? 'bg-orange-400 shadow-brutal-sm' : 'bg-white shadow-brutal-sm'}
                     `}>
                       <div className="flex items-center gap-3">
                         <span className={`w-12 h-12 rounded-xl border-4 border-black flex items-center justify-center text-2xl ${
-                          idx === 0 ? 'bg-black text-neon-yellow' : idx === 1 ? 'bg-black text-gray-300' : idx === 2 ? 'bg-black text-orange-400' : 'bg-black/20 text-black'
+                          entry.rank === 1 ? 'bg-black text-neon-yellow' : entry.rank === 2 ? 'bg-black text-gray-300' : entry.rank === 3 ? 'bg-black text-orange-400' : 'bg-black/20 text-black'
                         }`}>
-                          {idx === 0 ? '👑' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : entry.rank}
+                          {entry.rank === 1 ? '👑' : entry.rank === 2 ? '🥈' : entry.rank === 3 ? '🥉' : entry.rank}
                         </span>
                         <span className="font-black text-xl text-black">{entry.nickname}</span>
+                        <span className={`
+                          text-xs font-bold px-2 py-0.5 rounded border-2 border-black
+                          ${entry.connection === 'CONNECTED' ? 'bg-green-400 text-black' : ''}
+                          ${entry.connection === 'LEFT' ? 'bg-gray-400 text-black line-through' : ''}
+                          ${entry.connection === 'DISCONNECTED' ? 'bg-orange-400 text-black' : ''}
+                          ${!entry.connection ? 'bg-gray-300 text-black' : ''}
+                        `}>
+                          {entry.connection === 'CONNECTED' ? 'Online' : entry.connection === 'LEFT' ? 'Đã rời' : entry.connection === 'DISCONNECTED' ? 'Mất kết nối' : 'Offline'}
+                        </span>
                       </div>
                       <span className="font-black text-2xl text-black">{entry.score} pts</span>
                     </div>

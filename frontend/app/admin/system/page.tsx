@@ -35,6 +35,7 @@ interface ActiveSession {
   currentQuestionIndex: number;
   totalQuestions: number;
   timeLimit: number;
+  questionStartedAt?: number;
 }
 
 interface AuditEntry {
@@ -330,11 +331,10 @@ export default function SystemDashboard() {
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
-              className={`px-4 py-2 text-sm border-b-2 -mb-px transition-colors ${
-                tab === t.key
-                  ? 'border-gray-800 text-gray-900 font-medium'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
+              className={`px-4 py-2 text-sm border-b-2 -mb-px transition-colors ${tab === t.key
+                ? 'border-gray-800 text-gray-900 font-medium'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
             >
               {t.label}
             </button>
@@ -369,11 +369,10 @@ export default function SystemDashboard() {
                   <label className="text-xs text-gray-500 block">Hard Freeze — dừng timer, khóa màn hình người chơi</label>
                   <button
                     onClick={handleToggleLockdown}
-                    className={`w-full h-8 text-xs font-semibold rounded border transition-colors ${
-                      isLockdown
-                        ? 'bg-yellow-50 border-yellow-400 text-yellow-800 hover:bg-yellow-100'
-                        : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
-                    }`}
+                    className={`w-full h-8 text-xs font-semibold rounded border transition-colors ${isLockdown
+                      ? 'bg-yellow-50 border-yellow-400 text-yellow-800 hover:bg-yellow-100'
+                      : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                      }`}
                   >
                     {isLockdown ? '🔒 Đang FREEZE — nhấn để tắt' : 'Bật Hard Freeze'}
                   </button>
@@ -383,11 +382,10 @@ export default function SystemDashboard() {
                   <label className="text-xs text-gray-500 block">Maintenance Mode — kick tất cả người chơi sau 5 giây</label>
                   <button
                     onClick={handleToggleMaintenance}
-                    className={`w-full h-8 text-xs font-semibold rounded border transition-colors ${
-                      isMaintenance
-                        ? 'bg-orange-50 border-orange-400 text-orange-800 hover:bg-orange-100'
-                        : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
-                    }`}
+                    className={`w-full h-8 text-xs font-semibold rounded border transition-colors ${isMaintenance
+                      ? 'bg-orange-50 border-orange-400 text-orange-800 hover:bg-orange-100'
+                      : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                      }`}
                   >
                     {isMaintenance ? '🔧 Đang MAINTENANCE — nhấn để tắt' : 'Bật Maintenance'}
                   </button>
@@ -422,11 +420,10 @@ export default function SystemDashboard() {
                         <div className="space-y-0.5">
                           <div className="flex items-center gap-2">
                             <span className="font-mono text-xs text-gray-800">{s.sessionId.slice(0, 12)}…</span>
-                            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
-                              s.status === 'QUESTION_ACTIVE'
-                                ? 'bg-green-100 text-green-700'
-                                : 'bg-gray-100 text-gray-600'
-                            }`}>{s.status}</span>
+                            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${s.status === 'QUESTION_ACTIVE'
+                              ? 'bg-green-100 text-green-700'
+                              : 'bg-gray-100 text-gray-600'
+                              }`}>{s.status}</span>
                           </div>
                           <div className="text-xs text-gray-400">
                             Câu {s.currentQuestionIndex + 1}/{s.totalQuestions}
@@ -528,12 +525,11 @@ export default function SystemDashboard() {
                       <span className="text-gray-400 shrink-0">
                         {new Date(log.createdAt).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit', day: '2-digit', month: '2-digit' })}
                       </span>
-                      <span className={`shrink-0 font-medium ${
-                        log.action.includes('BAN') ? 'text-red-500'
-                          : log.action.includes('UNBAN') ? 'text-blue-500'
-                            : log.action.includes('LOCKDOWN') || log.action.includes('KILL') ? 'text-yellow-600'
-                              : 'text-gray-700'
-                      }`}>{log.action}</span>
+                      <span className={`shrink-0 font-medium ${log.action.includes('BAN') ? 'text-red-500'
+                        : log.action.includes('UNBAN') ? 'text-blue-500'
+                          : log.action.includes('LOCKDOWN') || log.action.includes('KILL') ? 'text-yellow-600'
+                            : 'text-gray-700'
+                        }`}>{log.action}</span>
                       {log.ipAddress && <span className="text-gray-500">{log.ipAddress}</span>}
                       {log.details && <span className="text-gray-400 truncate">{log.details}</span>}
                     </div>

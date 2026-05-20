@@ -3,6 +3,7 @@ import { Geist, Geist_Mono, Inter } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "sonner";
 import { AuthBootstrap } from "../components/auth-bootstrap";
+import SystemEventNotification from "@/components/admin/SystemEventNotification";
 
 const inter = Inter({
   variable: "--font-sans",
@@ -25,6 +26,7 @@ export default function RootLayout({
         <AuthBootstrap />
         {children}
         <Toaster richColors position="top-right" />
+        <SystemEventNotification />
       </body>
     </html>
   );

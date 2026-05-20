@@ -1,10 +1,15 @@
 import { create } from 'zustand';
 import { toast } from 'sonner';
 import { Socket } from 'socket.io-client';
-import { getSocket } from '@/lib/socket';
+import { getLobbySocket, connectLobbySocket, removeAllLobbyListeners } from '@/lib/lobby-socket';
 import { Room, Player, RoomJoinedPayload, PlayerJoinedPayload, PlayerLeftPayload } from '@/types/room.type';
 import { roomService } from '@/services/room.service';
+import { normalizePlayerJoinedEvent, normalizePlayerLeftEvent } from '@/lib/socket-normalizer';
 import axios from 'axios';
+
+// Guard to prevent duplicate listener registration
+// This is shared across all store instances (module-level singleton)
+let listenersRegistered = false;
 
 interface RoomState {
   socket: Socket | null;
@@ -18,9 +23,10 @@ interface RoomState {
 
   connectSocket: () => void;
   disconnectSocket: () => void;
+  removeAllListeners: () => void;
   createRoom: (quizId: string) => Promise<Room>;
   joinRoom: (pin: string, nickname: string) => Promise<void>;
-  joinRoomById: (roomId: string, nickname: string, jwt?: string) => Promise<void>;
+  joinRoomById: (roomId: string, nickname: string, jwt?: string, playerId?: string) => Promise<void>;
   leaveRoom: () => Promise<void>;
   getRoomState: (roomId: string) => Promise<void>;
   setCurrentRoom: (room: Room | null) => void;
@@ -51,13 +57,21 @@ export const useRoomStore = create<RoomState>((set, get) => ({
 
   connectSocket: () => {
     const { socket } = get();
-    if (socket) {
-      console.log('[RoomStore] connectSocket: socket already exists, skipping listener registration');
-      return; // already initialized with shared socket
+    
+    // Guard: prevent duplicate listener registration
+    if (socket || listenersRegistered) {
+      console.log('[RoomStore] connectSocket: skipping, socket exists:', !!socket, 'listenersRegistered:', listenersRegistered);
+      return;
     }
 
-    const newSocket = getSocket();
+    const newSocket = getLobbySocket();
     
+    // Connect the lobby socket
+    if (!newSocket.connected) {
+      console.log('[RoomStore] Connecting lobby socket...');
+      connectLobbySocket();
+    }
+
     // Track listener count for debugging
     let listenerCount = 0;
     const registerListener = (event: string, handler: (...args: any[]) => void) => {
@@ -67,12 +81,12 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     };
 
     newSocket.on('connect', () => {
-      console.log('[Socket] Connected:', newSocket.id);
+      console.log('[LobbySocket] Connected:', newSocket.id);
       set({ isConnected: true, error: null });
     });
 
     newSocket.on('disconnect', (reason) => {
-      console.log('[Socket] Disconnected:', reason);
+      console.log('[LobbySocket] Disconnected:', reason);
       set({ isConnected: false });
     });
 
@@ -128,81 +142,57 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     registerListener('player_joined', (data: any) => {
       console.log('[Socket] player_joined received:', JSON.stringify(data));
       
-      // CRITICAL: Handle TWO different payload shapes from different gateways:
-      // - RoomGateway: { player: { id, nickname }, playerCount, joinedBy }
-      // - GameGateway: { playerId, nickname, timestamp }
+      // Normalize payload using shared normalizer
+      const player = normalizePlayerJoinedEvent(data);
       
-      // Normalize payload to consistent format
-      let playerId: string | undefined;
-      let playerNickname: string | undefined;
-      
-      if (data.player) {
-        // RoomGateway format
-        playerId = data.player.id;
-        playerNickname = data.player.nickname;
-      } else if (data.playerId) {
-        // GameGateway format
-        playerId = data.playerId;
-        playerNickname = data.nickname;
-      }
-      
-      // DEBUG: Validate normalized payload
-      if (!playerId) {
-        console.error('[Socket] player_joined: playerId is undefined! Raw data:', JSON.stringify(data));
+      if (!player) {
+        console.error('[Socket] player_joined: Failed to normalize payload:', JSON.stringify(data));
         return;
       }
       
       set((state) => {
-        console.log('[Socket] player_joined: current players state:', JSON.stringify(state.players));
-        
         // Defensive: ensure players is an array
         const safePlayers = Array.isArray(state.players) ? state.players : [];
         
-        // Filter with safety check
-        const filtered = safePlayers.filter(p => p && p.id && p.id !== playerId);
-        console.log('[Socket] player_joined: after filter:', JSON.stringify(filtered));
+        // Filter out existing player with same ID
+        const filtered = safePlayers.filter(p => p && p.id && p.id !== player.playerId);
         
         return {
-          players: [...filtered, { id: playerId!, nickname: playerNickname || 'Unknown', isHost: false }]
+          players: [...filtered, { 
+            id: player.playerId, 
+            nickname: player.nickname, 
+            isHost: player.isHost ?? false 
+          }]
         };
       });
-      toast.success(`${playerNickname || 'Player'} đã tham gia!`);
+      toast.success(`${player.nickname} đã tham gia!`);
     });
 
     registerListener('player_left', (data: any) => {
       console.log('[Socket] player_left received:', JSON.stringify(data));
+      console.log('[Socket] player_left listener count:', newSocket.listeners('player_left').length);
       
-      // CRITICAL: Handle TWO different payload shapes from different gateways:
-      // - RoomGateway: { playerId, nickname, playerCount, isHost }
-      // - GameGateway: { playerId, nickname, timestamp }
+      // Normalize payload using shared normalizer
+      const player = normalizePlayerLeftEvent(data);
       
-      // Normalize payload - extract playerId
-      const playerId = data.playerId;
-      
-      // DEBUG: Validate payload
-      if (!playerId) {
-        console.error('[Socket] player_left: playerId is undefined! Raw data:', JSON.stringify(data));
+      if (!player) {
+        console.error('[Socket] player_left: Failed to normalize payload:', JSON.stringify(data));
         return;
       }
       
       set((state) => {
-        console.log('[Socket] player_left: current players state:', JSON.stringify(state.players));
-        
         // Defensive: ensure players is an array
         const safePlayers = Array.isArray(state.players) ? state.players : [];
         
-        // Filter with safety check
-        const filtered = safePlayers.filter(p => p && p.id && p.id !== playerId);
-        console.log('[Socket] player_left: after filter:', JSON.stringify(filtered));
+        // Filter out the player who left
+        const filtered = safePlayers.filter(p => p && p.id && p.id !== player.playerId);
         
         return {
           players: filtered
         };
       });
       
-      if (data.nickname) {
-        toast.info(`${data.nickname} đã rời phòng`);
-      }
+      toast.info(`${player.nickname} đã rời phòng`);
     });
 
     registerListener('player_reconnecting', (data: { playerId: string; nickname: string; gracePeriodMs: number }) => {
@@ -221,6 +211,12 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       console.log('[Socket] host_left received:', JSON.stringify(data));
     });
 
+    registerListener('player_status', (data: { playerId: string; nickname: string; connection: string; isHost: boolean; timestamp: number }) => {
+      console.log('[Socket] player_status received:', JSON.stringify(data));
+      // Update player connection status in UI if needed
+      // This event is for status tracking, not for adding/removing players from list
+    });
+
     registerListener('room_left', (data: { roomId: string; message: string; isHost?: boolean }) => {
       console.log('[Socket] room_left received:', JSON.stringify(data));
     });
@@ -232,12 +228,40 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     });
 
     console.log('[RoomStore] connectSocket: registered', listenerCount, 'listeners, socket.id:', newSocket.id);
+    
+    // Mark listeners as registered to prevent duplicate registration
+    listenersRegistered = true;
+    
     set({ socket: newSocket });
   },
 
   disconnectSocket: () => {
     // Socket is shared — never disconnect it here.
+    // Reset listener guard so next connectSocket() can re-register
+    listenersRegistered = false;
     set({ socket: null, isConnected: false });
+  },
+
+  removeAllListeners: () => {
+    const { socket } = get();
+    if (socket) {
+      // Remove all listeners registered by this store
+      const events = [
+        'room_joined', 'player_joined', 'player_left',
+        'player_reconnecting', 'player_reconnected', 'host_left',
+        'room_left', 'error',
+      ];
+      
+      events.forEach(event => {
+        socket.removeAllListeners(event);
+      });
+      
+      console.log('[RoomStore] Removed all socket listeners');
+    }
+    
+    // Reset guard so next connectSocket() can re-register
+    listenersRegistered = false;
+    set({ socket: null });
   },
 
   createRoom: async (quizId: string) => {
@@ -356,7 +380,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     });
   },
 
-  joinRoomById: async (roomId: string, nickname: string, jwt?: string) => {
+  joinRoomById: async (roomId: string, nickname: string, jwt?: string, playerId?: string) => {
     // Always call connectSocket — it no-ops if socket already exists.
     const { connectSocket } = get();
 
@@ -385,13 +409,21 @@ export const useRoomStore = create<RoomState>((set, get) => ({
         return;
       }
 
-      currentSocket.emit('join_by_id', { roomId, nickname, jwt }, (response: any) => {
+      currentSocket.emit('join_by_id', { roomId, nickname, jwt, playerId }, (response: any) => {
         if (response.success) {
           if (response.playerId) {
             sessionStorage.setItem('playerId', response.playerId);
             sessionStorage.setItem('playerNickname', nickname);
             sessionStorage.setItem('currentRoomId', roomId);
-            sessionStorage.setItem('isHost', 'false');
+            // Host flag set by server in room_joined event
+            if (response.isHost) {
+              sessionStorage.setItem('isHost', 'true');
+            }
+          } else if (playerId) {
+            // Existing player reconnecting
+            sessionStorage.setItem('playerId', playerId);
+            sessionStorage.setItem('playerNickname', nickname);
+            sessionStorage.setItem('currentRoomId', roomId);
           }
           resolve();
         } else {

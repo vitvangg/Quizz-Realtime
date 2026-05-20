@@ -72,19 +72,16 @@ export const useQuestionStore = create<QuestionState>((set) => ({
   uploadImage: async (id, file) => {
     try {
       set({ loading: true });
-      console.log("step 1");
-
       const updated = await questionService.uploadImage(id, file);
-      console.log("step 2", updated);
 
       set((state) => ({
         questions: state.questions.map((q) =>
           q.id === id ? updated : q
         ),
       }));
-      toast.success("Upload ảnh thành công!");
     } catch (error) {
       toast.error(getErrorMessage(error, "Upload ảnh thất bại"));
+      throw error;
     } finally {
       set({ loading: false });
     }

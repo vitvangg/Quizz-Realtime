@@ -2,7 +2,7 @@
 
 import { io, Socket } from 'socket.io-client';
 
-const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000';
+const SOCKET_URL = process.env.NEXT_PUBLIC_WS_URL || process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000';
 
 /**
  * Single shared socket instance.
@@ -10,13 +10,67 @@ const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000'
  * We don't auto-connect because we need auth token to be ready first.
  */
 
-// Module-level listeners map to prevent duplicate registration
-const registeredListeners = new Set<string>();
+// Module-level listeners map to track registered listeners
+const registeredListeners = new Map<string, SocketHandler[]>();
+const listenerCounts = new Map<string, number>();
+
 type SocketHandler = (...args: any[]) => void;
-function safeOn(socket: Socket, event: string, handler: SocketHandler) {
-  if (registeredListeners.has(event)) return;
-  registeredListeners.add(event);
+
+/**
+ * Safe listener registration with deduplication
+ * Each event can only have ONE handler registered at the module level
+ */
+function safeOn(socket: Socket, event: string, handler: SocketHandler): void {
+  // Check if already registered
+  if (registeredListeners.has(event)) {
+    console.warn(`[Socket] Event ${event} already registered, skipping duplicate`);
+    return;
+  }
+
+  registeredListeners.set(event, [handler]);
+  listenerCounts.set(event, 1);
   socket.on(event, handler);
+  console.log(`[Socket] Registered listener for event: ${event}`);
+}
+
+/**
+ * Remove a specific listener
+ */
+function safeOff(socket: Socket, event: string, handler?: SocketHandler): void {
+  if (handler) {
+    socket.off(event, handler);
+    const handlers = registeredListeners.get(event);
+    if (handlers) {
+      const idx = handlers.indexOf(handler);
+      if (idx > -1) handlers.splice(idx, 1);
+    }
+  } else {
+    // Remove all handlers for this event
+    const handlers = registeredListeners.get(event);
+    if (handlers) {
+      handlers.forEach(h => socket.off(event, h));
+      registeredListeners.delete(event);
+    }
+  }
+}
+
+/**
+ * Remove ALL listeners registered via safeOn
+ */
+export function removeAllSocketListeners(socket: Socket): void {
+  console.log('[Socket] Removing all registered socket listeners');
+  registeredListeners.forEach((handlers, event) => {
+    handlers.forEach(handler => socket.off(event, handler));
+  });
+  registeredListeners.clear();
+  listenerCounts.clear();
+}
+
+/**
+ * Get list of registered event names
+ */
+export function getRegisteredSocketEvents(): string[] {
+  return Array.from(registeredListeners.keys());
 }
 
 // Socket instance - auth token will be set when connecting
@@ -32,7 +86,7 @@ let _authToken: string | null = null;
 
 export function setSocketAuthToken(token: string | null) {
   _authToken = token;
-  
+
   // If connected, disconnect and reconnect with new token
   // This ensures socket always has the latest auth token
   if (sharedSocket.connected) {
@@ -46,7 +100,7 @@ export function setSocketAuthToken(token: string | null) {
 
 export function connectSocketWithAuth(token: string) {
   setSocketAuthToken(token);
-  
+
   if (!sharedSocket.connected) {
     (sharedSocket as any).auth = { token };
     sharedSocket.connect();
@@ -197,7 +251,23 @@ export function getSocket(): Socket {
   return sharedSocket;
 }
 
-/** Disconnect the shared socket — call only on intentional app logout. */
+/**
+ * Disconnect and cleanup the shared socket
+ * Call this on intentional app logout
+ */
 export function disconnectSocket(): void {
+  // Remove all registered listeners before disconnecting
+  removeAllSocketListeners(sharedSocket);
   sharedSocket.disconnect();
+}
+
+/**
+ * Reconnect socket with cleanup
+ */
+export function reconnectSocket(): void {
+  removeAllSocketListeners(sharedSocket);
+  if (sharedSocket.connected) {
+    sharedSocket.disconnect();
+  }
+  sharedSocket.connect();
 }

@@ -4,20 +4,29 @@ import {
   SubscribeMessage,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  OnGatewayInit,
   MessageBody,
   ConnectedSocket,
   WsException,
 } from '@nestjs/websockets';
+import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { UseGuards, UsePipes, ValidationPipe } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { RoomService } from './room.service';
 import { RedisService } from '../redis/redis.service';
+import { PlayerPresenceService } from '../game/player-presence.service';
+import { setupRedisAdapter } from '../game/redis-adapter.setup';
 import {
   JoinRoomPayload,
   LeaveRoomPayload,
   JoinByIdPayload,
 } from './dto/websocket-payload.dto';
+import {
+  PlayerJoinedEvent,
+  PlayerLeftEvent,
+  RoomJoinedEvent,
+} from '../common/socket/socket-events.interface';
 
 interface PlayerIdentity {
   userId?: string;  // For hosts
@@ -32,77 +41,91 @@ interface PlayerIdentity {
     origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
     credentials: true,
   },
-  namespace: '/game',
+  namespace: '/lobby',
 })
-export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit {
   @WebSocketServer()
   server: Server;
 
-  private socketMap = new Map<string, PlayerIdentity>();
-  private roomSockets = new Map<string, Set<string>>();
+  private readonly logger = new Logger(RoomGateway.name);
 
-  // Redis key prefix for tracking players in game sessions (must match GameGateway)
-  private readonly PLAYER_IN_GAME_KEY_PREFIX = 'player:in_game:';
+  // Minimal socket storage - just maps socketId -> identity
+  // This is NOT authoritative - only used for disconnect handling
+  private socketMap = new Map<string, PlayerIdentity>();
 
   constructor(
     private readonly roomService: RoomService,
     private readonly jwtService: JwtService,
     private readonly redisService: RedisService,
+    private readonly presenceService: PlayerPresenceService,
   ) {}
 
-  async handleConnection(client: Socket) {
-    console.log(`[RoomGateway] Client connected: ${client.id}`);
+  afterInit(server: Server) {
+    this.logger.log('[RoomGateway] Initialized (Stateless Socket Architecture with Redis Presence)');
+
+    // Setup Redis Adapter once (idempotent - safe to call from multiple gateways)
+    setupRedisAdapter(server, {
+      host: process.env.REDIS_HOST || 'localhost',
+      port: parseInt(process.env.REDIS_PORT || '6379'),
+      password: process.env.REDIS_PASSWORD,
+    }).catch((err) => {
+      this.logger.error('[RoomGateway] Failed to setup Redis Adapter:', err);
+    });
   }
 
-  async handleDisconnect(client: Socket) {
-    console.log(`[RoomGateway] Client disconnected: ${client.id}`);
+  // NOTE: onModuleDestroy intentionally removed
+  // Redis Adapter teardown is handled at app-level shutdown if needed
+  // This ensures no gateway prematurely closes connections used by others
 
-    const identity = this.socketMap.get(client.id);
-    if (!identity) {
-      console.log(`[RoomGateway] No identity for disconnected client ${client.id}`);
+  async handleConnection(client: Socket) {
+    const ip = client.handshake.address;
+
+    const isBanned = await this.redisService.isIpBanned(ip);
+    if (isBanned) {
+      this.logger.warn(`[RoomGateway] Rejected BANNED IP: ${ip} (socket: ${client.id})`);
+      client.disconnect(true);
       return;
     }
 
+    this.logger.log(`[RoomGateway] Client connected: ${client.id} (IP: ${ip})`);
+  }
+
+  async handleDisconnect(client: Socket) {
+    const identity = this.socketMap.get(client.id);
+    this.logger.log(
+      `[RoomGateway] Client disconnected: ${client.id} | identity: ${
+        identity
+          ? JSON.stringify({ playerId: identity.playerId, isHost: identity.isHost, roomId: identity.roomId })
+          : 'none'
+      }`,
+    );
+
+    if (!identity) return;
+
     const { roomId, isHost, playerId, nickname } = identity;
 
-    try {
-      // Always clean up socket from in-memory maps.
-      client.leave(roomId);
-      this.socketMap.delete(client.id);
+    // Remove from socket map
+    this.socketMap.delete(client.id);
 
-      const roomSockets = this.roomSockets.get(roomId);
-      if (roomSockets) {
-        roomSockets.delete(client.id);
-        if (roomSockets.size === 0) {
-          this.roomSockets.delete(roomId);
-        }
-      }
+    if (!roomId || !playerId) return;
 
-      // CRITICAL: Check if player is in a game session BEFORE emitting player_left
-      // GameGateway manages player lifecycle during games with grace period support.
-      // If player is in game, GameGateway will handle player_reconnecting/player_left.
-      if (!isHost && playerId) {
-        const isInGame = await this.redisService.get(`${this.PLAYER_IN_GAME_KEY_PREFIX}${playerId}`);
-        if (isInGame) {
-          console.log(`[RoomGateway] Player ${nickname} is in game session, GameGateway will handle disconnect`);
-          // DO NOT call handleLeaveRoom - let GameGateway manage during games
-          return;
-        }
-      }
+    // MARK DISCONNECTED in Redis - keep player in room for reconnect grace period
+    // This prevents host from seeing player_left on page reload
+    await this.presenceService.markDisconnectedInLobby(roomId, playerId);
 
-      // Hosts that disconnect during game navigation will also call this —
-      // but the frontend's handleHostLeft does NOT redirect during
-      // game (gameStatus === STARTING). game_redirect is the authoritative redirect.
-      if (!isHost) {
-        await this.handleLeaveRoom(client, { roomId });
-      } else {
-        // For hosts, emit host_left so players can detect host departure.
-        // Players handle this via handleHostLeft which checks gameStatus.
-        this.server.to(roomId).emit('host_left', { roomId });
-      }
-    } catch (error) {
-      console.error('[RoomGateway] Error on disconnect:', error);
-    }
+    // Emit connection status update
+    this.server.to(roomId).emit('player_status', {
+      playerId,
+      nickname,
+      connection: 'DISCONNECTED',
+      isHost,
+      timestamp: Date.now(),
+    });
+
+    // NOTE: DO NOT emit host_left on disconnect - host may reconnect
+    // host_left is only emitted on explicit leave_room or room close
+
+    this.logger.log(`[RoomGateway] Player ${nickname} marked disconnected (grace period started)`);
   }
 
   @SubscribeMessage('join_room')
@@ -123,14 +146,29 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
         isHost: room.hostId === player.id,
       };
 
+      // Check if this is a reconnect (player already in Redis)
+      const isReconnect = await this.presenceService.isPlayerInLobby(room.id, player.id);
+
+      // Update presence: use update if reconnecting, attach if first join
+      if (isReconnect) {
+        await this.presenceService.updateLobbySocketId(room.id, player.id, client.id);
+      } else {
+        await this.presenceService.attachPlayerToLobby({
+          roomId: room.id,
+          playerId: player.id,
+          nickname: player.nickname,
+          socketId: client.id,
+          isHost: identity.isHost,
+        });
+      }
+
       this.socketMap.set(client.id, identity);
-
-      const roomSockets = this.roomSockets.get(room.id) || new Set();
-      roomSockets.add(client.id);
-      this.roomSockets.set(room.id, roomSockets);
-
       client.join(room.id);
 
+      // Get current players from Redis
+      const presence = await this.presenceService.getLobbyPresence(room.id);
+
+      // Find host identity
       const hostIdentity = Array.from(this.socketMap.values()).find(
         (i) => i.roomId === room.id && i.isHost,
       );
@@ -157,20 +195,53 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
           title: room.quiz.title,
           questionCount: room.quiz.questions?.length || 0,
         },
+        isReconnect,
       });
 
+      // Broadcast events based on isReconnect flag
       if (!identity.isHost) {
-        client.to(room.id).emit('player_joined', {
-          player: {
-            id: player.id,
+        if (isReconnect) {
+          // Reconnect: only emit player_status CONNECTED
+          this.server.to(room.id).emit('player_status', {
+            playerId: player.id,
             nickname: player.nickname,
-          },
-          playerCount: room.players.length + 1,
-          joinedBy: hostIdentity?.nickname || 'Host',
+            connection: 'CONNECTED',
+            isHost: false,
+            timestamp: Date.now(),
+          });
+        } else {
+          // First join: emit player_joined for others
+          const joinedEvent: PlayerJoinedEvent = {
+            playerId: player.id,
+            nickname: player.nickname,
+            playerCount: room.players.length + 1,
+            joinedBy: hostIdentity?.nickname || 'Host',
+            timestamp: Date.now(),
+            isHost: false,
+          };
+          client.to(room.id).emit('player_joined', joinedEvent);
+
+          // Also emit player_status CONNECTED
+          this.server.to(room.id).emit('player_status', {
+            playerId: player.id,
+            nickname: player.nickname,
+            connection: 'CONNECTED',
+            isHost: false,
+            timestamp: Date.now(),
+          });
+        }
+      } else {
+        // Host reconnect: emit player_status CONNECTED
+        this.server.to(room.id).emit('player_status', {
+          playerId: player.id,
+          nickname: player.nickname,
+          connection: 'CONNECTED',
+          isHost: true,
+          timestamp: Date.now(),
         });
       }
 
-      return { success: true };
+      return { success: true, isReconnect };
     } catch (error) {
       const message =
         error.response?.message || error.message || 'Failed to join room';
@@ -184,7 +255,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() payload: JoinByIdPayload,
   ) {
     try {
-      const { roomId, nickname, jwt } = payload;
+      const { roomId, nickname, jwt, playerId: providedPlayerId } = payload;
 
       // Verify JWT if provided (for host reconnection)
       let userId: string | null = null;
@@ -203,78 +274,36 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
         throw new WsException('Game already started or finished');
       }
 
-      // If user is host (JWT matches room hostId), they are host
-      const isHost = userId && room.hostId === userId;
-      const playerId = isHost ? `host_${userId}` : null;
+      // ============================================================
+      // HOST PATH: JWT valid and userId matches room.hostId
+      // This must be checked FIRST and return immediately
+      // ============================================================
+      const isHostJwt = userId && room.hostId === userId;
+      
+      if (isHostJwt) {
+        this.logger.log(`[RoomGateway] HOST PATH: userId=${userId}, room.hostId=${room.hostId}`);
+        
+        const hostPlayerId = `host_${userId}`;
+        
+        // Check if reconnecting
+        const isReconnect = await this.presenceService.isPlayerInLobby(roomId, hostPlayerId);
 
-      // For guests: add as player
-      if (!isHost) {
-        const existingPlayer = room.players.find(
-          (p) => p.nickname.toLowerCase() === nickname.toLowerCase(),
-        );
-
-        if (existingPlayer) {
-          throw new WsException('Nickname already taken');
+        // Update presence
+        if (isReconnect) {
+          await this.presenceService.updateLobbySocketId(roomId, hostPlayerId, client.id);
+          this.logger.log(`[RoomGateway] Host reconnect: ${hostPlayerId}`);
+        } else {
+          await this.presenceService.attachPlayerToLobby({
+            roomId: room.id,
+            playerId: hostPlayerId,
+            nickname: nickname || 'Host',
+            socketId: client.id,
+            isHost: true,
+          });
         }
 
-        const player = await this.roomService.addPlayerToRoom(roomId, nickname);
-
         const identity: PlayerIdentity = {
-          playerId: player.id,
-          roomId: room.id,
-          nickname: player.nickname,
-          isHost: false,
-        };
-
-        this.socketMap.set(client.id, identity);
-
-        const roomSockets = this.roomSockets.get(room.id) || new Set();
-        roomSockets.add(client.id);
-        this.roomSockets.set(room.id, roomSockets);
-
-        client.join(room.id);
-
-        const updatedRoom = await this.roomService.findOne(roomId);
-
-        client.emit('room_joined', {
-          room: {
-            id: room.id,
-            pin: room.pin,
-            status: room.status,
-            hostId: room.hostId,
-          },
-          player: {
-            id: player.id,
-            nickname: player.nickname,
-            isHost: false,
-          },
-          players: updatedRoom.players.map((p) => ({
-            id: p.id,
-            nickname: p.nickname,
-            isHost: false,
-          })),
-          quiz: {
-            id: room.quiz.id,
-            title: room.quiz.title,
-            questionCount: room.quiz.questions?.length || 0,
-          },
-        });
-
-        // Broadcast to ALL sockets in room (including host if connected)
-        this.server.to(room.id).emit('player_joined', {
-          player: {
-            id: player.id,
-            nickname: player.nickname,
-          },
-          playerCount: updatedRoom.players.length,
-        });
-
-        // Return playerId so frontend can persist it (for game session recovery after redirect)
-        return { success: true, playerId: player.id };
-      } else {
-        // Host joining - no player record needed
-        const identity: PlayerIdentity = {
-          playerId: playerId!,
+          playerId: hostPlayerId,
           roomId: room.id,
           nickname: nickname || 'Host',
           isHost: true,
@@ -282,11 +311,6 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
         };
 
         this.socketMap.set(client.id, identity);
-
-        const roomSockets = this.roomSockets.get(room.id) || new Set();
-        roomSockets.add(client.id);
-        this.roomSockets.set(room.id, roomSockets);
-
         client.join(room.id);
 
         client.emit('room_joined', {
@@ -297,24 +321,230 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
             hostId: room.hostId,
           },
           player: {
-            id: playerId,
+            id: hostPlayerId,
             nickname: nickname || 'Host',
             isHost: true,
           },
           players: room.players.map((p) => ({
             id: p.id,
             nickname: p.nickname,
-            isHost: false,
+            isHost: p.id === room.hostId,
           })),
           quiz: {
             id: room.quiz.id,
             title: room.quiz.title,
             questionCount: room.quiz.questions?.length || 0,
           },
+          isReconnect,
         });
 
-        return { success: true };
+        // Only emit player_status CONNECTED - NEVER emit player_joined
+        this.server.to(room.id).emit('player_status', {
+          playerId: hostPlayerId,
+          nickname: nickname || 'Host',
+          connection: 'CONNECTED',
+          isHost: true,
+          timestamp: Date.now(),
+        });
+
+        this.logger.log(`[RoomGateway] Host joined room: ${room.id}, isReconnect: ${isReconnect}`);
+        return { success: true, isReconnect };
       }
+
+      // ============================================================
+      // GUEST PATH: No valid JWT for host
+      // ============================================================
+      this.logger.log(`[RoomGateway] GUEST PATH: userId=${userId}, isHostJwt=${isHostJwt}`);
+
+      // Check if reconnecting guest with provided playerId
+      if (providedPlayerId) {
+        const existingPlayer = room.players.find((p) => p.id === providedPlayerId);
+
+        if (existingPlayer) {
+          const isReconnect = await this.presenceService.isPlayerInLobby(roomId, providedPlayerId);
+
+          await this.presenceService.updateLobbySocketId(roomId, providedPlayerId, client.id);
+          this.logger.log(`[RoomGateway] Guest reconnect: ${providedPlayerId}, isReconnect: ${isReconnect}`);
+
+          const identity: PlayerIdentity = {
+            playerId: existingPlayer.id,
+            roomId: room.id,
+            nickname: existingPlayer.nickname,
+            isHost: false,
+          };
+
+          this.socketMap.set(client.id, identity);
+          client.join(room.id);
+
+          client.emit('room_joined', {
+            room: {
+              id: room.id,
+              pin: room.pin,
+              status: room.status,
+              hostId: room.hostId,
+            },
+            player: {
+              id: existingPlayer.id,
+              nickname: existingPlayer.nickname,
+              isHost: false,
+            },
+            players: room.players.map((p) => ({
+              id: p.id,
+              nickname: p.nickname,
+              isHost: p.id === room.hostId,
+            })),
+            quiz: {
+              id: room.quiz.id,
+              title: room.quiz.title,
+              questionCount: room.quiz.questions?.length || 0,
+            },
+            isReconnect,
+          });
+
+          // Emit player_status CONNECTED - NEVER emit player_joined on reconnect
+          this.server.to(roomId).emit('player_status', {
+            playerId: existingPlayer.id,
+            nickname: existingPlayer.nickname,
+            connection: 'CONNECTED',
+            isHost: false,
+            timestamp: Date.now(),
+          });
+
+          return { success: true, isReconnect };
+        }
+      }
+
+      // Guest: find by nickname or create new
+      const existingPlayer = room.players.find(
+        (p) => p.nickname.toLowerCase() === nickname.toLowerCase(),
+      );
+
+      if (existingPlayer) {
+        const isReconnect = await this.presenceService.isPlayerInLobby(roomId, existingPlayer.id);
+
+        if (isReconnect) {
+          await this.presenceService.updateLobbySocketId(roomId, existingPlayer.id, client.id);
+
+          const identity: PlayerIdentity = {
+            playerId: existingPlayer.id,
+            roomId: room.id,
+            nickname: existingPlayer.nickname,
+            isHost: false,
+          };
+
+          this.socketMap.set(client.id, identity);
+          client.join(room.id);
+
+          client.emit('room_joined', {
+            room: {
+              id: room.id,
+              pin: room.pin,
+              status: room.status,
+              hostId: room.hostId,
+            },
+            player: {
+              id: existingPlayer.id,
+              nickname: existingPlayer.nickname,
+              isHost: false,
+            },
+            players: room.players.map((p) => ({
+              id: p.id,
+              nickname: p.nickname,
+              isHost: p.id === room.hostId,
+            })),
+            quiz: {
+              id: room.quiz.id,
+              title: room.quiz.title,
+              questionCount: room.quiz.questions?.length || 0,
+            },
+            isReconnect: true,
+          });
+
+          // Emit player_status CONNECTED - NEVER emit player_joined on reconnect
+          this.server.to(roomId).emit('player_status', {
+            playerId: existingPlayer.id,
+            nickname: existingPlayer.nickname,
+            connection: 'CONNECTED',
+            isHost: false,
+            timestamp: Date.now(),
+          });
+
+          return { success: true, isReconnect: true };
+        }
+
+        throw new WsException('Nickname already taken');
+      }
+
+      // Create new player
+      const player = await this.roomService.addPlayerToRoom(roomId, nickname);
+
+      await this.presenceService.attachPlayerToLobby({
+        roomId: room.id,
+        playerId: player.id,
+        nickname: player.nickname,
+        socketId: client.id,
+        isHost: false,
+      });
+
+      const identity: PlayerIdentity = {
+        playerId: player.id,
+        roomId: room.id,
+        nickname: player.nickname,
+        isHost: false,
+      };
+
+      this.socketMap.set(client.id, identity);
+      client.join(room.id);
+
+      const updatedRoom = await this.roomService.findOne(roomId);
+
+      client.emit('room_joined', {
+        room: {
+          id: room.id,
+          pin: room.pin,
+          status: room.status,
+          hostId: room.hostId,
+        },
+        player: {
+          id: player.id,
+          nickname: player.nickname,
+          isHost: false,
+        },
+        players: updatedRoom.players.map((p) => ({
+          id: p.id,
+          nickname: p.nickname,
+          isHost: p.id === room.hostId,
+        })),
+        quiz: {
+          id: room.quiz.id,
+          title: room.quiz.title,
+          questionCount: room.quiz.questions?.length || 0,
+        },
+        isReconnect: false,
+      });
+
+      // ONLY emit player_joined for NEW guest joins - not for reconnects
+      const joinedEvent: PlayerJoinedEvent = {
+        playerId: player.id,
+        nickname: player.nickname,
+        playerCount: updatedRoom.players.length,
+        timestamp: Date.now(),
+        isHost: false,
+      };
+      
+      this.logger.log(`[RoomGateway] EMIT player_joined for NEW guest: ${JSON.stringify(joinedEvent)}`);
+      this.server.to(room.id).emit('player_joined', joinedEvent);
+
+      this.server.to(room.id).emit('player_status', {
+        playerId: player.id,
+        nickname: player.nickname,
+        connection: 'CONNECTED',
+        isHost: false,
+        timestamp: Date.now(),
+      });
+
+      this.logger.log(`[RoomGateway] New guest joined: ${player.nickname}`);
+      return { success: true, playerId: player.id, isReconnect: false };
     } catch (error) {
       const message =
         error.response?.message || error.message || 'Failed to join room';
@@ -341,20 +571,15 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
         const result = await this.roomService.leaveRoom(roomId, identity.playerId);
         leftPlayerId = result.leftPlayerId;
       } catch (dbError) {
-        console.log('[RoomGateway] Player already removed or error:', dbError.message);
+        this.logger.log('[RoomGateway] Player already removed or error:', dbError.message);
         // Continue - player might already be removed
       }
 
+      // Detach from Redis presence
+      await this.presenceService.detachPlayerFromLobby(roomId, identity.playerId);
+
       client.leave(roomId);
       this.socketMap.delete(client.id);
-
-      const socketsInRoom = this.roomSockets.get(roomId);
-      if (socketsInRoom) {
-        socketsInRoom.delete(client.id);
-        if (socketsInRoom.size === 0) {
-          this.roomSockets.delete(roomId);
-        }
-      }
 
       client.emit('room_left', {
         roomId,
@@ -362,11 +587,26 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
         isHost: identity.isHost,
       });
 
-      this.server.to(roomId).emit('player_left', {
+      // Broadcast player_left event with connection tracking
+      const presence = await this.presenceService.getLobbyPresence(roomId);
+      const leftEvent: PlayerLeftEvent = {
         playerId: leftPlayerId,
         nickname: identity.nickname,
-        playerCount: socketsInRoom?.size || 0,
+        playerCount: presence.players.size,
         isHost: identity.isHost,
+        timestamp: Date.now(),
+      };
+      
+      this.logger.log(`[RoomGateway] EMIT player_left to room ${roomId}: ${JSON.stringify(leftEvent)}`);
+      this.server.to(roomId).emit('player_left', leftEvent);
+
+      // Emit player_status for connection tracking
+      this.server.to(roomId).emit('player_status', {
+        playerId: leftPlayerId,
+        nickname: identity.nickname,
+        connection: 'LEFT',
+        isHost: identity.isHost,
+        timestamp: Date.now(),
       });
 
       return { success: true };
@@ -377,40 +617,8 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  @SubscribeMessage('get_room_state')
-  async handleGetRoomState(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() payload: { roomId: string },
-  ) {
-    try {
-      const identity = this.socketMap.get(client.id);
-      const room = await this.roomService.findOne(payload.roomId);
-
-      return {
-        room: {
-          id: room.id,
-          pin: room.pin,
-          status: room.status,
-          hostId: room.hostId,
-        },
-        players: room.players.map((p) => ({
-          id: p.id,
-          nickname: p.nickname,
-          isHost: p.id === room.hostId,
-        })),
-        quiz: {
-          id: room.quiz.id,
-          title: room.quiz.title,
-          questionCount: room.quiz.questions?.length || 0,
-        },
-        yourIdentity: identity || null,
-      };
-    } catch (error) {
-      const message =
-        error.response?.message || error.message || 'Failed to get room state';
-      throw new WsException(message);
-    }
-  }
+  // REMOVED: get_room_state - Use HTTP API /rooms/:id instead
+  // This socket event was redundant as frontend uses HTTP API for room state
 
   @SubscribeMessage('ping')
   handlePing(@ConnectedSocket() client: Socket) {
@@ -439,8 +647,26 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server.to(roomId).emit(event, data);
   }
 
-  getRoomPlayerCount(roomId: string): number {
-    return this.roomSockets.get(roomId)?.size || 0;
+  /**
+   * Get player count from Redis presence
+   */
+  async getRoomPlayerCount(roomId: string): Promise<number> {
+    const presence = await this.presenceService.getLobbyPresence(roomId);
+    return presence.players.size;
+  }
+
+  /**
+   * Get all connected players in a room
+   */
+  async getConnectedPlayers(roomId: string): Promise<string[]> {
+    const presence = await this.presenceService.getLobbyPresence(roomId);
+    const connected: string[] = [];
+    for (const [playerId, data] of presence.players) {
+      if (data.socketId) {
+        connected.push(playerId);
+      }
+    }
+    return connected;
   }
 
   getSocketIdentity(socketId: string): PlayerIdentity | undefined {
