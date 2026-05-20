@@ -302,7 +302,7 @@ export class GameSessionService {
       status: GameState.QUESTION_RESULT,
       questionStartedAt: null,
       timerVersion: (cached.timerVersion || 0) + 1,
-    });
+    }, 'handleQuestionEnd');
 
     // STEP 4: Update DB SECOND (for persistence/recovery)
     await this.prisma.gameSession.update({
@@ -452,9 +452,11 @@ export class GameSessionService {
     const cached = await this.getGameCache(sessionId);
     const finalLeaderboard = await this.getLeaderboard(sessionId);
 
+    console.log(`[endGame] sessionId=${sessionId} totalQuestions=${cached?.totalQuestions} currentQuestionIndex=${cached?.currentQuestionIndex}`);
+    
     await this.updateGameCache(sessionId, {
       status: GameState.FINISHED,
-    });
+    }, 'endGame');
 
     const finalResults = {
       leaderboard: finalLeaderboard,
@@ -576,7 +578,16 @@ export class GameSessionService {
    * waiting for a socket event.
    */
   async getFullGameState(sessionId: string) {
-    const cached = await this.getGameCache(sessionId);
+    const cacheKey = `game:${sessionId}`;
+    const cachedRaw = await this.redis.get(cacheKey);
+    const cached = cachedRaw ? JSON.parse(cachedRaw) : null;
+    
+    console.log(`[getFullGameState] sessionId=${sessionId} cacheKey=${cacheKey}`);
+    console.log(`[getFullGameState] cachedRaw=${cachedRaw ? 'EXISTS' : 'NULL'}`);
+    if (cached) {
+      console.log(`[getFullGameState] cached.status=${cached.status} cached.sessionId=${cached.sessionId}`);
+    }
+    
     const session = await this.prisma.gameSession.findUnique({
       where: { id: sessionId },
       include: {
@@ -760,7 +771,7 @@ export class GameSessionService {
     await this.updateGameCache(sessionId, {
       questionStartedAt: scheduledAt,
       timerVersion,
-    });
+    }, 'scheduleQuestionEnd');
 
     // Save metadata to Redis for freeze/unfreeze recovery
     await this.redis.set(
@@ -833,10 +844,12 @@ export class GameSessionService {
   private async updateGameCache(
     sessionId: string,
     updates: Partial<GameCache>,
+    caller?: string,
   ) {
     const current = await this.getGameCache(sessionId);
     if (current) {
       const updated = { ...current, ...updates };
+      console.log(`[updateGameCache] sessionId=${sessionId} caller=${caller || 'unknown'} status=${current.status} -> ${updated.status}`);
       await this.redis.set(
         `game:${sessionId}`,
         JSON.stringify(updated),
@@ -853,7 +866,7 @@ export class GameSessionService {
   async updateQuestionStartTime(sessionId: string, startTime: number) {
     await this.updateGameCache(sessionId, {
       questionStartedAt: startTime,
-    });
+    }, 'updateQuestionStartTime');
   }
 
   private async initLeaderboard(sessionId: string, playerIds: string[]) {

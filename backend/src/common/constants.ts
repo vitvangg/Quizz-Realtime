@@ -20,11 +20,10 @@ export const GAME_CONSTANTS = {
   // ============================================================
 
   /** Buffer time (ms) after game_redirect before question_start
-   * MUST be large enough for full redirect cycle: receive redirect → navigate → mount → connect → join
-   * 3000ms accounts for slow devices/networks (~550-1700ms + overhead)
-   * Increase this value when running load tests with 100+ bots
+   * DISABLED: We emit question_start immediately after countdown
+   * Players joining late will use recoverState to sync timer
    */
-  GAME_REDIRECT_BUFFER_MS: 5000,
+  GAME_REDIRECT_BUFFER_MS: 0,
 
   // ============================================================
   // REDIS TTL (seconds)

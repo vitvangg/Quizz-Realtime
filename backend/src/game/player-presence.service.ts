@@ -536,6 +536,8 @@ export class PlayerPresenceService {
     isHost: boolean;
     socketId?: string;
     joinedAt: number;
+    connection?: 'CONNECTED' | 'DISCONNECTED';
+    disconnectedAt?: number;
   } | null> {
     const key = `player:lobby:${roomId}:${playerId}`;
     const data = await this.redis.get(key);

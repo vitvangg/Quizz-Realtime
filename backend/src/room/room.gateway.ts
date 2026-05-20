@@ -36,6 +36,21 @@ interface PlayerIdentity {
   isHost: boolean;
 }
 
+// Track host disconnections with grace period timers
+// Key: roomId, Value: { playerId, timer }
+const hostDisconnectTimers = new Map<string, NodeJS.Timeout>();
+const HOST_DISCONNECT_GRACE_PERIOD_MS = 30000; // 30 seconds grace period for host reconnect
+
+function clearHostDisconnectTimer(roomId: string) {
+  const timer = hostDisconnectTimers.get(roomId);
+  if (timer) {
+    clearTimeout(timer);
+    hostDisconnectTimers.delete(roomId);
+    return true;
+  }
+  return false;
+}
+
 @WebSocketGateway({
   cors: {
     origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
@@ -122,10 +137,53 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       timestamp: Date.now(),
     });
 
-    // NOTE: DO NOT emit host_left on disconnect - host may reconnect
-    // host_left is only emitted on explicit leave_room or room close
-
-    this.logger.log(`[RoomGateway] Player ${nickname} marked disconnected (grace period started)`);
+    if (isHost) {
+      // For host disconnect, start grace period timer
+      // If host doesn't reconnect within grace period, emit host_left
+      this.logger.log(`[RoomGateway] Host ${nickname} disconnected - starting grace period timer`);
+      
+      // Clear any existing timer for this room
+      clearHostDisconnectTimer(roomId);
+      
+      const timer = setTimeout(async () => {
+        // Host didn't reconnect - emit host_left and room_closed
+        this.logger.log(`[RoomGateway] Host grace period expired - emitting host_left for room ${roomId}`);
+        
+        // Check if host actually reconnected (presence might have been updated)
+        const hostPresence = await this.presenceService.getPlayerLobbyPresence(roomId, playerId);
+        if (hostPresence && hostPresence.connection === 'CONNECTED') {
+          this.logger.log(`[RoomGateway] Host ${nickname} reconnected during grace period - skipping host_left`);
+          return;
+        }
+        
+        // Detach host from Redis presence
+        await this.presenceService.detachPlayerFromLobby(roomId, playerId);
+        
+        // Emit host_left and room_closed to all players
+        this.server.to(roomId).emit('host_left', {
+          roomId,
+          hostId: playerId,
+          nickname,
+          timestamp: Date.now(),
+        });
+        
+        this.server.to(roomId).emit('room_closed', {
+          roomId,
+          reason: 'host_disconnect_timeout',
+          message: 'Host đã mất kết nối. Phòng sẽ bị đóng.',
+          timestamp: Date.now(),
+        });
+        
+        this.logger.log(`[RoomGateway] Room ${roomId} closed due to host disconnect timeout`);
+      }, HOST_DISCONNECT_GRACE_PERIOD_MS);
+      
+      hostDisconnectTimers.set(roomId, timer);
+      
+      this.logger.log(`[RoomGateway] Host disconnect timer set for ${HOST_DISCONNECT_GRACE_PERIOD_MS}ms`);
+    } else {
+      // For regular players, just mark disconnected (no timer needed)
+      this.logger.log(`[RoomGateway] Player ${nickname} marked disconnected (no grace period)`);
+    }
   }
 
   @SubscribeMessage('join_room')
@@ -347,6 +405,11 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect, On
           timestamp: Date.now(),
         });
 
+        // Clear any pending host disconnect timer (host is reconnecting)
+        if (clearHostDisconnectTimer(roomId)) {
+          this.logger.log(`[RoomGateway] Cleared host disconnect timer for room ${roomId} - host reconnected`);
+        }
+        
         this.logger.log(`[RoomGateway] Host joined room: ${room.id}, isReconnect: ${isReconnect}`);
         return { success: true, isReconnect };
       }
@@ -587,32 +650,114 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         isHost: identity.isHost,
       });
 
-      // Broadcast player_left event with connection tracking
+      // Broadcast based on whether host is leaving or player is leaving
       const presence = await this.presenceService.getLobbyPresence(roomId);
-      const leftEvent: PlayerLeftEvent = {
-        playerId: leftPlayerId,
-        nickname: identity.nickname,
-        playerCount: presence.players.size,
-        isHost: identity.isHost,
-        timestamp: Date.now(),
-      };
       
-      this.logger.log(`[RoomGateway] EMIT player_left to room ${roomId}: ${JSON.stringify(leftEvent)}`);
-      this.server.to(roomId).emit('player_left', leftEvent);
+      if (identity.isHost) {
+        // Host is leaving - emit host_left and room_closed for all players
+        this.logger.log(`[RoomGateway] Host ${identity.nickname} left room ${roomId} - emitting host_left`);
+        
+        this.server.to(roomId).emit('host_left', {
+          roomId,
+          hostId: leftPlayerId,
+          nickname: identity.nickname,
+          timestamp: Date.now(),
+        });
+        
+        this.server.to(roomId).emit('room_closed', {
+          roomId,
+          reason: 'host_left',
+          message: 'Host đã rời phòng. Phòng sẽ bị đóng.',
+          timestamp: Date.now(),
+        });
 
-      // Emit player_status for connection tracking
-      this.server.to(roomId).emit('player_status', {
-        playerId: leftPlayerId,
-        nickname: identity.nickname,
-        connection: 'LEFT',
-        isHost: identity.isHost,
-        timestamp: Date.now(),
-      });
+        // Emit player_status for connection tracking
+        this.server.to(roomId).emit('player_status', {
+          playerId: leftPlayerId,
+          nickname: identity.nickname,
+          connection: 'LEFT',
+          isHost: true,
+          timestamp: Date.now(),
+        });
+      } else {
+        // Regular player is leaving - emit player_left
+        const leftEvent: PlayerLeftEvent = {
+          playerId: leftPlayerId,
+          nickname: identity.nickname,
+          playerCount: presence.players.size,
+          isHost: false,
+          timestamp: Date.now(),
+        };
+        
+        this.logger.log(`[RoomGateway] EMIT player_left to room ${roomId}: ${JSON.stringify(leftEvent)}`);
+        this.server.to(roomId).emit('player_left', leftEvent);
+
+        // Emit player_status for connection tracking
+        this.server.to(roomId).emit('player_status', {
+          playerId: leftPlayerId,
+          nickname: identity.nickname,
+          connection: 'LEFT',
+          isHost: false,
+          timestamp: Date.now(),
+        });
+      }
 
       return { success: true };
     } catch (error) {
       const message =
         error.response?.message || error.message || 'Failed to leave room';
+      throw new WsException(message);
+    }
+  }
+
+  @SubscribeMessage('host_leave_room')
+  async handleHostLeaveRoom(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: LeaveRoomPayload,
+  ) {
+    try {
+      const { roomId } = payload;
+      const identity = this.socketMap.get(client.id);
+
+      if (!identity || identity.roomId !== roomId) {
+        throw new WsException('Not in this room');
+      }
+
+      // Verify this is actually the host
+      if (!identity.isHost) {
+        throw new WsException('Only host can close the room');
+      }
+
+      this.logger.log(`[RoomGateway] host_leave_room received from ${identity.nickname} (${identity.playerId}) for room ${roomId}`);
+
+      // Detach host from Redis presence
+      await this.presenceService.detachPlayerFromLobby(roomId, identity.playerId);
+
+      client.leave(roomId);
+      this.socketMap.delete(client.id);
+
+      // Emit room_closed to all players (including host for confirmation)
+      this.server.to(roomId).emit('room_closed', {
+        roomId,
+        reason: 'host_left',
+        message: 'Host đã rời phòng. Phòng sẽ bị đóng.',
+        timestamp: Date.now(),
+      });
+
+      // Also emit host_left for consistency
+      this.server.to(roomId).emit('host_left', {
+        roomId,
+        hostId: identity.playerId,
+        nickname: identity.nickname,
+        timestamp: Date.now(),
+      });
+
+      this.logger.log(`[RoomGateway] Room ${roomId} closed by host ${identity.nickname}`);
+
+      return { success: true, roomClosed: true };
+    } catch (error) {
+      const message =
+        error.response?.message || error.message || 'Failed to close room';
       throw new WsException(message);
     }
   }
