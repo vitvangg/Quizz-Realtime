@@ -15,6 +15,7 @@ import { getGameSocket, connectGameSocket } from '@/lib/game-socket';
 import { usePagination } from '@/hooks/usePagination';
 import { PaginationControls } from '@/components/common/PaginationControls';
 import { Zap, Trophy, Crown, Clock, Target, CheckCircle, XCircle, AlertTriangle, Users } from 'lucide-react';
+import { useGameHostIdentity } from '@/hooks/useHostIdentity';
 
 // ============================================================================
 // FREEZE OVERLAY COMPONENT - Neo-Brutalism Style
@@ -123,12 +124,38 @@ export default function GamePage() {
     reset,
   } = useGameStore();
 
+  // ============================================================
+  // SINGLE SOURCE OF TRUTH: useGameHostIdentity
+  // ============================================================
+  // This hook provides authoritative host identity based on:
+  // 1. Server response (host_join_game response) - authoritative
+  // 2. Store's isHost flag (set by server response)
+  // 3. Storage recovery (sessionStorage for reload)
+  const hostIdentity = useGameHostIdentity();
+  
+  // Debug logging in development
+  if (process.env.NODE_ENV === 'development' && sessionId) {
+    console.log('[GamePage] Host Identity:', {
+      isHost: hostIdentity.isHost,
+      source: hostIdentity.source,
+      storeIsHost: isHost,
+      debug: hostIdentity.debug,
+    });
+  }
+
   const isLastQuestion = totalQuestions > 0 && questionIndex >= totalQuestions - 1;
 
   const [localTimeRemaining, setLocalTimeRemaining] = useState(0);
   const [isJoining, setIsJoining] = useState(true);
   const [authReady, setAuthReady] = useState(false);
   const [hasRecoveredFromHttp, setHasRecoveredFromHttp] = useState(false);
+
+  // ============================================================
+  // EFFECTIVE HOST STATUS FOR UI
+  // ============================================================
+  // Use hostIdentity.isHost as authoritative for UI
+  // This ensures consistent host detection across all UI elements
+  const effectiveIsHost = hostIdentity.isHost;
 
   const hasRecoveredRef = useRef(false);
   const joinedSessionRef = useRef<string | null>(null);
@@ -1550,7 +1577,7 @@ export default function GamePage() {
           <CardContent className="flex flex-col items-center gap-4 pt-6">
             <div className="w-12 h-12 border-4 border-black border-t-transparent rounded-full animate-spin bg-neon-green" />
             <p className="text-lg font-bold text-black/60">
-              {isHost ? 'Đợi người chơi tham gia' : 'Chờ host bắt đầu game'}
+              {effectiveIsHost ? 'Đợi người chơi tham gia' : 'Chờ host bắt đầu game'}
             </p>
           </CardContent>
         </Card>
@@ -1571,7 +1598,7 @@ export default function GamePage() {
     return (
       <div className="min-h-screen bg-neon-yellow p-4">
         {/* Player count for non-host players */}
-        {!isHost && (
+        {!effectiveIsHost && (
           <div className="max-w-4xl mx-auto mb-4">
             <Card className="bg-white border-4 border-black shadow-brutal">
               <CardContent className="py-3 px-4 flex items-center gap-2">
@@ -1585,7 +1612,7 @@ export default function GamePage() {
         )}
 
         {/* Host Player List Panel with Pagination */}
-        {isHost && (
+        {effectiveIsHost && (
           <div className="max-w-6xl mx-auto mb-4">
             <Card className="bg-white border-4 border-black shadow-brutal">
               <CardHeader className="bg-neon-green border-b-4 border-black pb-3">
@@ -1644,7 +1671,7 @@ export default function GamePage() {
           </div>
         )}
 
-        <div className={isHost ? 'max-w-3xl mx-auto' : 'max-w-4xl mx-auto'}>
+        <div className={effectiveIsHost ? 'max-w-3xl mx-auto' : 'max-w-4xl mx-auto'}>
           {/* Header */}
           <div className="flex justify-between items-center mb-6 bg-white rounded-2xl p-4 border-4 border-black shadow-brutal">
             <div className="bg-black border-4 border-black shadow-brutal-sm px-4 py-2">
@@ -1680,15 +1707,15 @@ export default function GamePage() {
               return (
                 <button
                   key={answer.id}
-                  onClick={() => !isHost && handleSubmitAnswer(answer.id)}
-                  disabled={hasAnswered || isHost}
+                  onClick={() => !effectiveIsHost && handleSubmitAnswer(answer.id)}
+                  disabled={hasAnswered || effectiveIsHost}
                   className={`
                     ${color.bg} border-4 border-black
                     text-white text-xl py-10 px-6
                     font-black uppercase
                     shadow-brutal
                     transition-all duration-150
-                    ${!isHost && !hasAnswered ? `${color.hover} hover:-translate-y-1 hover:shadow-brutal-lg cursor-pointer` : ''}
+                    ${!effectiveIsHost && !hasAnswered ? `${color.hover} hover:-translate-y-1 hover:shadow-brutal-lg cursor-pointer` : ''}
                     ${isSelected ? 'ring-4 ring-white scale-105' : ''}
                     disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:translate-y-0
                   `}
@@ -1705,7 +1732,7 @@ export default function GamePage() {
           </div>
 
           {/* Status message - Neo-Brutalism */}
-          {isHost ? (
+          {effectiveIsHost ? (
             <div className="text-center bg-white border-4 border-black shadow-brutal p-4">
               <p className="font-bold text-black/60 uppercase tracking-wide">
                 <span className="inline-block w-3 h-3 bg-neon-orange border-2 border-black mr-2"></span>
@@ -1787,7 +1814,7 @@ export default function GamePage() {
               <div className="space-y-3">
                 {currentQuestion?.answers.map((answer, index) => {
                   const isAnswerCorrect = answer.id === correctAnswerId;
-                  const isSelected = !isHost && answer.id === selectedAnswerId;
+                  const isSelected = !effectiveIsHost && answer.id === selectedAnswerId;
                   
                   return (
                     <div key={answer.id} className={`
@@ -1816,7 +1843,7 @@ export default function GamePage() {
           </Card>
 
           {/* Player score card */}
-          {!isHost && (
+          {!effectiveIsHost && (
             <Card className="mb-6 bg-white border-4 border-black shadow-brutal">
               <CardContent className="pt-6 text-center">
                 <p className="text-sm font-bold text-black/50 uppercase tracking-wider mb-2">Điểm của bạn</p>
@@ -1829,7 +1856,7 @@ export default function GamePage() {
           )}
 
           {/* Host leaderboard */}
-          {isHost && (
+          {effectiveIsHost && (
             <Card className="mb-6 bg-white border-4 border-black shadow-brutal">
               <CardHeader className="bg-neon-yellow border-b-4 border-black pb-4">
                 <CardTitle className="text-xl font-black uppercase flex items-center gap-2">
@@ -1889,7 +1916,7 @@ export default function GamePage() {
           )}
 
           {/* Next question button */}
-          {isHost && !isLastQuestion && (
+          {effectiveIsHost && !isLastQuestion && (
             <Button
               onClick={handleNextQuestion}
               className="w-full bg-neon-pink border-4 border-black shadow-brutal hover:shadow-none hover:translate-x-2 hover:translate-y-2 font-black text-xl py-8 uppercase"
@@ -1917,7 +1944,7 @@ export default function GamePage() {
           </div>
 
           {/* Player result card */}
-          {!isHost && (
+          {!effectiveIsHost && (
             <Card className="mb-6 bg-white border-4 border-black shadow-brutal-xl">
               <CardHeader className="bg-neon-blue border-b-4 border-black pb-4">
                 <CardTitle className="text-xl font-black uppercase text-white text-center">
@@ -1937,7 +1964,7 @@ export default function GamePage() {
           )}
 
           {/* Host leaderboard */}
-          {isHost && (
+          {effectiveIsHost && (
             <Card className="mb-6 bg-white border-4 border-black shadow-brutal-xl">
               <CardHeader className="bg-neon-green border-b-4 border-black pb-4">
                 <CardTitle className="text-xl font-black uppercase flex items-center gap-2">
@@ -1992,7 +2019,7 @@ export default function GamePage() {
           )}
 
           {/* Action buttons */}
-          {isHost ? (
+          {effectiveIsHost ? (
             <div className="grid grid-cols-2 gap-4">
               <Button
                 onClick={handlePlayAgain}
