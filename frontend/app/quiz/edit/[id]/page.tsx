@@ -358,7 +358,7 @@ export default function EditQuizPage() {
             <Button
               variant="outline"
               size="icon"
-                onClick={() => router.push('/quiz')}
+              onClick={() => router.push('/quiz')}
               className="border-4 border-black shadow-brutal-sm hover:shadow-none hover:translate-x-0.5 hover:translate-y-0.5 bg-white"
             >
               <ArrowLeft className="w-5 h-5" />
@@ -435,8 +435,8 @@ export default function EditQuizPage() {
                             setShowMobileSidebar(false);
                           }}
                           className={`w-full text-left p-4 rounded-2xl border-2 transition-all ${isActive
-                              ? "bg-primary text-primary-foreground border-primary"
-                              : "hover:bg-muted border-transparent"
+                            ? "bg-primary text-primary-foreground border-primary"
+                            : "hover:bg-muted border-transparent"
                             }`}
                         >
                           <div className="font-black">Câu {index + 1}</div>
@@ -463,28 +463,31 @@ export default function EditQuizPage() {
               <Info className="h-4 w-4" />
               <span className="text-xs font-black uppercase tracking-widest">Thông tin cơ bản</span>
             </div>
-            <Card className="border-2 border-primary/10 shadow-sm bg-gradient-to-br from-background to-muted/30 overflow-hidden rounded-3xl">
+
+            <Card className="rounded-3xl border-2">
               <CardContent className="pt-8">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-3">
-                    <Label htmlFor="title" className="text-sm font-black text-muted-foreground uppercase tracking-widest px-1">
-                      Tên bộ sưu tập
+                    <Label>
+                      Tên Quiz
                     </Label>
                     <Input
-                      id="title"
-                      placeholder="Tên Quiz..."
+                      placeholder="Ví dụ: React cơ bản..."
                       value={title}
                       onChange={(e) => setTitle(e.target.value)}
-                      className="text-2xl font-black py-8 border-2 border-transparent bg-white focus:border-primary/50 transition-all rounded-2xl"
+                      className="rounded-2xl h-14"
                     />
                   </div>
 
                   <div className="space-y-3">
-                    <Label htmlFor="category" className="text-sm font-black text-muted-foreground uppercase tracking-widest px-1">
+                    <Label>
                       Danh mục
                     </Label>
-                    <Select value={category} onValueChange={(value) => setCategory(value as QuizCategory)}>
-                      <SelectTrigger className="text-xl font-black py-8 border-2 border-transparent bg-white focus:border-primary/50 transition-all rounded-2xl h-8">
+                    <Select
+                      value={category}
+                      onValueChange={(value) => setCategory(value as QuizCategory)}
+                    >
+                      <SelectTrigger className="rounded-2xl h-14">
                         <SelectValue placeholder="Chọn danh mục" />
                       </SelectTrigger>
                       <SelectContent className="rounded-2xl border-2">
@@ -578,8 +581,8 @@ export default function EditQuizPage() {
                         key={q.id}
                         onClick={() => scrollToQuestion(q.id)}
                         className={`w-full text-left p-4 rounded-2xl border-2 transition-all ${isActive
-                            ? "bg-primary text-primary-foreground border-primary"
-                            : "hover:bg-muted border-transparent"
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "hover:bg-muted border-transparent"
                           }`}
                       >
                         <div className="font-black">Câu {index + 1}</div>
