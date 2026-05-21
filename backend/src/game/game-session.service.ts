@@ -217,6 +217,7 @@ export class GameSessionService {
       firstQuestion: {
         id: firstQuestion.id,
         content: firstQuestion.content,
+        imageUrl: firstQuestion.imageUrl || undefined,
         answers: firstQuestion.answers.map((a) => ({
           id: a.id,
           content: a.content,
@@ -262,6 +263,7 @@ export class GameSessionService {
       question: {
         id: question.id,
         content: question.content,
+        imageUrl: question.imageUrl || undefined,
         answers: question.answers.map((a) => ({
           id: a.id,
           content: a.content,
@@ -448,6 +450,7 @@ export class GameSessionService {
       question: {
         id: nextQuestion.id,
         content: nextQuestion.content,
+        imageUrl: nextQuestion.imageUrl || undefined,
         answers: nextQuestion.answers.map((a) => ({
           id: a.id,
           content: a.content,
@@ -747,18 +750,23 @@ export class GameSessionService {
     }
 
     // Compute remaining time based on server clock
+    // For backward compatibility, also compute questionEndTime
     let remainingTime: number | null = null;
+    let questionEndTime: number | null = null;
     let currentQuestion: any = null;
     let correctAnswerId: string | null = null;
 
     if (cached && cached.status === GameState.QUESTION_ACTIVE && cached.questionStartedAt) {
       const elapsed = (Date.now() - cached.questionStartedAt) / 1000;
       remainingTime = Math.max(0, cached.timeLimit - Math.floor(elapsed));
+      // questionEndTime for client timer sync (absolute server timestamp)
+      questionEndTime = cached.questionStartedAt + (cached.timeLimit * 1000);
       const questionData = session.room.quiz.questions[cached.currentQuestionIndex];
       if (questionData) {
         currentQuestion = {
           id: questionData.id,
           content: questionData.content,
+          imageUrl: questionData.imageUrl || undefined,
           answers: questionData.answers.map((a: any) => ({ id: a.id, content: a.content })),
           timeLimit: questionData.timeLimit,
         };
@@ -770,6 +778,7 @@ export class GameSessionService {
         currentQuestion = {
           id: questionData.id,
           content: questionData.content,
+          imageUrl: questionData.imageUrl || undefined,
           answers: questionData.answers.map((a: any) => ({ id: a.id, content: a.content })),
           timeLimit: questionData.timeLimit,
         };
@@ -804,6 +813,7 @@ export class GameSessionService {
       currentQuestionIndex: cached?.currentQuestionIndex ?? 0,
       totalQuestions: cached?.totalQuestions ?? session.room.quiz.questions.length,
       remainingTime,
+      questionEndTime, // Absolute end time for client timer sync
       currentQuestion,
       correctAnswerId,
       leaderboard,

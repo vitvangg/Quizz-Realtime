@@ -35,9 +35,9 @@ export function AnswerButtons({
   onAnswerSelect,
 }: AnswerButtonsProps) {
   if (showCorrect) {
-    // Show results mode
+    // Show results mode - always single column for readability
     return (
-      <div className="space-y-3">
+      <div className="space-y-2 sm:space-y-3">
         {answers.map((answer, index) => {
           const isAnswerCorrect = answer.id === correctAnswerId;
           const isSelected = answer.id === selectedAnswerId;
@@ -46,7 +46,7 @@ export function AnswerButtons({
             <div
               key={answer.id}
               className={`
-                p-4 rounded-xl flex items-center gap-3 border-4 border-black
+                p-3 sm:p-4 rounded-xl flex items-center gap-2 sm:gap-3 border-4 border-black
                 ${isAnswerCorrect
                   ? 'bg-neon-green shadow-brutal'
                   : isSelected
@@ -55,15 +55,15 @@ export function AnswerButtons({
                 }
               `}
             >
-              <span className={`w-10 h-10 rounded-lg border-2 border-black flex items-center justify-center font-black text-lg ${
+              <span className={`w-8 h-8 sm:w-10 sm:h-10 rounded-lg border-2 border-black flex items-center justify-center font-black text-base sm:text-lg ${
                 isAnswerCorrect || isSelected ? 'bg-black text-white' : 'bg-black/10 text-black'
               }`}>
                 {String.fromCharCode(65 + index)}
               </span>
-              <span className={`flex-1 font-bold text-lg ${isAnswerCorrect || isSelected ? 'text-white' : 'text-black'}`}>
+              <span className={`flex-1 font-bold text-base sm:text-lg ${isAnswerCorrect || isSelected ? 'text-white' : 'text-black'}`}>
                 {answer.content}
               </span>
-              {isAnswerCorrect && <CheckCircle className="w-6 h-6 text-white" />}
+              {isAnswerCorrect && <CheckCircle className="w-5 h-5 sm:w-6 sm:h-6 text-white" />}
             </div>
           );
         })}
@@ -71,9 +71,9 @@ export function AnswerButtons({
     );
   }
 
-  // Interactive mode
+  // Interactive mode - responsive grid: 1 column on mobile, 2 columns on md+
   return (
-    <div className="grid grid-cols-2 gap-4 mb-6">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 mb-4 sm:mb-6">
       {answers.map((answer, index) => {
         const color = answerColors[index % 4];
         const isSelected = selectedAnswerId === answer.id;
@@ -85,7 +85,7 @@ export function AnswerButtons({
             disabled={disabled || isHost}
             className={`
               ${color.bg} border-4 border-black
-              text-white text-xl py-10 px-6
+              text-lg sm:text-xl py-6 sm:py-10 px-4 sm:px-6
               font-black uppercase
               shadow-brutal
               transition-all duration-150
@@ -94,11 +94,11 @@ export function AnswerButtons({
               disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:translate-y-0
             `}
           >
-            <span className="flex items-center justify-center gap-4">
-              <span className="w-12 h-12 rounded-xl bg-black/20 flex items-center justify-center text-2xl font-black">
+            <span className="flex items-center justify-center gap-2 sm:gap-4">
+              <span className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-black/20 flex items-center justify-center text-xl sm:text-2xl font-black shrink-0">
                 {String.fromCharCode(65 + index)}
               </span>
-              <span className="text-left flex-1">{answer.content}</span>
+              <span className="text-left flex-1 break-words">{answer.content}</span>
             </span>
           </button>
         );

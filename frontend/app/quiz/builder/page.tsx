@@ -16,6 +16,8 @@ import {
   FileUp,
   FileText,
   Sparkles,
+  Menu,
+  X,
 } from "lucide-react";
 
 import Link from "next/link";
@@ -57,6 +59,7 @@ export default function QuizBuilderPage() {
 
   const [saving, setSaving] = useState(false);
   const [showAI, setShowAI] = useState(false);
+  const [showMobileSidebar, setShowMobileSidebar] = useState(false);
 
   const quizStore = useQuizStore();
   const questionStore = useQuestionStore();
@@ -651,18 +654,132 @@ export default function QuizBuilderPage() {
     <>
       {/* APP BAR STICKY */}
       <div className="sticky top-0 z-50 bg-background/80 backdrop-blur-xl border-b shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center gap-4">
+        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => router.back()}
+              className="border-4 border-black shadow-brutal-sm hover:shadow-none hover:translate-x-0.5 hover:translate-y-0.5 bg-white"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </Button>
+            <h1 className="text-xl font-black tracking-tight">Trình tạo Quiz</h1>
+          </div>
           <Button
             variant="outline"
             size="icon"
-            onClick={() => router.back()}
-            className="border-4 border-black shadow-brutal-sm hover:shadow-none hover:translate-x-0.5 hover:translate-y-0.5 bg-white"
+            className="lg:hidden border-2 rounded-xl"
+            onClick={() => setShowMobileSidebar(true)}
           >
-            <ArrowLeft className="w-5 h-5" />
+            <Menu className="w-5 h-5" />
           </Button>
-          <h1 className="text-xl font-black tracking-tight">Trình tạo Quiz</h1>
         </div>
       </div>
+
+      {/* MOBILE SIDEBAR OVERLAY */}
+      {showMobileSidebar && (
+        <div className="fixed inset-0 z-[60] lg:hidden">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => setShowMobileSidebar(false)}
+          />
+          {/* Drawer */}
+          <div className="absolute right-0 top-0 bottom-0 w-[320px] max-w-[85vw] bg-background shadow-2xl animate-in slide-in-from-right duration-300 flex flex-col">
+            {/* Drawer header */}
+            <div className="flex items-center justify-between p-4 border-b">
+              <h2 className="font-black text-lg">Menu</h2>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="rounded-full"
+                onClick={() => setShowMobileSidebar(false)}
+              >
+                <X className="w-5 h-5" />
+              </Button>
+            </div>
+            {/* Drawer content */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {/* QUIZ SUMMARY */}
+              <Card className="rounded-3xl border-2 shrink-0">
+                <CardContent className="p-5 space-y-4">
+                  <div>
+                    <h2 className="text-2xl font-black">
+                      {title || "Quiz chưa có tên"}
+                    </h2>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {questions.length} câu hỏi
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      variant="outline"
+                      className="w-full rounded-xl justify-center h-10 text-xs px-2"
+                      onClick={() => { downloadTemplate(); setShowMobileSidebar(false); }}
+                    >
+                      <FileDown className="w-3.5 h-3.5 mr-1" />
+                      File Mẫu
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="w-full rounded-xl justify-center h-10 text-xs px-2"
+                      onClick={() => { handleImportClick(); setShowMobileSidebar(false); }}
+                    >
+                      <FileUp className="w-3.5 h-3.5 mr-1" />
+                      Nhập File
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="col-span-2 w-full rounded-xl justify-center h-10 text-sm"
+                      onClick={() => { setShowAI(!showAI); setShowMobileSidebar(false); }}
+                    >
+                      <Sparkles className="w-4 h-4 mr-1.5" />
+                      {showAI ? "Đóng AI" : "Tạo bằng AI"}
+                    </Button>
+                  </div>
+                  <Button
+                    className="w-full rounded-2xl h-12 font-black"
+                    onClick={() => { handleSave(); setShowMobileSidebar(false); }}
+                    disabled={saving}
+                  >
+                    {saving ? "Đang lưu..." : "Xuất bản Quiz"}
+                  </Button>
+                </CardContent>
+              </Card>
+
+              {/* QUESTION NAV */}
+              <Card className="rounded-3xl border-2">
+                <CardContent className="p-4">
+                  <div className="space-y-2">
+                    {questions.map((q, index) => {
+                      const isActive = activeQuestion === q.id;
+                      return (
+                        <button
+                          key={q.id}
+                          onClick={() => {
+                            scrollToQuestion(q.id);
+                            setShowMobileSidebar(false);
+                          }}
+                          className={`w-full text-left p-4 rounded-2xl border-2 transition-all ${isActive
+                              ? "bg-primary text-primary-foreground border-primary"
+                              : "hover:bg-muted border-transparent"
+                            }`}
+                        >
+                          <div className="font-black">Câu {index + 1}</div>
+                          <div className="text-xs opacity-70 line-clamp-2 mt-1">
+                            {q.content || "Chưa có nội dung"}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="max-w-7xl mx-auto px-4 py-8 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-8 items-start">
         {/* LEFT CONTENT */}

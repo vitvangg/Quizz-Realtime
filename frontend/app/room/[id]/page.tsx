@@ -28,6 +28,8 @@ export default function RoomPage() {
   const isDeterminingRef = useRef(false);
   // Track the current room ID for cleanup
   const currentRoomIdRef = useRef<string | null>(null);
+  // Track mount count to detect StrictMode remount
+  const mountCountRef = useRef(0);
 
   const { user, accessToken, isHydrated } = useAuthStore();
   const {
@@ -295,14 +297,34 @@ export default function RoomPage() {
   useEffect(() => {
     // Track current room ID
     currentRoomIdRef.current = roomId;
+    // Increment mount count
+    mountCountRef.current += 1;
+    const currentMountCount = mountCountRef.current;
     
     return () => {
       // This cleanup runs on:
       // 1. Route change (navigating away from /room/:id)
       // 2. Page refresh (unmount)
       // 3. Tab close (unmount)
+      // 4. React StrictMode double-render in dev mode
       
-      console.log('[RoomPage] Cleanup: unmounting from room', currentRoomIdRef.current);
+      const currentRoom = currentRoomIdRef.current;
+      console.log('[RoomPage] Cleanup: unmounting from room', currentRoom);
+      
+      // Check if this is first mount cleanup (StrictMode) or actual unmount
+      // If mountCount is still 1 after decrement, it was first mount
+      mountCountRef.current -= 1;
+      const isFirstMountCleanup = currentMountCount === 1;
+      
+      // CRITICAL: Reset refs FIRST to prevent stale state on remount
+      // This handles React StrictMode remount case - refs are cleared before emit
+      const shouldEmitHostLeave = hasJoinedRef.current;
+      const roomToLeave = currentRoomIdRef.current;
+      
+      // Always reset refs on unmount
+      hasJoinedRef.current = false;
+      isDeterminingRef.current = false;
+      currentRoomIdRef.current = null;
       
       // ============================================================
       // HOST LEAVE DETERMINATION (Single Source of Truth)
@@ -316,30 +338,22 @@ export default function RoomPage() {
         currentRoomHostId: store.currentRoom?.hostId || null,
       });
       
-      const hasJoined = hasJoinedRef.current;
-      
-      if (isHost && hasJoined && currentRoomIdRef.current) {
-        console.log('[RoomPage] Cleanup: Host is leaving room', currentRoomIdRef.current);
-        
-        // Emit host_leave_room asynchronously (don't block unmount)
-        handleHostLeave(currentRoomIdRef.current);
+      // Only emit host_leave_room if:
+      // 1. We had successfully joined
+      // 2. We are the host
+      // 3. This is NOT a StrictMode first-mount cleanup (isFirstMountCleanup)
+      if (shouldEmitHostLeave && isHost && roomToLeave && !isFirstMountCleanup) {
+        console.log('[RoomPage] Cleanup: Host is leaving room', roomToLeave);
+        handleHostLeave(roomToLeave);
+      } else if (isFirstMountCleanup) {
+        console.log('[RoomPage] Cleanup: StrictMode remount detected, skipping host_leave_room emit');
       } else {
         console.log('[RoomPage] Cleanup: Not emitting host_leave_room', {
+          shouldEmitHostLeave,
           isHost,
-          hasJoined,
-          roomId: currentRoomIdRef.current,
-          debug: store.currentPlayer ? {
-            playerId: store.currentPlayer.id,
-            isHost: store.currentPlayer.isHost,
-            hostId: store.currentRoom?.hostId,
-          } : null,
+          roomToLeave,
         });
       }
-      
-      // Reset refs
-      hasJoinedRef.current = false;
-      isDeterminingRef.current = false;
-      currentRoomIdRef.current = null;
     };
   }, [roomId, handleHostLeave]);
 

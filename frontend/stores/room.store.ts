@@ -360,6 +360,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
             clearTimeout(timeout);
             console.log('[RoomStore] Socket connected, emitting join_room');
             
+            // CRITICAL: Register listener BEFORE emit to avoid race condition
             s.on('room_joined', onRoomJoined);
             s.on('error', onError);
             
@@ -369,6 +370,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
                 cleanup();
                 reject(new Error(response?.message || 'Join failed'));
               }
+              // If success, wait for room_joined event (registered above)
             });
           } else {
             setTimeout(tryJoin, 100);
@@ -379,23 +381,42 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       } else {
         // Already connected
         console.log('[RoomStore] Socket already connected, emitting join_room');
+        
+        // CRITICAL: Register listener BEFORE emit to avoid race condition
+        // If server emits room_joined before callback, we must be listening
+        const onRoomJoined = (data: RoomJoinedPayload) => {
+          console.log('[RoomStore] room_joined event received:', data);
+          currentSocket.off('room_joined', onRoomJoined);
+          currentSocket.off('error', onError);
+          if (data.player?.id) {
+            sessionStorage.setItem('playerId', data.player.id);
+            sessionStorage.setItem('playerNickname', data.player.nickname);
+            sessionStorage.setItem('currentRoomId', data.room.id);
+            sessionStorage.setItem('isHost', 'false');
+          }
+          resolve();
+        };
+        
+        const onError = (error: { message: string }) => {
+          console.log('[RoomStore] error event received:', error);
+          currentSocket.off('room_joined', onRoomJoined);
+          currentSocket.off('error', onError);
+          reject(new Error(error.message));
+        };
+        
+        // Register listeners BEFORE emit to catch event immediately
+        currentSocket.on('room_joined', onRoomJoined);
+        currentSocket.on('error', onError);
+        
         currentSocket.emit('join_room', { pin, nickname }, (response: any) => {
           console.log('[RoomStore] join_room callback:', response);
           if (!response?.success) {
+            // Cleanup listeners on error
+            currentSocket.off('room_joined', onRoomJoined);
+            currentSocket.off('error', onError);
             reject(new Error(response?.message || 'Join failed'));
           }
-          // Resolve when room_joined event is received
-          const onRoomJoined = (data: RoomJoinedPayload) => {
-            currentSocket.off('room_joined', onRoomJoined);
-            if (data.player?.id) {
-              sessionStorage.setItem('playerId', data.player.id);
-              sessionStorage.setItem('playerNickname', data.player.nickname);
-              sessionStorage.setItem('currentRoomId', data.room.id);
-              sessionStorage.setItem('isHost', 'false');
-            }
-            resolve();
-          };
-          currentSocket.on('room_joined', onRoomJoined);
+          // If success, wait for room_joined event (registered above)
         });
       }
     });
