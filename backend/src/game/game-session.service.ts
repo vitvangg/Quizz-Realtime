@@ -170,6 +170,7 @@ export class GameSessionService {
         id: q.id,
         content: q.content,
         timeLimit: q.timeLimit,
+        imageUrl: q.imageUrl || undefined,
         answers: q.answers.map((a) => ({
           id: a.id,
           content: a.content,
@@ -651,17 +652,20 @@ export class GameSessionService {
       const quizData = JSON.parse(quizDataRaw);
       
       let remainingTime: number | null = null;
+      let questionEndTime: number | null = null;
       let currentQuestion: any = null;
       let correctAnswerId: string | null = null;
 
       if (quizData && cached.status === GameState.QUESTION_ACTIVE && cached.questionStartedAt) {
         const elapsed = (Date.now() - cached.questionStartedAt) / 1000;
         remainingTime = Math.max(0, cached.timeLimit - Math.floor(elapsed));
+        questionEndTime = cached.questionStartedAt + (cached.timeLimit * 1000);
         const questionData = quizData.questions[cached.currentQuestionIndex];
         if (questionData) {
           currentQuestion = {
             id: questionData.id,
             content: questionData.content,
+            imageUrl: questionData.imageUrl || undefined,
             answers: questionData.answers.map((a: any) => ({ id: a.id, content: a.content })),
             timeLimit: questionData.timeLimit,
           };
@@ -672,6 +676,7 @@ export class GameSessionService {
           currentQuestion = {
             id: questionData.id,
             content: questionData.content,
+            imageUrl: questionData.imageUrl || undefined,
             answers: questionData.answers.map((a: any) => ({ id: a.id, content: a.content })),
             timeLimit: questionData.timeLimit,
           };
@@ -704,6 +709,7 @@ export class GameSessionService {
         currentQuestionIndex: cached.currentQuestionIndex,
         totalQuestions: cached.totalQuestions,
         remainingTime,
+        questionEndTime,
         currentQuestion,
         correctAnswerId,
         leaderboard,
