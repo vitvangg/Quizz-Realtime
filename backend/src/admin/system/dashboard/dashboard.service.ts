@@ -37,7 +37,7 @@ export class DashboardService {
       user: adminId,
     });
 
-    this.eventEmitter.emit('system.incident.kill_switch', { pin });
+    this.redisService.publish('system.incident.kill_switch', JSON.stringify({ pin })).catch(e => this.logger.error(e));
 
     await this.auditLogService.logSecurityEvent({
       action: 'KILL_SWITCH',
@@ -68,13 +68,12 @@ export class DashboardService {
       user: adminId,
     });
 
-    // Phát sự kiện → GameGateway sẽ broadcast system:freeze tới toàn bộ người chơi
-    this.eventEmitter.emit('system.incident.lockdown', {
+    this.redisService.publish('system.incident.lockdown', JSON.stringify({
       enable,
       message: enable
         ? 'HỆ THỐNG TẠM DỪNG: Phát hiện truy cập bất thường. Đang truy vết kẻ tấn công. Vui lòng giữ nguyên màn hình...'
         : 'Hệ thống đã hoạt động trở lại. Trận đấu tiếp tục!',
-    });
+    })).catch(e => this.logger.error(e));
 
     await this.auditLogService.logSecurityEvent({
       action: enable ? 'LOCKDOWN_ENABLE' : 'LOCKDOWN_DISABLE',
@@ -127,12 +126,12 @@ export class DashboardService {
       user: adminId,
     });
 
-    this.eventEmitter.emit('system.incident.maintenance', {
+    this.redisService.publish('system.incident.maintenance', JSON.stringify({
       enable,
       message: options?.message,
       scheduledFrom: options?.scheduledFrom,
       scheduledUntil: options?.scheduledUntil,
-    });
+    })).catch(e => this.logger.error(e));
 
     await this.auditLogService.logSecurityEvent({
       action: enable ? 'MAINTENANCE_ENABLE' : 'MAINTENANCE_DISABLE',
@@ -214,8 +213,8 @@ export class DashboardService {
       details: `Manual ban by admin: ${reason} | TTL: ${ttlHours}h`,
     });
 
-    // Kick tất cả socket của IP đó ngay lập tức (không cần chờ reconnect)
-    this.eventEmitter.emit('system.incident.ban_ip', { ip });
+    // Kick tất cả socket của IP đó ngay lập tức (không cần chờ reconnect) thông qua Redis
+    this.redisService.publish('system.incident.ban_ip', JSON.stringify({ ip })).catch(e => this.logger.error(e));
 
     return { success: true };
   }
@@ -268,8 +267,8 @@ export class DashboardService {
       `IP Address: ${ip}\nTốc độ tấn công: ${requestCount} request/giây\nLý do: ${reason}\nThời gian: ${new Date().toISOString()}\n\nKiểm tra OPS Dashboard để quản lý.`,
     );
 
-    // Kick socket ngay lập tức
-    this.eventEmitter.emit('system.incident.ban_ip', { ip });
+    // Kick socket ngay lập tức thông qua Redis
+    this.redisService.publish('system.incident.ban_ip', JSON.stringify({ ip })).catch(e => this.logger.error(e));
   }
 
   // ============================================================================
