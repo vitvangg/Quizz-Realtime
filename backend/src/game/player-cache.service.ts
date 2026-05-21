@@ -153,10 +153,11 @@ export class PlayerCacheService {
         select: { id: true, nickname: true },
       });
 
-      for (const player of players) {
+      const cachePromises = players.map(player => {
         result.set(player.id, player.nickname);
-        await this.cachePlayerName(player.id, player.nickname);
-      }
+        return this.cachePlayerName(player.id, player.nickname);
+      });
+      await Promise.all(cachePromises);
     }
 
     // Fetch uncached Hosts (Users) from database
@@ -166,11 +167,12 @@ export class PlayerCacheService {
         select: { id: true, fullName: true },
       });
 
-      for (const user of users) {
+      const cachePromises = users.map(user => {
         const name = user.fullName || 'Host';
         result.set(`host_${user.id}`, name);
-        await this.cachePlayerName(`host_${user.id}`, name);
-      }
+        return this.cachePlayerName(`host_${user.id}`, name);
+      });
+      await Promise.all(cachePromises);
     }
 
     return result;

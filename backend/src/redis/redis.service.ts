@@ -136,7 +136,7 @@ export class RedisService extends Redis implements OnModuleDestroy {
   async setActiveRoom(sessionId: string, data: any): Promise<void> {
     await this.hset('admin:active_rooms', sessionId, JSON.stringify(data));
     // TTL sentinel key — nếu key này hết hạn (server crash, không cleanup), room được coi là ghost
-    await this.set(`admin:room_ttl:${sessionId}`, '1', 'EX', 300); // 1 phút (test)
+    await this.set(`admin:room_ttl:${sessionId}`, '1', 'EX', 7200);
   }
 
   async updateActiveRoom(sessionId: string, updates: Partial<any>): Promise<void> {
@@ -146,7 +146,7 @@ export class RedisService extends Redis implements OnModuleDestroy {
         const info = JSON.parse(infoStr);
         await this.hset('admin:active_rooms', sessionId, JSON.stringify({ ...info, ...updates }));
         // Refresh TTL sentinel so active games don't get cleaned as ghost sessions
-        await this.set(`admin:room_ttl:${sessionId}`, '1', 'EX', 60); // 1 phút (test)
+        await this.set(`admin:room_ttl:${sessionId}`, '1', 'EX', 7200);
       } catch (e) {
         console.error(`Error updating active room ${sessionId}`, e);
       }
