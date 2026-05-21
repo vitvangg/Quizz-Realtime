@@ -15,6 +15,7 @@ export interface Answer {
 export interface Question {
   id: string;
   content: string;
+  imageUrl?: string;
   answers: Answer[];
   timeLimit: number;
 }
