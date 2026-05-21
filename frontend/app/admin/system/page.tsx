@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import api from '@/lib/axios';
+import { useAuthStore } from '@/stores/auth.store';
 
 interface SystemMetrics {
   cpu: number;
@@ -75,6 +76,8 @@ export default function SystemDashboard() {
   const socketRef = useRef<Socket | null>(null);
   const terminalRef = useRef<HTMLDivElement>(null);
 
+  const { accessToken, isHydrated } = useAuthStore();
+
   const addEvent = useCallback((event: SystemEvent) => {
     setEvents((prev) => [...prev.slice(-99), event]);
   }, []);
@@ -118,10 +121,15 @@ export default function SystemDashboard() {
     }
   }, [tab, fetchSessions, fetchAuditLogs]);
 
-  // WebSocket OPS
+  // WebSocket OPS — FIX: thêm auth token để backend không từ chối kết nối
   useEffect(() => {
+    if (!isHydrated || !accessToken) return;
+
     const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:5000';
-    socketRef.current = io(`${wsUrl}/admin-ops`, { transports: ['websocket'] });
+    socketRef.current = io(`${wsUrl}/admin-ops`, {
+      transports: ['websocket'],
+      auth: { token: accessToken },  // ← BUG FIX: backend yêu cầu JWT
+    });
 
     socketRef.current.on('connect', () => {
       setIsConnected(true);
@@ -139,7 +147,8 @@ export default function SystemDashboard() {
     });
 
     return () => { socketRef.current?.disconnect(); };
-  }, [addEvent, fetchBannedIps]);
+  }, [isHydrated, accessToken, addEvent, fetchBannedIps]);
+
 
   useEffect(() => {
     if (terminalRef.current) terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
