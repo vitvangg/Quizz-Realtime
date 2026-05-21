@@ -108,8 +108,100 @@ export class RedisService extends Redis implements OnModuleDestroy {
   }
 
   // ============================================================================
+  // ACTIVE ROOMS TRACKING
+  // ============================================================================
+
+  async setActiveRoom(sessionId: string, data: any): Promise<void> {
+    await this.hset('admin:active_rooms', sessionId, JSON.stringify(data));
+    // TTL sentinel key — nếu key này hết hạn (server crash, không cleanup), room được coi là ghost
+    await this.set(`admin:room_ttl:${sessionId}`, '1', 'EX', 60); // 1 phút (test)
+  }
+
+  async updateActiveRoom(sessionId: string, updates: Partial<any>): Promise<void> {
+    const infoStr = await this.hget('admin:active_rooms', sessionId);
+    if (infoStr) {
+      try {
+        const info = JSON.parse(infoStr);
+        await this.hset('admin:active_rooms', sessionId, JSON.stringify({ ...info, ...updates }));
+        // Refresh TTL sentinel so active games don't get cleaned as ghost sessions
+        await this.set(`admin:room_ttl:${sessionId}`, '1', 'EX', 60); // 1 phút (test)
+      } catch (e) {
+        console.error(`Error updating active room ${sessionId}`, e);
+      }
+    }
+  }
+
+  async removeActiveRoom(sessionId: string): Promise<void> {
+    await this.hdel('admin:active_rooms', sessionId);
+    await this.del(`admin:room_players:${sessionId}`);
+    await this.del(`admin:room_ttl:${sessionId}`);
+  }
+
+  async getActiveRooms(): Promise<Record<string, any>> {
+    const data = await this.hgetall('admin:active_rooms');
+    const rooms: Record<string, any> = {};
+    if (data) {
+      for (const [sessionId, infoStr] of Object.entries(data)) {
+        try {
+          // Check 1: TTL sentinel — nếu hết hạn là ghost room (server crash không cleanup)
+          const alive = await this.exists(`admin:room_ttl:${sessionId}`);
+          if (alive === 0) {
+            await this.hdel('admin:active_rooms', sessionId);
+            await this.del(`admin:room_players:${sessionId}`);
+            console.log(`[Redis] Auto-cleaned ghost room (TTL expired): ${sessionId}`);
+            continue;
+          }
+
+          // Check 2: Game cache — nếu game cache không còn, session đã kết thúc (đóng tab, crash)
+          const info = JSON.parse(infoStr as string);
+          // Chỉ kiểm tra game cache nếu session không phải FINISHED (FINISHED sessions được cleanup ngay)
+          if (info.status !== 'FINISHED') {
+            const gameCacheAlive = await this.exists(`game:${sessionId}`);
+            if (gameCacheAlive === 0) {
+              await this.hdel('admin:active_rooms', sessionId);
+              await this.del(`admin:room_players:${sessionId}`);
+              await this.del(`admin:room_ttl:${sessionId}`);
+              console.log(`[Redis] Auto-cleaned ghost room (game cache gone): ${sessionId}`);
+              continue;
+            }
+          }
+
+          const playersCount = await this.getRoomPlayerCount(sessionId);
+          rooms[sessionId] = { ...info, playersCount };
+        } catch (e) {
+          console.error(`Error parsing room data for ${sessionId}`, e);
+        }
+      }
+    }
+    return rooms;
+  }
+
+  async incrementRoomPlayer(sessionId: string, amount: number): Promise<void> {
+    await this.incrby(`admin:room_players:${sessionId}`, amount);
+  }
+
+  async getRoomPlayerCount(sessionId: string): Promise<number> {
+    const val = await this.get(`admin:room_players:${sessionId}`);
+    return val ? parseInt(val, 10) : 0;
+  }
+
+  // ============================================================================
   // RATE LIMITING (Sliding Window via Lua)
   // ============================================================================
+
+  // Đọc số request hiện tại của một IP trong sliding window
+  async getIpRequestCount(ip: string): Promise<number> {
+    try {
+      const key = `ratelimit:${ip}`;
+      const now = Date.now();
+      // Xóa các entry cũ hơn 1 giây trước
+      await this.zremrangebyscore(key, '-inf', now - 1000);
+      const count = await this.zcard(key);
+      return count || 0;
+    } catch {
+      return 0;
+    }
+  }
 
   async checkRateLimit(
     key: string,

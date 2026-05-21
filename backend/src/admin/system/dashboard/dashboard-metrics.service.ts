@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { DashboardGateway } from './dashboard.gateway';
 import { GameGateway } from '../../../game/game.gateway';
+import { RedisService } from '../../../redis/redis.service';
 import pidusage = require('pidusage');
 import * as os from 'os';
 
@@ -13,6 +14,7 @@ export class DashboardMetricsService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly systemGateway: DashboardGateway,
     private readonly gameGateway: GameGateway,
+    private readonly redisService: RedisService,
   ) { }
 
   onModuleInit() {
@@ -56,6 +58,22 @@ export class DashboardMetricsService implements OnModuleInit, OnModuleDestroy {
       }
 
       this.systemGateway.broadcastMetrics(metrics);
+
+      // Phát sự kiện cập nhật danh sách phòng
+      const activeRooms = await this.redisService.getActiveRooms();
+      const sessions = Object.entries(activeRooms).map(([sessionId, info]) => ({
+        sessionId,
+        roomId: info.roomId,
+        hostId: info.hostId,
+        status: info.status,
+        playersCount: info.playersCount || 0,
+        startedAt: info.startedAt,
+      }));
+      
+      if (this.systemGateway.server) {
+        this.systemGateway.server.emit('admin:rooms_update', { sessions, timestamp: new Date().toISOString() });
+      }
+
     } catch (err) {
       this.logger.error(`Failed to collect metrics: ${err.message}`);
     }

@@ -5,13 +5,13 @@ services:
       dockerfile: Dockerfile
     container_name: quizz-backend
     restart: always
-    ports:
-      - "5000:5000"
+    expose:
+      - "5000"
     environment:
       - DATABASE_URL=${DATABASE_URL}
-      - REDIS_HOST=${REDIS_HOST:-redis}
-      - REDIS_PORT=${REDIS_PORT:-6379}
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-quizzpassword}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
       - JWT_KEY=${JWT_KEY}
       - NODE_ENV=production
       - PORT=5000
@@ -22,11 +22,15 @@ services:
       - SMTP_PASSWORD=${SMTP_PASSWORD}
       - SMTP_FROMNAME=${SMTP_FROMNAME:-Admin}
       - SMTP_FROMEMAIL=${SMTP_FROMEMAIL:-admin@quizz.local}
-    depends_on:
-      redis:
-        condition: service_healthy
+      - CORS_ORIGIN=${CORS_ORIGIN}
+      - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
+      - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
+      - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
+    networks:
+      - quizz-net
 
-  frontend:
+  # Next.js app (named "nextjs" để nginx upstream trỏ đúng)
+  nextjs:
     build:
       context: ./frontend
       dockerfile: Dockerfile
@@ -35,25 +39,28 @@ services:
         - NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL}
     container_name: quizz-frontend
     restart: always
-    ports:
-      - "3000:3000"
+    expose:
+      - "3000"
     depends_on:
       - backend
+    networks:
+      - quizz-net
 
-  redis:
-    image: redis:7-alpine
-    container_name: quizz-redis
+  # Nginx reverse proxy — cổng duy nhất ra ngoài internet
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    container_name: quizz-nginx
     restart: always
-    command: redis-server --requirepass ${REDIS_PASSWORD:-quizzpassword}
     ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-quizzpassword}", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
+      - "80:80"
+    depends_on:
+      - nextjs
+      - backend
+    networks:
+      - quizz-net
 
-volumes:
-  redis_data:
+networks:
+  quizz-net:
+    driver: bridge

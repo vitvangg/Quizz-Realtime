@@ -5,6 +5,7 @@ import { DashboardGateway } from './dashboard.gateway';
 import { RedisService } from '../../../redis/redis.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { NotificationService } from '../notification/notification.service';
+import { PrismaService } from '../../../prisma/prisma.service';
 
 @Injectable()
 export class DashboardService {
@@ -16,6 +17,7 @@ export class DashboardService {
     private readonly redisService: RedisService,
     private readonly auditLogService: AuditLogService,
     private readonly notificationService: NotificationService,
+    private readonly prisma: PrismaService,
   ) { }
 
   // ============================================================================
@@ -143,42 +145,45 @@ export class DashboardService {
   }
 
   async getActiveSessions() {
-    // Scan Redis để lấy tất cả game còn đang chạy
-    const keys = await this.redisService.keys('game:*');
-    const sessions: Array<{
-      sessionId: string;
-      roomId: string;
-      status: string;
-      currentQuestionIndex: number;
-      totalQuestions: number;
-      questionStartedAt: number | null;
-      timeLimit: number;
-    }> = [];
-
-    for (const key of keys) {
-      // Bỏ qua các key phụ (timer_pause, timer_meta)
-      if (key.includes(':timer_') || key.includes(':config:')) continue;
-
-      try {
-        const raw = await this.redisService.get(key);
-        if (!raw) continue;
-        const cache = JSON.parse(raw);
-
-        if (cache.status === 'FINISHED') continue;
-
-        sessions.push({
-          sessionId: cache.sessionId,
-          roomId: cache.roomId,
-          status: cache.status,
-          currentQuestionIndex: cache.currentQuestionIndex,
-          totalQuestions: cache.totalQuestions,
-          questionStartedAt: cache.questionStartedAt,
-          timeLimit: cache.timeLimit,
-        });
-      } catch { /* skip corrupt cache */ }
-    }
+    const roomsMap = await this.redisService.getActiveRooms();
+    const sessions = Object.entries(roomsMap).map(([sessionId, info]) => ({
+      sessionId,
+      roomId: info.roomId,
+      hostId: info.hostId,
+      status: info.status,
+      playersCount: info.playersCount || 0,
+      startedAt: info.startedAt,
+      currentQuestionIndex: info.currentQuestionIndex ?? 0,
+      totalQuestions: info.totalQuestions ?? 0,
+      timeLimit: info.timeLimit ?? 20,
+      questionStartedAt: info.questionStartedAt ?? null,
+    }));
 
     return { success: true, sessions };
+  }
+
+  async getSessionPlayers(sessionId: string) {
+    const data = await this.redisService.hgetall(`presence:session:${sessionId}`);
+    if (!data) return { success: true, players: [] };
+
+    const players = await Promise.all(
+      Object.values(data).map(async (str) => {
+        try {
+          const player = JSON.parse(str as string);
+          // Thêm requestCount từ Redis sliding window counter
+          if (player.ipAddress) {
+            player.requestCount = await this.redisService.getIpRequestCount(player.ipAddress);
+          } else {
+            player.requestCount = 0;
+          }
+          return player;
+        } catch {
+          return null;
+        }
+      })
+    );
+
+    return { success: true, players: players.filter(Boolean) };
   }
 
   // ============================================================================
@@ -208,6 +213,9 @@ export class DashboardService {
       ipAddress: ip,
       details: `Manual ban by admin: ${reason} | TTL: ${ttlHours}h`,
     });
+
+    // Kick tất cả socket của IP đó ngay lập tức (không cần chờ reconnect)
+    this.eventEmitter.emit('system.incident.ban_ip', { ip });
 
     return { success: true };
   }
@@ -259,5 +267,37 @@ export class DashboardService {
       `Auto-Ban IP: ${ip}`,
       `IP Address: ${ip}\nTốc độ tấn công: ${requestCount} request/giây\nLý do: ${reason}\nThời gian: ${new Date().toISOString()}\n\nKiểm tra OPS Dashboard để quản lý.`,
     );
+
+    // Kick socket ngay lập tức
+    this.eventEmitter.emit('system.incident.ban_ip', { ip });
+  }
+
+  // ============================================================================
+  // SYSTEM OVERVIEW
+  // ============================================================================
+
+
+  async getSystemOverview() {
+    const [totalUsers, totalQuizzes, activeRooms, bannedIps] = await Promise.all([
+      this.prisma.user.count(),
+      this.prisma.quiz.count({ where: { deletedAt: null } }),
+      this.redisService.getActiveRooms(),
+      this.redisService.getBannedIps(),
+    ]);
+
+    const activeSessions = Object.keys(activeRooms).length;
+    const totalPlayersOnline = Object.values(activeRooms).reduce(
+      (sum: number, room: any) => sum + (room.playersCount || 0), 0
+    );
+
+    return {
+      totalUsers,
+      totalQuizzes,
+      activeSessions,
+      totalPlayersOnline,
+      bannedIpsCount: bannedIps.length,
+      connectedAdmins: this.dashboardGateway.getConnectedAdminsCount(),
+    };
   }
 }
+

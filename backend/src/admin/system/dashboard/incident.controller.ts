@@ -45,4 +45,15 @@ export class IncidentController {
   async getActiveSessions() {
     return this.systemService.getActiveSessions();
   }
+
+  @Get('sessions/:sessionId/players')
+  async getSessionPlayers(@Req() req: any) {
+    const sessionId = req.params.sessionId;
+    return this.systemService.getSessionPlayers(sessionId);
+  }
+
+  @Get('overview')
+  async getOverview() {
+    return this.systemService.getSystemOverview();
+  }
 }

@@ -64,14 +64,14 @@ export function UserFormDialog({ open, onOpenChange, user }: UserFormDialogProps
     e.preventDefault();
     setLoading(true);
     try {
-      const payload = { 
+      const payload = {
         ...formData,
-        roleId: formData.roleId === "" ? null : formData.roleId 
+        roleId: formData.roleId === "" ? null : formData.roleId
       };
 
       if (isEdit) {
         // Chỉ gửi password nếu người dùng nhập mật khẩu mới
-        if (!payload.password) delete payload.password;
+        if (!payload.password) delete (payload as any).password;
         await updateUser(user.id, payload);
       } else {
         await createUser(payload);
@@ -144,8 +144,8 @@ export function UserFormDialog({ open, onOpenChange, user }: UserFormDialogProps
               <Label htmlFor="roleId" className="text-right">
                 Vai trò
               </Label>
-              <select 
-                id="roleId" 
+              <select
+                id="roleId"
                 className="col-span-3 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                 value={formData.roleId}
                 onChange={handleChange}
@@ -162,8 +162,8 @@ export function UserFormDialog({ open, onOpenChange, user }: UserFormDialogProps
               <Label htmlFor="status" className="text-right">
                 Trạng thái
               </Label>
-              <select 
-                id="status" 
+              <select
+                id="status"
                 className="col-span-3 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                 value={formData.status}
                 onChange={handleChange}

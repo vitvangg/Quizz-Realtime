@@ -167,6 +167,18 @@ export class GameSessionService {
       this.logger.warn(`Cache warmup failed (non-critical): ${e.message}`),
     );
 
+    // Track active room for admin ops
+    await this.redis.setActiveRoom(session.id, {
+      roomId,
+      hostId,
+      status: 'QUESTION_ACTIVE',
+      startedAt: Date.now(),
+      currentQuestionIndex: 0,
+      totalQuestions: room.quiz.questions.length,
+      timeLimit: firstQuestion.timeLimit || 20,
+      questionStartedAt: Date.now(),
+    });
+
     this.logger.log(
       `Game session ${session.id} started for room ${roomId} | ${room.players.length} players`,
     );
@@ -298,6 +310,11 @@ export class GameSessionService {
       timerVersion: (cached.timerVersion || 0) + 1,
     }, 'handleQuestionEnd');
 
+    await this.redis.updateActiveRoom(sessionId, {
+      status: GameState.QUESTION_RESULT,
+      questionStartedAt: null,
+    });
+
     // STEP 4: Update DB SECOND (for persistence/recovery)
     await this.prisma.gameSession.update({
       where: { id: sessionId },
@@ -416,6 +433,15 @@ export class GameSessionService {
       totalQuestions: cached.totalQuestions,
     };
 
+    // Update admin tracking with new question state
+    await this.redis.updateActiveRoom(sessionId, {
+      status: 'QUESTION_ACTIVE',
+      currentQuestionIndex: nextIndex,
+      totalQuestions: cached.totalQuestions,
+      timeLimit: nextQuestion.timeLimit || 20,
+      questionStartedAt: Date.now(),
+    });
+
     callback(questionData);
 
     return questionData;
@@ -462,6 +488,11 @@ export class GameSessionService {
 
     this.logger.log(`Game session ${sessionId} ended`);
 
+    // Xóa khỏi admin tracking — tránh hiển thị "ghost session" trên dashboard
+    await this.redis.removeActiveRoom(sessionId).catch((e) =>
+      this.logger.warn(`Failed to remove active room ${sessionId}: ${e.message}`),
+    );
+
     return finalResults;
   }
 
@@ -483,6 +514,9 @@ export class GameSessionService {
 
     // Delete leaderboard
     await this.redis.del(`leaderboard:${sessionId}`);
+
+    // Track active room for admin ops
+    await this.redis.removeActiveRoom(sessionId);
 
     // Delete player in-game tracking keys
     // Note: We don't delete player names cache as it's shared across sessions
@@ -519,6 +553,9 @@ export class GameSessionService {
         });
       }
     });
+
+    // Track active room for admin ops
+    await this.redis.removeActiveRoom(sessionId);
 
     this.logger.log(`[GameSessionService] Session ${sessionId} closed in DB`);
   }

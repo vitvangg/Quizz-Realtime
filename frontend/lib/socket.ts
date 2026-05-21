@@ -2,7 +2,7 @@
 
 import { io, Socket } from 'socket.io-client';
 
-const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000';
+const SOCKET_URL = process.env.NEXT_PUBLIC_WS_URL || process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000';
 
 /**
  * Single shared socket instance.
@@ -26,7 +26,7 @@ function safeOn(socket: Socket, event: string, handler: SocketHandler): void {
     console.warn(`[Socket] Event ${event} already registered, skipping duplicate`);
     return;
   }
-  
+
   registeredListeners.set(event, [handler]);
   listenerCounts.set(event, 1);
   socket.on(event, handler);
@@ -86,7 +86,7 @@ let _authToken: string | null = null;
 
 export function setSocketAuthToken(token: string | null) {
   _authToken = token;
-  
+
   // If connected, disconnect and reconnect with new token
   // This ensures socket always has the latest auth token
   if (sharedSocket.connected) {
@@ -100,7 +100,7 @@ export function setSocketAuthToken(token: string | null) {
 
 export function connectSocketWithAuth(token: string) {
   setSocketAuthToken(token);
-  
+
   if (!sharedSocket.connected) {
     (sharedSocket as any).auth = { token };
     sharedSocket.connect();
