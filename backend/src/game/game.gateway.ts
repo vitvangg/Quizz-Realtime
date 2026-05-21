@@ -60,6 +60,9 @@ export class GameGateway
   // This is NOT authoritative - only used for disconnect handling
   private socketMap = new Map<string, PlayerIdentity>();
 
+  // IP -> Set<socketId> mapping for instant kick on ban
+  private ipSocketMap = new Map<string, Set<string>>();
+
   // Session callbacks for timer handling
   private sessionCallbacks = new Map<string, (data: any) => void>();
 
@@ -97,7 +100,28 @@ export class GameGateway
 
   private getClientIp(client: Socket): string {
     const forwardedFor = client.handshake.headers['x-forwarded-for'];
-    return typeof forwardedFor === 'string' ? forwardedFor.split(',')[0].trim() : client.handshake.address;
+    const raw = typeof forwardedFor === 'string' ? forwardedFor.split(',')[0].trim() : client.handshake.address;
+    // Normalize IPv6 loopback to IPv4 for consistent key matching
+    if (raw === '::1' || raw === '::ffff:127.0.0.1') return '127.0.0.1';
+    // Strip IPv4-mapped IPv6 prefix (::ffff:x.x.x.x)
+    if (raw.startsWith('::ffff:')) return raw.slice(7);
+    return raw;
+  }
+
+  /**
+   * Track IP request for admin rate monitoring.
+   * Writes to the same Redis sorted-set that getIpRequestCount reads from.
+   */
+  private async trackIpRequest(ip: string): Promise<void> {
+    try {
+      const key = `ratelimit:${ip}`;
+      const now = Date.now();
+      // Add entry, expire after 2s so the set doesn't grow indefinitely
+      await this.redisService.zadd(key, now, `${now}:${Math.random()}`);
+      await this.redisService.expire(key, 2);
+    } catch {
+      // Non-critical — never block the main event
+    }
   }
 
   // ============================================================================
@@ -116,6 +140,10 @@ export class GameGateway
       return;
     }
 
+    // Track IP -> socket mapping (for instant kick on ban)
+    if (!this.ipSocketMap.has(ip)) this.ipSocketMap.set(ip, new Set());
+    this.ipSocketMap.get(ip)!.add(client.id);
+
     this.logger.log(`[GameGateway] Client connected: ${client.id} (IP: ${ip})`);
   }
 
@@ -131,6 +159,13 @@ export class GameGateway
         : 'none'
       }`,
     );
+
+    // Remove from IP -> socket tracking
+    const ip = identity?.ipAddress;
+    if (ip) {
+      this.ipSocketMap.get(ip)?.delete(client.id);
+      if (this.ipSocketMap.get(ip)?.size === 0) this.ipSocketMap.delete(ip);
+    }
 
     if (!identity) return;
 
@@ -163,6 +198,33 @@ export class GameGateway
   // ============================================================================
   // SYSTEM INCIDENT EVENTS
   // ============================================================================
+
+  /**
+   * Kick tất cả socket của một IP ngay lập tức.
+   * Gọi khi ban IP — không cần chờ user reconnect.
+   */
+  kickIp(ip: string): number {
+    const sockets = this.ipSocketMap.get(ip);
+    if (!sockets || sockets.size === 0) return 0;
+    let count = 0;
+    for (const socketId of sockets) {
+      // Check cả /game namespace
+      const gameSocket = this.server?.sockets?.sockets?.get(socketId);
+      if (gameSocket) {
+        gameSocket.emit('banned', { reason: 'Your IP has been banned by admin.' });
+        gameSocket.disconnect(true);
+        count++;
+      }
+    }
+    this.logger.warn(`[GameGateway] Kicked ${count} socket(s) for banned IP: ${ip}`);
+    return count;
+  }
+
+  @OnEvent('system.incident.ban_ip')
+  handleBanIpEvent(payload: { ip: string }) {
+    this.logger.warn(`[GameGateway] Ban IP event received: ${payload.ip}`);
+    this.kickIp(payload.ip);
+  }
 
   @OnEvent('system.incident.lockdown')
   async handleLockdown(payload: { enable: boolean; message: string }) {
@@ -1106,6 +1168,10 @@ export class GameGateway
     },
   ) {
     try {
+      // Track IP request count for admin dashboard (rate monitoring)
+      const ip = this.getClientIp(client);
+      this.trackIpRequest(ip).catch(() => {});
+
       // [T2] Backend received submit_answer
       this.logger.debug(
         `[T2] submit_answer received player=${payload.playerId} ts=${payload.clientTimestamp}`,

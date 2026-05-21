@@ -171,8 +171,12 @@ export class GameSessionService {
     await this.redis.setActiveRoom(session.id, {
       roomId,
       hostId,
-      status: 'PLAYING',
+      status: 'QUESTION_ACTIVE',
       startedAt: Date.now(),
+      currentQuestionIndex: 0,
+      totalQuestions: room.quiz.questions.length,
+      timeLimit: firstQuestion.timeLimit || 20,
+      questionStartedAt: Date.now(),
     });
 
     this.logger.log(
@@ -304,6 +308,11 @@ export class GameSessionService {
       timerVersion: (cached.timerVersion || 0) + 1,
     }, 'handleQuestionEnd');
 
+    await this.redis.updateActiveRoom(sessionId, {
+      status: GameState.QUESTION_RESULT,
+      questionStartedAt: null,
+    });
+
     // STEP 4: Update DB SECOND (for persistence/recovery)
     await this.prisma.gameSession.update({
       where: { id: sessionId },
@@ -421,6 +430,15 @@ export class GameSessionService {
       totalQuestions: cached.totalQuestions,
     };
 
+    // Update admin tracking with new question state
+    await this.redis.updateActiveRoom(sessionId, {
+      status: 'QUESTION_ACTIVE',
+      currentQuestionIndex: nextIndex,
+      totalQuestions: cached.totalQuestions,
+      timeLimit: nextQuestion.timeLimit || 20,
+      questionStartedAt: Date.now(),
+    });
+
     callback(questionData);
 
     return questionData;
@@ -466,6 +484,11 @@ export class GameSessionService {
     callback(finalResults);
 
     this.logger.log(`Game session ${sessionId} ended`);
+
+    // Xóa khỏi admin tracking — tránh hiển thị "ghost session" trên dashboard
+    await this.redis.removeActiveRoom(sessionId).catch((e) =>
+      this.logger.warn(`Failed to remove active room ${sessionId}: ${e.message}`),
+    );
 
     return finalResults;
   }
