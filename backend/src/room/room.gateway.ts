@@ -12,6 +12,7 @@ import {
 import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { UseGuards, UsePipes, ValidationPipe } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
 import { JwtService } from '@nestjs/jwt';
 import { RoomService } from './room.service';
 import { RedisService } from '../redis/redis.service';
@@ -68,6 +69,9 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   // This is NOT authoritative - only used for disconnect handling
   private socketMap = new Map<string, PlayerIdentity>();
 
+  // Track IP to socket for instant banning
+  private ipSocketMap = new Map<string, Set<string>>();
+
   constructor(
     private readonly roomService: RoomService,
     private readonly jwtService: JwtService,
@@ -102,6 +106,9 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       return;
     }
 
+    if (!this.ipSocketMap.has(ip)) this.ipSocketMap.set(ip, new Set());
+    this.ipSocketMap.get(ip)!.add(client.id);
+
     this.logger.log(`[RoomGateway] Client connected: ${client.id} (IP: ${ip})`);
   }
 
@@ -121,6 +128,12 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
     // Remove from socket map
     this.socketMap.delete(client.id);
+
+    const ip = client.handshake.address;
+    if (this.ipSocketMap.has(ip)) {
+      this.ipSocketMap.get(ip)?.delete(client.id);
+      if (this.ipSocketMap.get(ip)?.size === 0) this.ipSocketMap.delete(ip);
+    }
 
     if (!roomId || !playerId) return;
 
@@ -790,6 +803,24 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
   emitToRoom(roomId: string, event: string, data: any) {
     this.server.to(roomId).emit(event, data);
+  }
+
+  @OnEvent('system.incident.ban_ip')
+  handleBanIpEvent(payload: { ip: string }) {
+    const sockets = this.ipSocketMap.get(payload.ip);
+    if (!sockets || sockets.size === 0) return;
+    let count = 0;
+    for (const socketId of sockets) {
+      const lobbySocket = this.server?.sockets?.sockets?.get(socketId);
+      if (lobbySocket) {
+        lobbySocket.emit('banned', { reason: 'Your IP has been banned by admin.' });
+        lobbySocket.disconnect(true);
+        count++;
+      }
+    }
+    if (count > 0) {
+      this.logger.warn(`[RoomGateway] Kicked ${count} socket(s) for banned IP: ${payload.ip}`);
+    }
   }
 
   /**

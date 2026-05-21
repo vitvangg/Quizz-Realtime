@@ -1,9 +1,12 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import Redis from 'ioredis';
 
 @Injectable()
 export class RedisService extends Redis implements OnModuleDestroy {
-  constructor() {
+  private subClient: Redis;
+
+  constructor(private readonly eventEmitter: EventEmitter2) {
     const host = process.env.REDIS_HOST;
     const port = parseInt(process.env.REDIS_PORT || '6379', 10);
     const password = process.env.REDIS_PASSWORD;
@@ -33,9 +36,28 @@ export class RedisService extends Redis implements OnModuleDestroy {
     this.on('connect', () => {
       console.log('Redis connected successfully');
     });
+
+    // Initialize subscriber client for cross-instance communication
+    this.subClient = new Redis({ host, port, password });
+
+    // Subscribe to all incident events
+    this.subClient.psubscribe('system.incident.*', (err) => {
+      if (err) console.error('Failed to subscribe to system incidents', err);
+    });
+
+    this.subClient.on('pmessage', (pattern, channel, message) => {
+      try {
+        const payload = JSON.parse(message);
+        // Relay to local EventEmitter
+        this.eventEmitter.emit(channel, payload);
+      } catch (e) {
+        console.error(`Failed to parse pub/sub message from ${channel}`);
+      }
+    });
   }
 
   onModuleDestroy() {
+    if (this.subClient) this.subClient.quit();
     this.disconnect();
   }
 
@@ -114,7 +136,7 @@ export class RedisService extends Redis implements OnModuleDestroy {
   async setActiveRoom(sessionId: string, data: any): Promise<void> {
     await this.hset('admin:active_rooms', sessionId, JSON.stringify(data));
     // TTL sentinel key — nếu key này hết hạn (server crash, không cleanup), room được coi là ghost
-    await this.set(`admin:room_ttl:${sessionId}`, '1', 'EX', 60); // 1 phút (test)
+    await this.set(`admin:room_ttl:${sessionId}`, '1', 'EX', 300); // 1 phút (test)
   }
 
   async updateActiveRoom(sessionId: string, updates: Partial<any>): Promise<void> {
@@ -218,12 +240,12 @@ export class RedisService extends Redis implements OnModuleDestroy {
       local limit = tonumber(ARGV[3])
       redis.call('ZREMRANGEBYSCORE', key, '-inf', now - window)
       local count = redis.call('ZCARD', key)
+      redis.call('ZADD', key, now, now .. ':' .. math.random())
+      redis.call('EXPIRE', key, math.ceil(window / 1000) + 1)
       if count < limit then
-        redis.call('ZADD', key, now, now .. ':' .. math.random())
-        redis.call('EXPIRE', key, math.ceil(window / 1000) + 1)
         return {1, count + 1}
       end
-      return {0, count}
+      return {0, count + 1}
     `;
 
     try {

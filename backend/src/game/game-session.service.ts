@@ -22,9 +22,10 @@ export enum GameState {
   FINISHED = 'FINISHED',
 }
 
-interface GameCache {
+export interface GameCache {
   sessionId: string;
   roomId: string;
+  hostId?: string;
   status: GameState;
   currentQuestionIndex: number;
   totalQuestions: number;
@@ -110,7 +111,7 @@ export class GameSessionService {
       throw new BadRequestException('Quiz has no questions');
     }
 
-    const session = await this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const gameSession = await tx.gameSession.create({
         data: {
           roomId,
@@ -120,7 +121,7 @@ export class GameSessionService {
         },
       });
 
-      await tx.playerSession.createMany({
+      const playerSessions = await tx.playerSession.createManyAndReturn({
         data: room.players.map((p) => ({
           playerId: p.id,
           sessionId: gameSession.id,
@@ -133,8 +134,11 @@ export class GameSessionService {
         data: { status: 'PLAYING' as any },
       });
 
-      return gameSession;
+      return { gameSession, playerSessions };
     });
+
+    const session = result.gameSession;
+    const playerSessions = result.playerSessions;
 
     const questionIds = room.quiz.questions.map((q) => q.id);
     const firstQuestion = room.quiz.questions[0];
@@ -142,6 +146,7 @@ export class GameSessionService {
     const gameCache: GameCache = {
       sessionId: session.id,
       roomId,
+      hostId,
       status: GameState.QUESTION_ACTIVE,
       currentQuestionIndex: 0,
       totalQuestions: room.quiz.questions.length,
@@ -158,6 +163,28 @@ export class GameSessionService {
       'EX',
       GAME_CONSTANTS.GAME_CACHE_TTL,
     );
+
+    // Cache quiz data for O(1) lookups during gameplay
+    const quizData = {
+      questions: room.quiz.questions.map((q) => ({
+        id: q.id,
+        content: q.content,
+        timeLimit: q.timeLimit,
+        answers: q.answers.map((a) => ({
+          id: a.id,
+          content: a.content,
+          isCorrect: a.isCorrect,
+        })),
+      })),
+    };
+    await this.redis.set(`game:quiz_data:${session.id}`, JSON.stringify(quizData), 'EX', GAME_CONSTANTS.GAME_CACHE_TTL);
+
+    // Cache playerSession mappings
+    const playerSessionMap: Record<string, string> = {};
+    playerSessions.forEach((ps) => {
+      playerSessionMap[ps.playerId] = ps.id;
+    });
+    await this.redis.set(`game:player_sessions:${session.id}`, JSON.stringify(playerSessionMap), 'EX', GAME_CONSTANTS.GAME_CACHE_TTL);
 
     // Add regular players to leaderboard (their player.id values)
     await this.initLeaderboard(session.id, room.players.map((p) => p.id));
@@ -512,6 +539,10 @@ export class GameSessionService {
     await this.redis.del(`game:timer_meta:${sessionId}`);
     await this.redis.del(`game:timer_pause:${sessionId}`);
 
+    // Delete new Redis optimization keys
+    await this.redis.del(`game:quiz_data:${sessionId}`);
+    await this.redis.del(`game:player_sessions:${sessionId}`);
+
     // Delete leaderboard
     await this.redis.del(`leaderboard:${sessionId}`);
 
@@ -606,13 +637,90 @@ export class GameSessionService {
   async getFullGameState(sessionId: string) {
     const cacheKey = `game:${sessionId}`;
     const cachedRaw = await this.redis.get(cacheKey);
-    const cached = cachedRaw ? JSON.parse(cachedRaw) : null;
+    const cached: GameCache | null = cachedRaw ? JSON.parse(cachedRaw) : null;
     
-    console.log(`[getFullGameState] sessionId=${sessionId} cacheKey=${cacheKey}`);
-    console.log(`[getFullGameState] cachedRaw=${cachedRaw ? 'EXISTS' : 'NULL'}`);
+    // CRITICAL: Fast path using 100% Redis cache (avoids DB queries entirely during gameplay)
     if (cached) {
-      console.log(`[getFullGameState] cached.status=${cached.status} cached.sessionId=${cached.sessionId}`);
+      const quizDataRaw = await this.redis.get(`game:quiz_data:${sessionId}`);
+      
+      // Fallback if quizData is not found in Redis (old sessions)
+      if (!quizDataRaw) {
+        return this.getFullGameStateFromDB(sessionId);
+      }
+      
+      const quizData = JSON.parse(quizDataRaw);
+      
+      let remainingTime: number | null = null;
+      let currentQuestion: any = null;
+      let correctAnswerId: string | null = null;
+
+      if (quizData && cached.status === GameState.QUESTION_ACTIVE && cached.questionStartedAt) {
+        const elapsed = (Date.now() - cached.questionStartedAt) / 1000;
+        remainingTime = Math.max(0, cached.timeLimit - Math.floor(elapsed));
+        const questionData = quizData.questions[cached.currentQuestionIndex];
+        if (questionData) {
+          currentQuestion = {
+            id: questionData.id,
+            content: questionData.content,
+            answers: questionData.answers.map((a: any) => ({ id: a.id, content: a.content })),
+            timeLimit: questionData.timeLimit,
+          };
+        }
+      } else if (quizData && cached.status === GameState.QUESTION_RESULT) {
+        const questionData = quizData.questions[cached.currentQuestionIndex];
+        if (questionData) {
+          currentQuestion = {
+            id: questionData.id,
+            content: questionData.content,
+            answers: questionData.answers.map((a: any) => ({ id: a.id, content: a.content })),
+            timeLimit: questionData.timeLimit,
+          };
+          const correctAnswer = questionData.answers.find((a: any) => a.isCorrect);
+          correctAnswerId = correctAnswer?.id || null;
+        }
+      }
+
+      const leaderboard = await this.getLeaderboard(sessionId);
+
+      let currentSessionId: string | undefined;
+      if (cached.status === GameState.FINISHED) {
+        // Only read DB if game is FINISHED (which means gameplay is over)
+        const room = await this.prisma.room.findUnique({
+          where: { id: cached.roomId },
+          select: { currentSessionId: true },
+        });
+        if (room?.currentSessionId && room.currentSessionId !== sessionId) {
+          currentSessionId = room.currentSessionId;
+        }
+      }
+
+      return {
+        sessionId: cached.sessionId,
+        roomId: cached.roomId,
+        room: {
+          hostId: cached.hostId || '',
+        },
+        status: cached.status,
+        currentQuestionIndex: cached.currentQuestionIndex,
+        totalQuestions: cached.totalQuestions,
+        remainingTime,
+        currentQuestion,
+        correctAnswerId,
+        leaderboard,
+        serverTime: Date.now(),
+        questionStartedAt: cached.questionStartedAt || null,
+        currentSessionId,
+      };
     }
+
+    // Fallback to DB if cache is missing (extremely rare during active gameplay)
+    return this.getFullGameStateFromDB(sessionId);
+  }
+
+  private async getFullGameStateFromDB(sessionId: string) {
+    const cacheKey = `game:${sessionId}`;
+    const cachedRaw = await this.redis.get(cacheKey);
+    const cached = cachedRaw ? JSON.parse(cachedRaw) : null;
     
     const session = await this.prisma.gameSession.findUnique({
       where: { id: sessionId },
@@ -1091,20 +1199,37 @@ export class GameSessionService {
     }
 
     try {
-      // Verify player session exists
-      const playerSession = await this.prisma.playerSession.findFirst({
-        where: { sessionId, playerId },
-      });
+      // 1. Get playerSessionId from Redis instead of DB
+      const playerSessionsRaw = await this.redis.get(`game:player_sessions:${sessionId}`);
+      const playerSessions = playerSessionsRaw ? JSON.parse(playerSessionsRaw) : {};
+      let playerSessionId = playerSessions[playerId];
 
-      if (!playerSession) {
-        throw new ForbiddenException('Player is not part of this game session');
+      if (!playerSessionId) {
+        // Fallback to DB if player session is missing in Redis (e.g. old games or late joiners if supported)
+        const ps = await this.prisma.playerSession.findFirst({
+          where: { sessionId, playerId },
+        });
+        if (ps) {
+          playerSessionId = ps.id;
+        } else {
+          throw new ForbiddenException('Player is not part of this game session');
+        }
       }
 
-      // Fetch question with answers
-      const question = await this.prisma.question.findUnique({
-        where: { id: questionId },
-        include: { answers: { where: { deletedAt: null } } },
-      });
+      // 2. Fetch question with answers from Redis instead of DB
+      const quizDataRaw = await this.redis.get(`game:quiz_data:${sessionId}`);
+      let question: any;
+
+      if (quizDataRaw) {
+        const quizData = JSON.parse(quizDataRaw);
+        question = quizData.questions.find((q: any) => q.id === questionId);
+      } else {
+        // Fallback to DB if quizData missing from Redis
+        question = await this.prisma.question.findUnique({
+          where: { id: questionId },
+          include: { answers: { where: { deletedAt: null } } },
+        });
+      }
 
       if (!question) {
         throw new NotFoundException('Question not found');
@@ -1140,7 +1265,7 @@ export class GameSessionService {
       // Queue answer for batch processing (FAST - no DB write)
       // The batch processor will INSERT to DB and update playerSession score
       const queuedAnswer: QueuedAnswer = {
-        playerSessionId: playerSession.id,
+        playerSessionId,
         playerId,
         questionId,
         answerId,

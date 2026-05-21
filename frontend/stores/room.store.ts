@@ -77,6 +77,9 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       connectLobbySocket();
     } else {
       console.log('[RoomStore] Lobby socket already connected, socket.id:', newSocket.id);
+      // CRITICAL FIX: If already connected, we must set isConnected: true immediately
+      // otherwise the 'connect' event will never fire and handleJoin won't be called!
+      set({ isConnected: true });
     }
 
     // Track listener count for debugging

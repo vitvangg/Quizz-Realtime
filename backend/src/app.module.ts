@@ -18,8 +18,9 @@ import { ReportModule } from './admin/system/report/report.module';
 import { NotificationModule } from './admin/system/notification/notification.module';
 import { SettingModule } from './admin/system/setting/setting.module';
 import { AnalyticsModule } from './admin/system/analytics/analytics.module';
-import { APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_INTERCEPTOR, APP_GUARD } from '@nestjs/core';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor';
+import { RateLimitGuard } from './common/guards/rate-limit.guard';
 import { QuizzsModule } from './quizzs/quizzs.module';
 import { QuestionsModule } from './questions/questions.module';
 import { GameModule } from './game/game.module';
@@ -69,6 +70,10 @@ import { AiModule } from './ai/ai.module';
     {
       provide: APP_INTERCEPTOR,
       useClass: AuditLogInterceptor,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: RateLimitGuard,
     }
   ],
 })
