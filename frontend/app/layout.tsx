@@ -13,6 +13,9 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "Quiz Game - Host Dashboard",
   description: "Create and host interactive quiz games",
+  icons: {
+    icon: "/logo2.svg",
+  },
 };
 
 export default function RootLayout({
