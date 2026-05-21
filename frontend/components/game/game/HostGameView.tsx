@@ -41,6 +41,7 @@ interface HostGameViewProps {
   onPlayAgain?: () => void;
   onEndGame?: () => void;
   isLastQuestion?: boolean;
+  isPlayAgainLoading?: boolean;
 }
 
 export function HostGameView({
@@ -56,6 +57,7 @@ export function HostGameView({
   onPlayAgain,
   onEndGame,
   isLastQuestion,
+  isPlayAgainLoading = false,
 }: HostGameViewProps) {
   // Countdown/Starting state
   if (gameStatus === 'STARTING') {
@@ -155,11 +157,10 @@ export function HostGameView({
               </CardHeader>
               <CardContent className="p-2 sm:p-3">
                 <div className="flex flex-wrap gap-2 sm:gap-3 max-h-24 sm:max-h-32 overflow-y-auto scrollbar-thin scrollbar-thumb-neon-orange scrollbar-track-gray-200">
-                  {answeredPlayers.map((entry, index) => (
+                  {answeredPlayers.slice(-20).map((entry) => (
                     <div
                       key={entry.playerId}
-                      className="animate-fadeInScale flex flex-col items-center justify-center w-12 h-12 sm:w-14 sm:h-14 bg-neon-green border-2 sm:border-3 border-black rounded-lg shadow-brutal-sm hover:scale-105 transition-transform duration-200"
-                      style={{ animationDelay: `${index * 50}ms` }}
+                      className="flex flex-col items-center justify-center w-12 h-12 sm:w-14 sm:h-14 bg-neon-green border-2 sm:border-3 border-black rounded-lg shadow-brutal-sm"
                     >
                       <span className="font-black text-sm sm:text-base text-black uppercase">
                         {entry.nickname.charAt(0)}
@@ -195,7 +196,7 @@ export function HostGameView({
             <div className="bg-neon-yellow border-4 border-black shadow-brutal-xl inline-block px-6 sm:px-8 py-4 sm:py-4 mb-3">
               <CheckCircle className="w-12 h-12 sm:w-16 sm:h-16 text-black mx-auto" />
             </div>
-            <h2 className="text-3xl sm:text-4xl font-black text-white uppercase">Câu hỏi {questionIndex} của {totalQuestions}</h2>
+            <h2 className="text-3xl sm:text-4xl font-black text-white uppercase">Kết quả</h2>
           </div>
 
           {/* <Card className="mb-4 sm:mb-6 bg-white border-4 border-black shadow-brutal">
@@ -258,9 +259,21 @@ export function HostGameView({
           <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
             <Button
               onClick={onPlayAgain}
-              className="flex-1 bg-neon-green border-4 border-black shadow-brutal hover:shadow-none hover:translate-x-2 hover:translate-y-2 font-black text-lg sm:text-xl py-5 sm:py-8 uppercase"
+              disabled={isPlayAgainLoading}
+              className={`flex-1 border-4 shadow-brutal hover:shadow-none hover:translate-x-2 hover:translate-y-2 font-black text-lg sm:text-xl py-5 sm:py-8 uppercase transition-all ${
+                isPlayAgainLoading
+                  ? 'bg-gray-300 text-gray-500 cursor-wait'
+                  : 'bg-neon-green text-black border-black'
+              }`}
             >
-              Chơi lại
+              {isPlayAgainLoading ? (
+                <div className="flex items-center justify-center gap-2">
+                  <div className="w-5 h-5 border-3 border-black border-t-transparent rounded-full animate-spin" />
+                  Đang tải...
+                </div>
+              ) : (
+                'Chơi lại'
+              )}
             </Button>
             <Button
               onClick={onEndGame}
