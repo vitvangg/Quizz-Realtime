@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,6 +40,9 @@ export default function EditQuizPage() {
   const answerStore = useAnswerStore();
 
   const [questions, setQuestions] = useState<Question[]>([]);
+
+  const questionRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [activeQuestion, setActiveQuestion] = useState("");
 
   const loadQuizData = useCallback(async () => {
     try {
@@ -84,6 +87,33 @@ export default function EditQuizPage() {
   useEffect(() => {
     loadQuizData();
   }, [loadQuizData]);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setActiveQuestion(entry.target.id);
+          }
+        });
+      },
+      { threshold: 0.4 }
+    );
+
+    questions.forEach((q) => {
+      const el = questionRefs.current[q.id];
+      if (el) observer.observe(el);
+    });
+
+    return () => observer.disconnect();
+  }, [questions]);
+
+  const scrollToQuestion = (id: string) => {
+    questionRefs.current[id]?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+  };
 
   const addQuestion = () => {
     setQuestions([
@@ -317,127 +347,165 @@ export default function EditQuizPage() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto py-12 px-4 space-y-12 pb-32">
-      {/* HEADER */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 sticky top-16 z-40 bg-background/90 backdrop-blur-xl py-6 px-4 md:px-8 border-b transition-all duration-300 rounded-3xl">
-        <div className="flex items-center gap-5">
-          <Link href="/quiz">
-            <Button 
-              variant="outline" 
-              size="icon" 
+    <>
+      {/* APP BAR STICKY */}
+      <div className="sticky top-0 z-50 bg-background/80 backdrop-blur-xl border-b shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <Button
+              variant="outline"
+              size="icon"
+                onClick={() => router.push('/quiz')}
               className="border-4 border-black shadow-brutal-sm hover:shadow-none hover:translate-x-0.5 hover:translate-y-0.5 bg-white"
             >
               <ArrowLeft className="w-5 h-5" />
             </Button>
-          </Link>
-
-          <div>
-            <h1 className="text-3xl font-black tracking-tighter">
-              Chỉnh sửa Quiz
-            </h1>
-            <p className="text-sm text-muted-foreground font-medium flex items-center gap-1.5">
-              Cập nhật nội dung thử thách
-            </p>
+            <h1 className="text-xl font-black tracking-tight">Chỉnh sửa Quiz</h1>
           </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <Button
-            className="gap-2 px-8 py-6 rounded-2xl shadow-xl shadow-primary/20 font-black text-lg transition-all hover:scale-105"
-            onClick={handleUpdate}
-            disabled={saving}
-          >
-            {saving ? "Đang lưu..." : "Lưu thay đổi"}
-          </Button>
         </div>
       </div>
 
-      {/* QUIZ INFO SECTION */}
-      <section className="space-y-4">
-        <div className="flex items-center gap-2 px-2 text-primary">
-          <Info className="h-4 w-4" />
-          <span className="text-xs font-black uppercase tracking-widest">Thông tin cơ bản</span>
-        </div>
-        <Card className="border-2 border-primary/10 shadow-sm bg-gradient-to-br from-background to-muted/30 overflow-hidden rounded-3xl">
-          <CardContent className="pt-8">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-3">
-                <Label htmlFor="title" className="text-sm font-black text-muted-foreground uppercase tracking-widest px-1">
-                  Tên bộ sưu tập
-                </Label>
-                <Input
-                  id="title"
-                  placeholder="Tên Quiz..."
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  className="text-2xl font-black py-8 border-2 border-transparent bg-white focus:border-primary/50 transition-all rounded-2xl"
+      <div className="max-w-7xl mx-auto px-4 py-8 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-8 items-start">
+        {/* LEFT CONTENT */}
+        <div className="flex-1 min-w-0 space-y-12 pb-32">
+          {/* QUIZ INFO SECTION */}
+          <section className="space-y-4">
+            <div className="flex items-center gap-2 px-2 text-primary">
+              <Info className="h-4 w-4" />
+              <span className="text-xs font-black uppercase tracking-widest">Thông tin cơ bản</span>
+            </div>
+            <Card className="border-2 border-primary/10 shadow-sm bg-gradient-to-br from-background to-muted/30 overflow-hidden rounded-3xl">
+              <CardContent className="pt-8">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-3">
+                    <Label htmlFor="title" className="text-sm font-black text-muted-foreground uppercase tracking-widest px-1">
+                      Tên bộ sưu tập
+                    </Label>
+                    <Input
+                      id="title"
+                      placeholder="Tên Quiz..."
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      className="text-2xl font-black py-8 border-2 border-transparent bg-white focus:border-primary/50 transition-all rounded-2xl"
+                    />
+                  </div>
+
+                  <div className="space-y-3">
+                    <Label htmlFor="category" className="text-sm font-black text-muted-foreground uppercase tracking-widest px-1">
+                      Danh mục
+                    </Label>
+                    <Select value={category} onValueChange={(value) => setCategory(value as QuizCategory)}>
+                      <SelectTrigger className="text-xl font-black py-8 border-2 border-transparent bg-white focus:border-primary/50 transition-all rounded-2xl h-8">
+                        <SelectValue placeholder="Chọn danh mục" />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-2xl border-2">
+                        {Object.entries(CATEGORY_LABELS).map(([value, label]) => (
+                          <SelectItem key={value} value={value} className="py-3 font-bold rounded-xl">
+                            {label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </section>
+
+          {/* QUESTIONS LIST */}
+          <section className="space-y-8">
+            {questions.map((q, index) => (
+              <div
+                key={q.id}
+                id={q.id}
+                ref={(el) => {
+                  questionRefs.current[q.id] = el;
+                }}
+              >
+                <QuestionCard
+                  question={q}
+                  index={index}
+                  totalQuestions={questions.length}
+                  onUpdate={updateQuestion}
+                  onRemove={removeQuestion}
+                  onUpdateAnswer={updateAnswer}
+                  onAddAnswer={addAnswer}
+                  onRemoveAnswer={removeAnswer}
+                  onMove={moveQuestion}
+                  canRemove={questions.length > 1}
                 />
               </div>
+            ))}
+          </section>
 
-              <div className="space-y-3">
-                <Label htmlFor="category" className="text-sm font-black text-muted-foreground uppercase tracking-widest px-1">
-                  Danh mục
-                </Label>
-                <Select value={category} onValueChange={(value) => setCategory(value as QuizCategory)}>
-                  <SelectTrigger className="text-xl font-black py-8 border-2 border-transparent bg-white focus:border-primary/50 transition-all rounded-2xl h-8">
-                    <SelectValue placeholder="Chọn danh mục" />
-                  </SelectTrigger>
-                  <SelectContent className="rounded-2xl border-2">
-                    {Object.entries(CATEGORY_LABELS).map(([value, label]) => (
-                      <SelectItem key={value} value={value} className="py-3 font-bold rounded-xl">
-                        {label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+          {/* ADD QUESTION BUTTON */}
+          <div className="flex justify-center pt-8">
+            <Button
+              variant="outline"
+              className="group gap-3 w-full max-w-lg border-dashed border-2 py-12 text-xl font-black rounded-3xl hover:border-primary/50 hover:bg-primary/5 hover:text-primary transition-all duration-300"
+              onClick={addQuestion}
+              disabled={saving}
+            >
+              <div className="bg-primary/10 p-2 rounded-xl group-hover:bg-primary group-hover:text-white transition-colors">
+                <PlusCircle className="h-8 w-8" />
               </div>
-            </div>
-          </CardContent>
-        </Card>
-      </section>
-
-      {/* QUESTIONS LIST */}
-      <section className="space-y-10">
-        <div className="flex items-center justify-between px-2">
-          <div className="flex items-center gap-2 text-primary">
-            <FileText className="h-4 w-4" />
-            <span className="text-xs font-black uppercase tracking-widest">Danh sách câu hỏi ({questions.length})</span>
+              Thêm câu hỏi tiếp theo
+            </Button>
           </div>
         </div>
 
-        <div className="space-y-8">
-          {questions.map((q, index) => (
-            <QuestionCard
-              key={q.id}
-              question={q}
-              index={index}
-              totalQuestions={questions.length}
-              onUpdate={updateQuestion}
-              onRemove={removeQuestion}
-              onUpdateAnswer={updateAnswer}
-              onAddAnswer={addAnswer}
-              onRemoveAnswer={removeAnswer}
-              onMove={moveQuestion}
-              canRemove={questions.length > 1}
-            />
-          ))}
-        </div>
-      </section>
+        {/* RIGHT NAVBAR */}
+        <div className="hidden lg:flex flex-col sticky top-24 space-y-4 self-start max-h-[calc(100vh-8rem)]">
+          {/* QUIZ SUMMARY */}
+          <Card className="rounded-3xl border-2 shrink-0">
+            <CardContent className="p-5 space-y-4">
+              <div>
+                <h2 className="text-2xl font-black">
+                  {title || "Quiz chưa có tên"}
+                </h2>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {questions.length} câu hỏi
+                </p>
+              </div>
+              <Button
+                className="w-full rounded-2xl h-12 font-black"
+                onClick={handleUpdate}
+                disabled={saving}
+              >
+                {saving ? "Đang lưu..." : "Lưu thay đổi"}
+              </Button>
+            </CardContent>
+          </Card>
 
-      {/* ADD QUESTION BUTTON */}
-      <div className="flex justify-center pt-8">
-        <Button
-          variant="outline"
-          className="group gap-3 w-full max-w-lg border-dashed border-2 py-12 text-xl font-black rounded-3xl hover:border-primary/50 hover:bg-primary/5 hover:text-primary transition-all duration-300"
-          onClick={addQuestion}
-          disabled={saving}
-        >
-          <div className="bg-primary/10 p-2 rounded-xl group-hover:bg-primary group-hover:text-white transition-colors">
-            <PlusCircle className="h-8 w-8" />
-          </div>
-          Thêm câu hỏi tiếp theo
-        </Button>
+          {/* QUESTION NAV */}
+          {questions.length > 0 && (
+            <Card className="rounded-3xl border-2 flex-1 min-h-0 flex flex-col">
+              <CardContent className="p-4 overflow-y-auto flex-1 min-h-0">
+                <div className="space-y-2">
+                  {questions.map((q, index) => {
+                    const isActive = activeQuestion === q.id;
+                    return (
+                      <button
+                        key={q.id}
+                        onClick={() => scrollToQuestion(q.id)}
+                        className={`w-full text-left p-4 rounded-2xl border-2 transition-all ${isActive
+                            ? "bg-primary text-primary-foreground border-primary"
+                            : "hover:bg-muted border-transparent"
+                          }`}
+                      >
+                        <div className="font-black">Câu {index + 1}</div>
+                        <div className="text-xs opacity-70 line-clamp-2 mt-1">
+                          {q.content || "Chưa có nội dung"}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 }
