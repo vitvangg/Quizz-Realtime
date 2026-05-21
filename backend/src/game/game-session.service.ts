@@ -1101,7 +1101,7 @@ export class GameSessionService {
     await this.redis.del(key);
   }
 
-  async getLeaderboard(sessionId: string, limit = 100) {
+  async getLeaderboard(sessionId: string, limit = 2000) {
     const key = `leaderboard:${sessionId}`;
     const results = await this.redis.zrevrange(key, 0, limit - 1, 'WITHSCORES');
 
