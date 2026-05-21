@@ -9,12 +9,14 @@ import { RedisModule } from '../../../redis/redis.module';
 import { AuditLogModule } from '../audit-log/audit-log.module';
 import { NotificationModule } from '../notification/notification.module';
 import { GameModule } from '../../../game/game.module';
+import { PrismaModule } from '../../../prisma/prisma.module';
 
 @Module({
   imports: [
     RedisModule,
     AuditLogModule,
     NotificationModule,
+    PrismaModule,
     forwardRef(() => GameModule),
     AuthModule,
   ],

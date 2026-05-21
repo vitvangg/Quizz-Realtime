@@ -1,12 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
+import { PrismaService } from '../../../prisma/prisma.service';
 
 @Injectable()
 export class NotificationService {
   private readonly logger = new Logger(NotificationService.name);
   private transporter: nodemailer.Transporter;
 
-  constructor() {
+  constructor(private readonly prisma: PrismaService) {
     this.transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST,
       port: parseInt(process.env.SMTP_PORT || '465', 10),
@@ -23,6 +24,19 @@ export class NotificationService {
     if (!adminEmail) {
       this.logger.warn('SMTP_FROMEMAIL not configured, skipping email alert');
       return;
+    }
+
+    // Lưu vào DB Notification table
+    try {
+      await this.prisma.notification.create({
+        data: {
+          title: `🚨 ${subject}`,
+          message: body,
+          targetType: 'GLOBAL',
+        },
+      });
+    } catch (e) {
+      this.logger.error(`Failed to save notification to DB: ${e.message}`);
     }
 
     try {
@@ -55,5 +69,14 @@ export class NotificationService {
     } catch (error) {
       this.logger.error(`Failed to send security alert email: ${error.message}`);
     }
+  }
+
+  // Lấy lịch sử thông báo bảo mật từ DB Notification table
+  async getAlertHistory(limit = 50) {
+    return this.prisma.notification.findMany({
+      where: { targetType: 'GLOBAL' },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
   }
 }
