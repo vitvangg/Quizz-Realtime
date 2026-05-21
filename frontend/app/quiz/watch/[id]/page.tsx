@@ -188,8 +188,8 @@ export default function WatchQuizPage() {
                               setShowMobileSidebar(false);
                             }}
                             className={`w-full text-left p-4 rounded-2xl border-2 transition-all ${isActive
-                                ? "bg-primary text-primary-foreground border-primary"
-                                : "hover:bg-muted border-transparent"
+                              ? "bg-primary text-primary-foreground border-primary"
+                              : "hover:bg-muted border-transparent"
                               }`}
                           >
                             <div className="font-black">Câu {index + 1}</div>
@@ -217,20 +217,20 @@ export default function WatchQuizPage() {
               <Info className="h-4 w-4" />
               <span className="text-xs font-black uppercase tracking-widest">Thông tin cơ bản</span>
             </div>
-            <Card className="border-2 border-primary/10 shadow-sm bg-gradient-to-br from-background to-muted/30 overflow-hidden rounded-3xl">
+            <Card className="rounded-3xl border-2">
               <CardContent className="pt-8">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                   <div className="space-y-3">
                     <p className="text-sm font-black text-muted-foreground uppercase tracking-widest px-1">
-                      Tên bộ sưu tập
+                      Tên Quiz
                     </p>
-                    <p className="text-3xl font-black px-1">{title}</p>
+                    <p className="text-2xl font-black px-4 py-3 rounded-2xl bg-muted/50 border-2 border-transparent">{title}</p>
                   </div>
                   <div className="space-y-3">
                     <p className="text-sm font-black text-muted-foreground uppercase tracking-widest px-1">
                       Danh mục
                     </p>
-                    <p className="text-3xl font-black px-1">
+                    <p className="text-2xl font-black px-1 rounded-2xl">
                       {CATEGORY_LABELS[category as keyof typeof CATEGORY_LABELS] || "Khác"}
                     </p>
                   </div>
@@ -299,8 +299,8 @@ export default function WatchQuizPage() {
                         key={q.id}
                         onClick={() => scrollToQuestion(q.id)}
                         className={`w-full text-left p-4 rounded-2xl border-2 transition-all ${isActive
-                            ? "bg-primary text-primary-foreground border-primary"
-                            : "hover:bg-muted border-transparent"
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "hover:bg-muted border-transparent"
                           }`}
                       >
                         <div className="font-black">Câu {index + 1}</div>
