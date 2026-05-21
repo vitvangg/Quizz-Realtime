@@ -117,6 +117,7 @@ export default function GamePage() {
     leaderboard,
     myScore,
     myRank,
+    myPlayerId,
     countdown,
     correctAnswerId,
     timeRemaining,
@@ -152,6 +153,7 @@ export default function GamePage() {
   const [isJoining, setIsJoining] = useState(true);
   const [authReady, setAuthReady] = useState(false);
   const [hasRecoveredFromHttp, setHasRecoveredFromHttp] = useState(false);
+  const [isPlayAgainLoading, setIsPlayAgainLoading] = useState(false);
 
   // ============================================================
   // EFFECTIVE HOST STATUS FOR UI
@@ -345,6 +347,7 @@ export default function GamePage() {
         return;
       }
 
+      // Skip stale events - only process current question
       if (data.questionIndex !== state.questionIndex) {
         console.warn('[GamePage] Stale question_result received, skipping');
         return;
@@ -359,15 +362,16 @@ export default function GamePage() {
         correctAnswerId: data.correctAnswer?.id || null,
       });
 
+      // Always update myScore/myRank from server leaderboard - it's the source of truth
+      // No need to check hasAnswered since server already calculated correct score
       if (state.myPlayerId && safeLeaderboard.length > 0) {
         const myEntry = safeLeaderboard.find((e: any) => e?.playerId === state.myPlayerId);
         if (myEntry) {
-          const newScore = state.hasAnswered ? myEntry.score : state.myScore;
-          const newRank = state.hasAnswered ? myEntry.rank : state.myRank;
           useGameStore.setState({
-            myScore: newScore,
-            myRank: newRank,
+            myScore: myEntry.score,
+            myRank: myEntry.rank,
           });
+          console.log('[GamePage] question_result: Updated myScore:', myEntry.score, 'myRank:', myEntry.rank);
         }
       }
     };
@@ -729,21 +733,17 @@ export default function GamePage() {
         return;
       }
 
-      // Only non-host players need to have answered
-      if (!state.isHost && !state.hasAnswered) {
-        console.log('[GamePage] Skipping score_update: player has not answered this question');
-        return;
-      }
-
       // Defensive: ensure leaderboard is an array
       if (Array.isArray(data.leaderboard)) {
         useGameStore.setState({ leaderboard: data.leaderboard });
+
+        // Always update myScore/myRank from server leaderboard - it's the source of truth
         if (state.myPlayerId) {
           const myEntry = data.leaderboard.find(
             (e: any) => e?.playerId === state.myPlayerId
           );
           if (myEntry) {
-            console.log('[GamePage] Updating myScore:', myEntry.score, 'rank:', myEntry.rank);
+            console.log('[GamePage] score_update: Updating myScore:', myEntry.score, 'myRank:', myEntry.rank);
             useGameStore.setState({ myScore: myEntry.score, myRank: myEntry.rank });
           }
         }
@@ -1789,12 +1789,15 @@ export default function GamePage() {
     const gameStore = useGameStore.getState();
     const { sessionId: sid, roomId: rid, socket } = gameStore;
     if (!sid || !rid || !socket) return;
-    
+
+    setIsPlayAgainLoading(true);
+
     // Emit play_again — backend will emit session_switched to this socket too.
     // The session_switched handler stores state + navigates via router.replace.
     socket.emit('host_play_again', { sessionId: sid, roomId: rid }, (response: any) => {
       if (!response.success) {
         toast.error(response.error || 'Không thể chơi lại');
+        setIsPlayAgainLoading(false);
       }
       // No store update here — session_transition handler handles everything.
       // If response has new sessionId it's just for logging/debug.

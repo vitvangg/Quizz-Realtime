@@ -6,3 +6,6 @@ export * from './LeaderboardPanel';
 export * from './PlayerListPanel';
 export * from './HostGameView';
 export * from './PlayerGameView';
+export * from './GameOverPodium';
+export * from './PodiumPlayerCard';
+export * from './FinalLeaderboard';
