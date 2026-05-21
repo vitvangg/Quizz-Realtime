@@ -93,6 +93,17 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     newSocket.on('connect', () => {
       console.log('[LobbySocket] Connected:', newSocket.id);
       set({ isConnected: true, error: null });
+      
+      // Auto-rejoin if we were already in a room (handles silent proxy disconnects in production)
+      const state = get();
+      if (state.currentRoom && state.currentRoom.pin) {
+        const nickname = sessionStorage.getItem('playerNickname') || state.currentPlayer?.nickname || 'Player';
+        console.log(`[LobbySocket] Reconnection detected. Auto-rejoining room ${state.currentRoom.pin} as ${nickname}`);
+        newSocket.emit('join_room', {
+          pin: state.currentRoom.pin,
+          nickname: nickname,
+        });
+      }
     });
 
     newSocket.on('disconnect', (reason) => {
