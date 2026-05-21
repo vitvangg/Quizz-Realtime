@@ -178,6 +178,7 @@ export class GameSessionService {
       firstQuestion: {
         id: firstQuestion.id,
         content: firstQuestion.content,
+        imageUrl: firstQuestion.imageUrl || undefined,
         answers: firstQuestion.answers.map((a) => ({
           id: a.id,
           content: a.content,
@@ -223,6 +224,7 @@ export class GameSessionService {
       question: {
         id: question.id,
         content: question.content,
+        imageUrl: question.imageUrl || undefined,
         answers: question.answers.map((a) => ({
           id: a.id,
           content: a.content,
@@ -404,6 +406,7 @@ export class GameSessionService {
       question: {
         id: nextQuestion.id,
         content: nextQuestion.content,
+        imageUrl: nextQuestion.imageUrl || undefined,
         answers: nextQuestion.answers.map((a) => ({
           id: a.id,
           content: a.content,
@@ -618,6 +621,7 @@ export class GameSessionService {
         currentQuestion = {
           id: questionData.id,
           content: questionData.content,
+          imageUrl: questionData.imageUrl || undefined,
           answers: questionData.answers.map((a: any) => ({ id: a.id, content: a.content })),
           timeLimit: questionData.timeLimit,
         };
@@ -629,6 +633,7 @@ export class GameSessionService {
         currentQuestion = {
           id: questionData.id,
           content: questionData.content,
+          imageUrl: questionData.imageUrl || undefined,
           answers: questionData.answers.map((a: any) => ({ id: a.id, content: a.content })),
           timeLimit: questionData.timeLimit,
         };
