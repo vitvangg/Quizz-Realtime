@@ -7,7 +7,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import {
   ArrowLeft,
   Info,
-  FileText
+  FileText,
+  Menu,
+  X
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -26,6 +28,7 @@ export default function WatchQuizPage() {
   const [category, setCategory] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [questions, setQuestions] = useState<Question[]>([]);
+  const [showMobileSidebar, setShowMobileSidebar] = useState(false);
 
   const questionRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [activeQuestion, setActiveQuestion] = useState("");
@@ -116,8 +119,94 @@ export default function WatchQuizPage() {
             </Button>
             <h1 className="text-xl font-black tracking-tight">Chi tiết Quiz</h1>
           </div>
+          <Button
+            variant="outline"
+            size="icon"
+            className="lg:hidden border-2 rounded-xl"
+            onClick={() => setShowMobileSidebar(true)}
+          >
+            <Menu className="w-5 h-5" />
+          </Button>
         </div>
       </div>
+
+      {/* MOBILE SIDEBAR OVERLAY */}
+      {showMobileSidebar && (
+        <div className="fixed inset-0 z-[60] lg:hidden">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => setShowMobileSidebar(false)}
+          />
+          {/* Drawer */}
+          <div className="absolute right-0 top-0 bottom-0 w-[320px] max-w-[85vw] bg-background shadow-2xl animate-in slide-in-from-right duration-300 flex flex-col">
+            {/* Drawer header */}
+            <div className="flex items-center justify-between p-4 border-b">
+              <h2 className="font-black text-lg">Menu</h2>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="rounded-full"
+                onClick={() => setShowMobileSidebar(false)}
+              >
+                <X className="w-5 h-5" />
+              </Button>
+            </div>
+            {/* Drawer content */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {/* QUIZ SUMMARY */}
+              <Card className="rounded-3xl border-2 shrink-0">
+                <CardContent className="p-5 space-y-4">
+                  <div>
+                    <h2 className="text-2xl font-black">
+                      {title || "Quiz chưa có tên"}
+                    </h2>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {questions.length} câu hỏi
+                    </p>
+                  </div>
+                  <Link href={`/quiz/edit/${quizId}`} onClick={() => setShowMobileSidebar(false)}>
+                    <Button className="w-full rounded-2xl h-12 font-black">
+                      Chỉnh sửa ngay
+                    </Button>
+                  </Link>
+                </CardContent>
+              </Card>
+
+              {/* QUESTION NAV */}
+              {questions.length > 0 && (
+                <Card className="rounded-3xl border-2">
+                  <CardContent className="p-4">
+                    <div className="space-y-2">
+                      {questions.map((q, index) => {
+                        const isActive = activeQuestion === q.id;
+                        return (
+                          <button
+                            key={q.id}
+                            onClick={() => {
+                              scrollToQuestion(q.id);
+                              setShowMobileSidebar(false);
+                            }}
+                            className={`w-full text-left p-4 rounded-2xl border-2 transition-all ${isActive
+                                ? "bg-primary text-primary-foreground border-primary"
+                                : "hover:bg-muted border-transparent"
+                              }`}
+                          >
+                            <div className="font-black">Câu {index + 1}</div>
+                            <div className="text-xs opacity-70 line-clamp-2 mt-1">
+                              {q.content || "Chưa có nội dung"}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="max-w-7xl mx-auto px-4 py-8 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-8 items-start">
         {/* LEFT CONTENT */}
