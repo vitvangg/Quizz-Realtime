@@ -5,6 +5,7 @@ import { DashboardGateway } from './dashboard.gateway';
 import { RedisService } from '../../../redis/redis.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { NotificationService } from '../notification/notification.service';
+import { PrismaService } from '../../../prisma/prisma.service';
 
 @Injectable()
 export class DashboardService {
@@ -16,6 +17,7 @@ export class DashboardService {
     private readonly redisService: RedisService,
     private readonly auditLogService: AuditLogService,
     private readonly notificationService: NotificationService,
+    private readonly prisma: PrismaService,
   ) { }
 
   // ============================================================================
@@ -151,6 +153,10 @@ export class DashboardService {
       status: info.status,
       playersCount: info.playersCount || 0,
       startedAt: info.startedAt,
+      currentQuestionIndex: info.currentQuestionIndex ?? 0,
+      totalQuestions: info.totalQuestions ?? 0,
+      timeLimit: info.timeLimit ?? 20,
+      questionStartedAt: info.questionStartedAt ?? null,
     }));
 
     return { success: true, sessions };
@@ -160,15 +166,24 @@ export class DashboardService {
     const data = await this.redisService.hgetall(`presence:session:${sessionId}`);
     if (!data) return { success: true, players: [] };
 
-    const players = Object.values(data).map(str => {
-      try {
-        return JSON.parse(str);
-      } catch {
-        return null;
-      }
-    }).filter(Boolean);
+    const players = await Promise.all(
+      Object.values(data).map(async (str) => {
+        try {
+          const player = JSON.parse(str as string);
+          // Thêm requestCount từ Redis sliding window counter
+          if (player.ipAddress) {
+            player.requestCount = await this.redisService.getIpRequestCount(player.ipAddress);
+          } else {
+            player.requestCount = 0;
+          }
+          return player;
+        } catch {
+          return null;
+        }
+      })
+    );
 
-    return { success: true, players };
+    return { success: true, players: players.filter(Boolean) };
   }
 
   // ============================================================================
@@ -198,6 +213,9 @@ export class DashboardService {
       ipAddress: ip,
       details: `Manual ban by admin: ${reason} | TTL: ${ttlHours}h`,
     });
+
+    // Kick tất cả socket của IP đó ngay lập tức (không cần chờ reconnect)
+    this.eventEmitter.emit('system.incident.ban_ip', { ip });
 
     return { success: true };
   }
@@ -249,5 +267,37 @@ export class DashboardService {
       `Auto-Ban IP: ${ip}`,
       `IP Address: ${ip}\nTốc độ tấn công: ${requestCount} request/giây\nLý do: ${reason}\nThời gian: ${new Date().toISOString()}\n\nKiểm tra OPS Dashboard để quản lý.`,
     );
+
+    // Kick socket ngay lập tức
+    this.eventEmitter.emit('system.incident.ban_ip', { ip });
+  }
+
+  // ============================================================================
+  // SYSTEM OVERVIEW
+  // ============================================================================
+
+
+  async getSystemOverview() {
+    const [totalUsers, totalQuizzes, activeRooms, bannedIps] = await Promise.all([
+      this.prisma.user.count(),
+      this.prisma.quiz.count({ where: { deletedAt: null } }),
+      this.redisService.getActiveRooms(),
+      this.redisService.getBannedIps(),
+    ]);
+
+    const activeSessions = Object.keys(activeRooms).length;
+    const totalPlayersOnline = Object.values(activeRooms).reduce(
+      (sum: number, room: any) => sum + (room.playersCount || 0), 0
+    );
+
+    return {
+      totalUsers,
+      totalQuizzes,
+      activeSessions,
+      totalPlayersOnline,
+      bannedIpsCount: bannedIps.length,
+      connectedAdmins: this.dashboardGateway.getConnectedAdminsCount(),
+    };
   }
 }
+

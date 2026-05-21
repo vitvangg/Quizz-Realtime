@@ -1,34 +1,23 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
-import { ReportService } from './report.service';
-import { CreateReportDto } from './dto/create-report.dto';
-import { UpdateReportDto } from './dto/update-report.dto';
+import { Controller, Get, Post, Patch, Body, Param, Query, Req } from '@nestjs/common';
+import { ReportService, ReportStatus } from './report.service';
 
-@Controller('report')
+@Controller('admin/system/reports')
 export class ReportController {
   constructor(private readonly reportService: ReportService) {}
 
-  @Post()
-  create(@Body() createReportDto: CreateReportDto) {
-    return this.reportService.create(createReportDto);
-  }
-
   @Get()
-  findAll() {
-    return this.reportService.findAll();
+  async findAll(@Query('status') status?: string) {
+    const reports = await this.reportService.findAll(status as any);
+    return { reports, total: reports.length };
   }
 
-  @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.reportService.findOne(+id);
+  @Post()
+  async create(@Req() req: any, @Body() body: { entityType: string; entityId: string; reason: string }) {
+    return this.reportService.create(req.user?.id || 'admin', body.entityType, body.entityId, body.reason);
   }
 
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() updateReportDto: UpdateReportDto) {
-    return this.reportService.update(+id, updateReportDto);
-  }
-
-  @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.reportService.remove(+id);
+  @Patch(':id/status')
+  async updateStatus(@Param('id') id: string, @Body() body: { status: string }) {
+    return this.reportService.updateStatus(id, body.status as any);
   }
 }

@@ -51,4 +51,9 @@ export class IncidentController {
     const sessionId = req.params.sessionId;
     return this.systemService.getSessionPlayers(sessionId);
   }
+
+  @Get('overview')
+  async getOverview() {
+    return this.systemService.getSystemOverview();
+  }
 }
